@@ -170,7 +170,7 @@ describe('browser hub REST proxy', () => {
       relayUrl,
       machineId,
       machineSecret,
-      connectorVersion: 'test',
+      connectorVersion: '0.10.0-test',
       localTarget: { origin: 'http://127.0.0.1:32352', authToken: 'local-token' },
       fetchImpl: localFetch as never,
     })

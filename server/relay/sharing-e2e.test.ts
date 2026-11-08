@@ -213,7 +213,7 @@ describe('a shared-in user over the relay', () => {
       relayUrl: `http://127.0.0.1:${port}`,
       machineId,
       machineSecret: complete.machineSecret,
-      connectorVersion: 'test',
+      connectorVersion: '0.10.0-test',
       localTarget: { origin: `http://127.0.0.1:${local.port}`, authToken: 'local-token' },
       fetchImpl: localFetch as never,
     })

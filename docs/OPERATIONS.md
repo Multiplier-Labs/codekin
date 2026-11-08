@@ -429,10 +429,23 @@ curl -H "Authorization: Bearer $(cat ~/.config/codekin/token)" \
 # → { "paired": true, "managed": true, "state": "connected", "machineId": "…", "relayUrl": "…" }
 ```
 
-`state` is one of `connecting`, `connected`, `disconnected` (retrying),
-`replaced`, `auth_failed`, `unmanaged`, `disabled`, `unpaired`, `stopped`.
+`state` is one of `connecting`, `connected`, `update_required`,
+`disconnected` (retrying), `replaced`, `auth_failed`, `unmanaged`, `disabled`,
+`unpaired`, `stopped`.
 `replaced` and `auth_failed` are terminal for that credential — the server
 logs why and waits for `relay.json` to change instead of reconnecting.
+`update_required` means the relay accepted the connection but refuses its
+traffic until Codekin is updated (`detail` names the minimum version and why);
+run `codekin upgrade` and restart the service.
+
+**Connector version floors.** The relay keeps a base minimum connector version
+and, per security feature, the oldest connector it believes when the feature is
+advertised (`CONNECTOR_FLOORS` in `server/relay/connector-version.ts`). A
+workspace can require features of its machines (`workspaces.required_capabilities`,
+a JSON array, empty by default). A machine below a floor, or missing a required
+feature, stays connected and shows as **update required** in the hosted app,
+and every request and stream to it fails with `connector_update_required`.
+Before raising a floor, check `connectorVersions` in `GET /api/admin/stats`.
 
 **Unmanaged (self-supervised) connectors.** A credential without the
 `managed` field — every pairing made before it existed, or

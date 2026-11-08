@@ -24,6 +24,11 @@ export interface Machine {
   /** True when the machine's connector is behind the supported version. */
   connectorOutdated?: boolean
   /**
+   * Set when the machine is connected but the relay refuses its traffic until
+   * Codekin on it is updated (a connector version floor).
+   */
+  updateRequired?: { minimum: string; missing: string[]; reason: string } | null
+  /**
    * Created by an install command that has not been run yet. Such a machine
    * has never connected; the UI shows it as "waiting for installation", not
    * as an ordinary offline machine.

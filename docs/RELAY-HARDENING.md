@@ -1,6 +1,6 @@
 # Relay hardening
 
-**Status:** In progress. Built: §1 (health endpoints) and §3 (browser security headers). The rest is spec.
+**Status:** In progress. Built: §1 (health endpoints), §3 (browser security headers) and §4 (connector version floors). The rest is spec.
 **Date:** 2026-11-08
 **Scope:** hardening features for anyone who runs the relay (`server/relay`), whether self-hosted or as a public service. Values specific to a deployment, such as limits, thresholds and monitoring setup, belong in that deployment's own config. They are not defined here.
 **Related:** `docs/RELAY-SIGNED-INTENTS-AND-E2E-SPEC.md`, `docs/SELF-HOSTED-RELAY.md`, `docs/OPERATIONS.md` ("Hosted relay").
@@ -56,14 +56,14 @@ Supporting changes (**built**):
 
 ## 4. Connector version floors per capability
 
-Today a connector below `MIN_SUPPORTED_CONNECTOR_VERSION` only triggers a warning (`connector-hub.ts:385`). Features like signed intents need the relay to refuse machines that can't enforce them.
+**Built** (`server/relay/connector-version.ts`, `connector-hub.ts`). A connector below `MIN_SUPPORTED_CONNECTOR_VERSION` used to trigger only a warning. Features like signed intents need the relay to refuse machines that can't enforce them. No capability floor is set yet; each one is set when its feature ships.
 
-- **Floors.** `CONNECTOR_FLOORS` in `connector-version.ts` sets a `base` floor plus one floor per capability (`intents`, `e2e`, …). A machine has a capability when it advertises it **and** meets that capability's floor.
+- **Floors.** `CONNECTOR_FLOORS` in `connector-version.ts` sets a `base` floor plus one floor per capability (`intents`, `e2e`, `credentialClass`). Connectors advertise capabilities in `ConnectorHello.capabilities.features`. A machine has a capability when it advertises it **and** meets that capability's floor.
 - **Below a floor, or missing a capability its workspace requires:**
   - The hub keeps the socket open. Closing it would put old connectors in a reconnect loop.
   - It sends `hello_ack.updateRequired: { minimum, missing, reason }`.
-  - It marks the machine `update_required` and refuses browser traffic to it with `connector_update_required`.
-- **Workspace setting.** `required_capabilities` per workspace. The default is empty for self-hosted relays.
+  - It refuses every request and stream to the machine with `connector_update_required`. The hosted app shows the machine as **update required**; the connector reports `update_required` in `codekin relay status` and the local Settings.
+- **Workspace setting.** `workspaces.required_capabilities` (JSON array). The default is empty. It is read when a machine connects; there is no API to change it yet, since no capability has shipped.
 - **Floors only go up.** `/api/admin/stats` shows the version spread before a floor is raised.
 
 ## 5. Secret storage

@@ -237,7 +237,7 @@ describe('session streaming over the relay', () => {
       relayUrl,
       machineId,
       machineSecret,
-      connectorVersion: 'test',
+      connectorVersion: '0.10.0-test',
       localTarget: { origin: `http://127.0.0.1:${local.port}`, authToken: 'local-token' },
     })
     connector.start()

@@ -51,6 +51,8 @@ export interface ConnectorOptions {
 export type ConnectorStatus =
   | 'connecting'
   | 'connected'
+  /** Connected, but the relay refuses traffic until this connector is updated. */
+  | 'update_required'
   | 'auth_failed'
   | 'disconnected'
   | 'reconnect_scheduled'
@@ -137,7 +139,13 @@ export class RelayConnector {
       if (msg.kind === 'hello_ack') {
         this.backoffMs = BACKOFF_MIN_MS
         const ack = msg.payload as ConnectorHelloAck
-        this.opts.onStatus?.('connected', ack.displayName)
+        if (ack.updateRequired) {
+          // Stay connected (so the hosted UI shows "update required" rather
+          // than offline) and keep the heartbeat; the relay refuses traffic.
+          this.opts.onStatus?.('update_required', `needs ${ack.updateRequired.minimum} or later: ${ack.updateRequired.reason}`)
+        } else {
+          this.opts.onStatus?.('connected', ack.displayName)
+        }
         this.heartbeat = setInterval(() => {
           if (ws.readyState === WebSocket.OPEN) {
             ws.send(JSON.stringify(envelope('ping', {})))

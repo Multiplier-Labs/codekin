@@ -37,6 +37,8 @@ export type EmbeddedConnectorState =
   | 'unmanaged'
   | 'connecting'
   | 'connected'
+  /** Connected, but the relay refuses traffic until Codekin is updated. */
+  | 'update_required'
   /** Lost the relay; the connector is backing off and will retry. */
   | 'disconnected'
   /** Another connector took this machine's slot. Terminal until relay.json changes. */
@@ -216,6 +218,12 @@ export class EmbeddedConnectorSupervisor {
       case 'connected':
         if (this.state !== 'connected') this.log.log(`[relay] Machine online as "${detail ?? credential.machineId}"`)
         this.setState('connected', detail)
+        break
+      case 'update_required':
+        if (this.state !== 'update_required') {
+          this.log.warn(`[relay] The relay won't serve this machine until Codekin is updated (${detail ?? 'version too old'}). Run \`codekin upgrade\`.`)
+        }
+        this.setState('update_required', detail)
         break
       case 'disconnected':
       case 'reconnect_scheduled':

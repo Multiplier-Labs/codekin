@@ -88,7 +88,7 @@ describe('connector hub', () => {
       relayUrl,
       machineId,
       machineSecret,
-      connectorVersion: '0.8.0-test',
+      connectorVersion: '0.10.0-test',
       onStatus: () => {},
     })
     connector.start()
@@ -135,7 +135,7 @@ describe('connector hub', () => {
     hub.openChannel(machineId, 'chan-a', () => {})
     hub.openChannel(machineId, 'chan-b', () => {})
     expect(hub.channelCount).toBe(2)
-    expect(hub.connectorVersionCounts()).toEqual({ '0.8.0-test': 1 })
+    expect(hub.connectorVersionCounts()).toEqual({ '0.10.0-test': 1 })
 
     hub.closeChannel(machineId, 'chan-a')
     expect(hub.channelCount).toBe(1)
@@ -144,6 +144,70 @@ describe('connector hub', () => {
     await waitFor(() => !hub.isOnline(machineId))
     expect(hub.channelCount).toBe(0)
     expect(hub.connectorVersionCounts()).toEqual({})
+  })
+
+  describe('connector version floors', () => {
+    async function connectAt(version: string, statuses: Array<{ status: string; detail?: string }>): Promise<RelayConnector> {
+      const connector = new RelayConnector({
+        relayUrl, machineId, machineSecret, connectorVersion: version,
+        onStatus: (status, detail) => { statuses.push({ status, detail }) },
+      })
+      connector.start()
+      await waitFor(() => statuses.some(s => s.status === 'update_required' || s.status === 'connected'))
+      return connector
+    }
+
+    it('keeps a connector below the base floor connected but refuses its traffic', async () => {
+      const statuses: Array<{ status: string; detail?: string }> = []
+      const connector = await connectAt('0.8.0', statuses)
+
+      // Told why, and still online, so the UI can say "update required"
+      // rather than "offline".
+      expect(statuses.map(s => s.status)).toContain('update_required')
+      expect(statuses.find(s => s.status === 'update_required')?.detail).toContain('0.9.0')
+      expect(hub.isOnline(machineId)).toBe(true)
+      expect(hub.updateRequired(machineId)).toMatchObject({ minimum: '0.9.0', missing: [] })
+
+      const outcome = await hub.sendRequest(machineId, { method: 'GET', path: '/api/sessions/list' })
+      expect(outcome).toMatchObject({ error: { code: RELAY_ERROR.connectorUpdateRequired } })
+      expect(hub.openChannel(machineId, 'chan-old', () => {})).toMatchObject({ code: RELAY_ERROR.connectorUpdateRequired })
+      expect(hub.channelCount).toBe(0)
+
+      // No close, so no reconnect loop.
+      await new Promise(resolve => setTimeout(resolve, 100))
+      expect(statuses.map(s => s.status)).not.toContain('disconnected')
+      expect(statuses.map(s => s.status)).not.toContain('reconnect_scheduled')
+      connector.stop()
+    })
+
+    it('serves the same machine once it reconnects with a connector above the floor', async () => {
+      const old = await connectAt('0.8.0', [])
+      old.stop()
+      await waitFor(() => !hub.isOnline(machineId))
+
+      const statuses: Array<{ status: string; detail?: string }> = []
+      const current = await connectAt('0.10.5', statuses)
+      expect(statuses.map(s => s.status)).toContain('connected')
+      expect(hub.updateRequired(machineId)).toBeNull()
+      current.stop()
+    })
+
+    it('refuses a connector that lacks a capability its workspace requires', async () => {
+      hub.close()
+      hub = new ConnectorHub(db, { floors: { base: '0.9.0', capabilities: { intents: '0.12.0' } } })
+      db.prepare(`UPDATE workspaces SET required_capabilities = '["intents"]' WHERE id = ?`).run(BOOTSTRAP_WORKSPACE_ID)
+
+      const statuses: Array<{ status: string; detail?: string }> = []
+      const connector = await connectAt('0.12.0', statuses)
+      expect(hub.updateRequired(machineId)).toEqual({
+        minimum: '0.12.0',
+        missing: ['intents'],
+        reason: 'the workspace requires intents (needed for signed control)',
+      })
+      expect(await hub.sendRequest(machineId, { method: 'GET', path: '/api/sessions/list' }))
+        .toMatchObject({ error: { code: RELAY_ERROR.connectorUpdateRequired } })
+      connector.stop()
+    })
   })
 
   it('keeps relaying channel data while the connector is draining normally', async () => {
@@ -179,7 +243,7 @@ describe('connector hub', () => {
       relayUrl,
       machineId,
       machineSecret,
-      connectorVersion: '0.8.0-test',
+      connectorVersion: '0.10.0-test',
       onStatus: s => { statuses.push(s) },
     })
     connector.start()
@@ -190,7 +254,7 @@ describe('connector hub', () => {
     await waitFor(() => hub.isOnline(machineId) && statuses.includes('connected'))
     expect(statuses).toContain('connected')
     expect(listMachines(db, BOOTSTRAP_WORKSPACE_ID)[0].status).toBe('online')
-    expect(listMachines(db, BOOTSTRAP_WORKSPACE_ID)[0].connector_version).toBe('0.8.0-test')
+    expect(listMachines(db, BOOTSTRAP_WORKSPACE_ID)[0].connector_version).toBe('0.10.0-test')
 
     connector.stop()
     await waitFor(() => !hub.isOnline(machineId))
@@ -234,17 +298,17 @@ describe('connector hub', () => {
   it('a second connection for the same machine replaces the first', async () => {
     const firstStatuses: string[] = []
     const first = new RelayConnector({
-      relayUrl, machineId, machineSecret, connectorVersion: '1',
+      relayUrl, machineId, machineSecret, connectorVersion: '1.0.0',
       onStatus: s => { firstStatuses.push(s) },
     })
     first.start()
     await waitFor(() => hub.isOnline(machineId))
 
     const second = new RelayConnector({
-      relayUrl, machineId, machineSecret, connectorVersion: '2',
+      relayUrl, machineId, machineSecret, connectorVersion: '2.0.0',
     })
     second.start()
-    await waitFor(() => listMachines(db, BOOTSTRAP_WORKSPACE_ID)[0].connector_version === '2')
+    await waitFor(() => listMachines(db, BOOTSTRAP_WORKSPACE_ID)[0].connector_version === '2.0.0')
     expect(hub.onlineCount).toBe(1)
 
     // The replaced connector stands down instead of taking the slot back:
@@ -259,7 +323,7 @@ describe('connector hub', () => {
   it('disconnectMachine drops the live socket and the connector does not retry', async () => {
     const statuses: string[] = []
     const connector = new RelayConnector({
-      relayUrl, machineId, machineSecret, connectorVersion: '1',
+      relayUrl, machineId, machineSecret, connectorVersion: '1.0.0',
       onStatus: status => { statuses.push(status) },
     })
     connector.start()
@@ -281,7 +345,7 @@ describe('connector hub', () => {
   it('a disconnected machine goes offline and a revoked secret cannot reconnect', async () => {
     const statuses: string[] = []
     const connector = new RelayConnector({
-      relayUrl, machineId, machineSecret, connectorVersion: '1',
+      relayUrl, machineId, machineSecret, connectorVersion: '1.0.0',
       onStatus: status => { statuses.push(status) },
     })
     connector.start()
@@ -295,7 +359,7 @@ describe('connector hub', () => {
     connector.stop()
 
     const retry = new RelayConnector({
-      relayUrl, machineId, machineSecret, connectorVersion: '1',
+      relayUrl, machineId, machineSecret, connectorVersion: '1.0.0',
       onStatus: status => { statuses.push(status) },
     })
     statuses.length = 0
@@ -306,13 +370,13 @@ describe('connector hub', () => {
   })
 
   it('the survivor keeps the machine online after a replacement', async () => {
-    const first = new RelayConnector({ relayUrl, machineId, machineSecret, connectorVersion: '1' })
+    const first = new RelayConnector({ relayUrl, machineId, machineSecret, connectorVersion: '1.0.0' })
     first.start()
     await waitFor(() => hub.isOnline(machineId))
 
-    const second = new RelayConnector({ relayUrl, machineId, machineSecret, connectorVersion: '2' })
+    const second = new RelayConnector({ relayUrl, machineId, machineSecret, connectorVersion: '2.0.0' })
     second.start()
-    await waitFor(() => listMachines(db, BOOTSTRAP_WORKSPACE_ID)[0].connector_version === '2')
+    await waitFor(() => listMachines(db, BOOTSTRAP_WORKSPACE_ID)[0].connector_version === '2.0.0')
 
     // Give the loser time to have flapped, if it were going to
     await new Promise(resolve => setTimeout(resolve, 500))

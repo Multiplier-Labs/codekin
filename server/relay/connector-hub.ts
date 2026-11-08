@@ -27,9 +27,12 @@ import {
   RateLimiter,
   isBackedUp,
 } from './rate-limit.js'
-import { isConnectorOutdated } from './connector-version.js'
+import { CONNECTOR_FLOORS, connectorUpdateRequired } from './connector-version.js'
+import type { ConnectorFloors, UpdateRequired } from './connector-version.js'
+import { getRequiredCapabilities } from './workspaces.js'
 import type {
   ConnectorHello,
+  ConnectorHelloAck,
   LocalSessionSummary,
   ProxyRequest,
   ProxyResponse,
@@ -70,8 +73,8 @@ interface ConnectedMachine {
   pending: Set<string>
   channels: Set<string>
   connectorVersion: string | null
-  /** True when the connector predates features the hub expects. */
-  outdated: boolean
+  /** Set when the connector is below a floor: connected, but refused traffic. */
+  updateRequired: UpdateRequired | null
   /** Last session counts the connector advertised, if any. */
   sessions: LocalSessionSummary | null
 }
@@ -93,7 +96,10 @@ export class ConnectorHub {
   private frameLimiter = new RateLimiter(MACHINE_FRAME_LIMIT)
   private idleTimer: ReturnType<typeof setInterval>
 
-  constructor(private db: Database.Database) {
+  private readonly floors: ConnectorFloors
+
+  constructor(private db: Database.Database, options: { floors?: ConnectorFloors } = {}) {
+    this.floors = options.floors ?? CONNECTOR_FLOORS
     // Recovering from a restart: nothing is connected yet.
     this.db.prepare(`UPDATE machines SET status = 'offline'`).run()
     this.idleTimer = setInterval(() => { this.dropIdleConnections(); }, IDLE_TIMEOUT_MS / 3)
@@ -216,6 +222,9 @@ export class ConnectorHub {
         error: { code: RELAY_ERROR.machineOffline, message: 'Machine is not connected' },
       })
     }
+    if (machine.updateRequired) {
+      return Promise.resolve({ error: updateRequiredError(machine.updateRequired) })
+    }
     if (machine.pending.size >= MAX_PENDING_PER_MACHINE) {
       return Promise.resolve({
         error: { code: RELAY_ERROR.badRequest, message: 'Too many requests in flight for this machine' },
@@ -269,6 +278,7 @@ export class ConnectorHub {
   ): RelayError | null {
     const machine = this.machines.get(machineId)
     if (!machine) return { code: RELAY_ERROR.machineOffline, message: 'Machine is not connected' }
+    if (machine.updateRequired) return updateRequiredError(machine.updateRequired)
     if (machine.channels.size >= MAX_CHANNELS_PER_MACHINE) {
       return { code: RELAY_ERROR.tooManyChannels, message: 'This machine is serving too many sessions' }
     }
@@ -374,11 +384,19 @@ export class ConnectorHub {
 
     const now = Date.now()
     const connectorVersion = hello.connectorVersion ?? null
+    const features = Array.isArray(hello.capabilities?.features)
+      ? hello.capabilities.features.filter((f): f is string => typeof f === 'string')
+      : []
+    const workspace = this.db.prepare('SELECT workspace_id FROM machines WHERE id = ?').get(machineId) as
+      | { workspace_id: string }
+      | undefined
+    const required = workspace ? getRequiredCapabilities(this.db, workspace.workspace_id) : []
+    const updateRequired = connectorUpdateRequired(connectorVersion, features, required, this.floors)
     this.machines.set(machineId, {
       machineId, socket, lastActivity: now, lastSeenWrite: now,
       pending: new Set(), channels: new Set(),
       connectorVersion,
-      outdated: isConnectorOutdated(connectorVersion),
+      updateRequired,
       sessions: hello.sessions ?? null,
     })
 
@@ -395,18 +413,22 @@ export class ConnectorHub {
     recordAuditEvent(this.db, {
       kind: 'machine_connected',
       machineId,
-      metadata: { connectorVersion: hello.connectorVersion ?? null },
+      metadata: {
+        connectorVersion: hello.connectorVersion ?? null,
+        ...(updateRequired ? { updateRequiredMinimum: updateRequired.minimum, updateRequiredMissing: updateRequired.missing.join(',') } : {}),
+      },
     })
 
-    if (isConnectorOutdated(connectorVersion)) {
-      console.warn(`[relay] machine ${machineId} runs connector ${connectorVersion ?? 'unknown'}, which is outdated`)
+    if (updateRequired) {
+      console.warn(`[relay] machine ${machineId} needs connector ${updateRequired.minimum} or later: ${updateRequired.reason}`)
     }
 
-    socket.send(
-      JSON.stringify(
-        envelope('hello_ack', { machineId, displayName: row?.display_name ?? 'Machine' }),
-      ),
-    )
+    // Below a floor the socket stays open: old connectors treat most closes
+    // as "reconnect", so closing would only start a loop. Traffic is refused
+    // in sendRequest/openChannel instead.
+    const ack: ConnectorHelloAck = { machineId, displayName: row?.display_name ?? 'Machine' }
+    if (updateRequired) ack.updateRequired = updateRequired
+    socket.send(JSON.stringify(envelope('hello_ack', ack)))
   }
 
   private setStatus(machineId: string, status: 'online' | 'offline' | 'degraded'): void {
@@ -433,9 +455,9 @@ export class ConnectorHub {
   }
 
   /** Disconnect everything and stop timers (shutdown / tests). */
-  /** Whether a connected machine's connector is behind the supported version. */
-  isOutdated(machineId: string): boolean {
-    return this.machines.get(machineId)?.outdated ?? false
+  /** Why a connected machine is refused traffic until its connector is updated, if it is. */
+  updateRequired(machineId: string): UpdateRequired | null {
+    return this.machines.get(machineId)?.updateRequired ?? null
   }
 
   /** Session counts a machine advertised at connect time (spec §11.3). */
@@ -468,5 +490,12 @@ export class ConnectorHub {
       machine.socket.close(1001, 'server shutting down')
     }
     this.machines.clear()
+  }
+}
+
+function updateRequiredError(update: UpdateRequired): RelayError {
+  return {
+    code: RELAY_ERROR.connectorUpdateRequired,
+    message: `This machine needs Codekin ${update.minimum} or later: ${update.reason}`,
   }
 }

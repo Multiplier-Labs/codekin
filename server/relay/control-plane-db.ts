@@ -371,6 +371,13 @@ const MIGRATIONS: Array<(db: Database.Database) => void> = [
   db => {
     db.exec('ALTER TABLE machine_webhooks ADD COLUMN token TEXT')
   },
+
+  // 9: connector capabilities a workspace requires of its machines
+  // (docs/RELAY-HARDENING.md §4), as a JSON array. Empty: only the base
+  // version floor applies.
+  db => {
+    db.exec(`ALTER TABLE workspaces ADD COLUMN required_capabilities TEXT NOT NULL DEFAULT '[]'`)
+  },
 ]
 
 function runMigrations(db: Database.Database): void {

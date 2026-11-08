@@ -86,6 +86,14 @@ function MachineRow({ machine: m, isCurrent, onSwitch, setup, gutter }: {
           <span className={`h-2 w-2 flex-shrink-0 rounded-full ${MACHINE_STATUS_DOT[m.status]}`} />
           <span className="truncate text-body text-ink">{m.displayName}</span>
           {m.hostname && <span className="truncate text-meta text-ink-muted">{m.hostname}</span>}
+          {m.updateRequired && (
+            <span
+              className="flex-shrink-0 rounded-control border border-warning-7/60 px-1.5 py-0.5 text-meta text-warning-5"
+              title={`Needs Codekin ${m.updateRequired.minimum} or later: ${m.updateRequired.reason}. Run \`codekin upgrade\` on it; the desktop app updates itself.`}
+            >
+              update required
+            </span>
+          )}
           {m.access === 'shared' && (
             <span className="flex-shrink-0 rounded-control border border-edge px-1.5 py-0.5 text-meta text-ink-muted">
               shared with you

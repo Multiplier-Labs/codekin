@@ -66,6 +66,19 @@ describe('MachinesSection', () => {
     expect(rows[1].textContent).not.toContain('connected')
   })
 
+  it('flags a machine the relay refuses until its Codekin is updated', async () => {
+    stubMachines([
+      machine({ updateRequired: { minimum: '0.9.0', missing: [], reason: 'connector 0.8.0 is older than the minimum 0.9.0' } }),
+      machine({ id: 'm2', displayName: 'other' }),
+    ])
+    const container = await render(<MachinesSection currentMachineId="m2" onSwitch={vi.fn()} />)
+    const rows = [...container.querySelectorAll('li')]
+    const badge = [...rows[0].querySelectorAll('span')].find(el => el.textContent === 'update required')
+    expect(badge?.getAttribute('title')).toContain('Needs Codekin 0.9.0 or later')
+    expect(badge?.getAttribute('title')).toContain('codekin upgrade')
+    expect(rows[1].textContent).not.toContain('update required')
+  })
+
   it('does not offer to reconnect to the machine you are already on', async () => {
     // Switching to where you already are would tear the workspace down and
     // rebuild it for nothing, so that row is not a button at all.

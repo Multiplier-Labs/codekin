@@ -82,7 +82,9 @@ export function MachineConnect({ machine, transport, onBack, onConnected }: Mach
             <p className="mb-2 text-body text-ink">
               {relayCode === 'local_unauthorized'
                 ? 'This machine’s connector is not authorized to its local Codekin server.'
-                : 'Could not reach this machine.'}
+                : relayCode === 'connector_update_required'
+                  ? 'Codekin on this machine needs an update.'
+                  : 'Could not reach this machine.'}
             </p>
             <p className="mb-4 text-meta text-ink-muted">{error}</p>
             <p className="mb-6 text-meta text-ink-faint">
@@ -91,6 +93,12 @@ export function MachineConnect({ machine, transport, onBack, onConnected }: Mach
                   The connector is running, but holding the wrong token. Restart it with{' '}
                   <code className="font-mono">AUTH_TOKEN_FILE</code> set to the token that machine’s
                   server uses.
+                </>
+              ) : relayCode === 'connector_update_required' ? (
+                <>
+                  It is online, but too old for this relay. Run{' '}
+                  <code className="font-mono">codekin upgrade</code> on it. The desktop app updates itself
+                  from its menu.
                 </>
               ) : (
                 <>
