@@ -630,6 +630,7 @@ Local Codekin keeps its existing local session archive and screenshots behavior.
 - Should connector-to-local-Codekin use the existing HTTP API only, or should local Codekin expose a narrower internal relay API?
 - How should file uploads be handled for large files: chunked JSON frames, signed temporary upload channels through relay, or direct connector pull?
 - Is end-to-end encryption between browser and connector required for any customer profile, knowing it would limit hosted audit and policy inspection?
+  *Answered (2026-11-08):* yes for the public SaaS. See `docs/RELAY-SIGNED-INTENTS-AND-E2E-SPEC.md` (L1 device-signed intents at launch, L2 E2E encryption after).
 
 ---
 
