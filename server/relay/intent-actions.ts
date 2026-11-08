@@ -331,6 +331,51 @@ export function requestNeedsStepUp(method: string, path: string, body: Uint8Arra
     : answersStanding(msg.value)
 }
 
+// --- Share grants (§6.7) --------------------------------------------------------
+
+export const GRANT_ACTION = 'grant'
+export const GRANT_REVOKE_ACTION = 'grant_revoke'
+
+/** The longest a signed grant lives, whatever the share says (D3). */
+export const MAX_GRANT_LIFETIME_MS = 30 * 24 * 60 * 60_000
+
+/** What an owner signs to let one person act on one session of one machine. */
+export interface GrantBody {
+  /** The relay's share id. */
+  grantId: string
+  sessionId: string
+  granteeUserId: string
+  permissions: string[]
+  /** The grantee's browser keys allowed to act under this grant. */
+  granteeKeys: Array<{ keyId: string; spki: string }>
+  /** ms since epoch; at most 30 days after signing, never past the share's expiry. */
+  expiresAt: number
+}
+
+/**
+ * A grant as it travels: the grant JSON text exactly as signed, and the
+ * owner's `grant` intent whose payloadHash is SHA-256 of that text.
+ */
+export interface SignedGrant {
+  grant: string
+  intent: SignedIntent
+}
+
+/** The bytes a grant intent's payloadHash covers: the grant text itself. */
+export function grantPayload(grantText: string): Uint8Array {
+  return encoder.encode(grantText)
+}
+
+/** What a grant_revoke intent covers: the grant id. */
+export function grantRevokePayload(grantId: string): Uint8Array {
+  return framed([encoder.encode(grantId)])
+}
+
+/** A grant that lets someone approve shell commands is privileged (§6.2). */
+export function grantNeedsStepUp(permissions: readonly string[]): boolean {
+  return permissions.includes('approve_shell')
+}
+
 /** Device and policy changes always count as privileged. */
 export function actionNeedsStepUp(action: string): boolean {
   return action === DEVICE_CERTIFY_ACTION || action === DEVICE_REVOKE_ACTION

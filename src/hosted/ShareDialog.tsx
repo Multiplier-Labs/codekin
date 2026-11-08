@@ -8,15 +8,63 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { currentWorkspaceId, fetchMembers, workspaceHeaders, type WorkspaceMember } from './workspace'
+import {
+  GrantError, fetchGranteeKeys, grantStatus, revokeShareGrant, signShareGrant,
+  type GrantStatus, type GrantTransport, type ShareWithGrant,
+} from './grants'
+import { transport } from '../lib/transport'
 
-export interface SessionShare {
-  id: string
-  machineId: string
-  localSessionId: string
-  granteeUserId: string | null
-  permissions: string[]
+export interface SessionShare extends ShareWithGrant {
   createdAt: string
-  expiresAt: string | null
+}
+
+/** The hosted transport signs grants; the local one never renders this dialog. */
+function grantTransport(): GrantTransport | null {
+  const t = transport as unknown as Partial<GrantTransport>
+  return typeof t.signIntent === 'function' && typeof t.sendDeviceFrame === 'function' ? t as GrantTransport : null
+}
+
+/** One share: who, which role, and whether the owner's grant covers their devices (§6.7). */
+function ShareRow({ share, login, status, busy, onAllow, onRevoke }: {
+  share: SessionShare
+  login: string
+  status: GrantStatus | undefined
+  busy: boolean
+  onAllow: (status: GrantStatus) => void
+  onRevoke: () => void
+}) {
+  // Something to sign: never signed, or a device the grant doesn't name, and devices to name.
+  const toAllow = status && status.kind !== 'signed' && status.keys.length > 0 ? status : null
+  return (
+    <li className="flex items-center gap-2 rounded-control border border-edge bg-surface px-3 py-1.5">
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-meta text-ink">
+          {login} · {share.permissions.includes('send_prompt') ? 'Editor' : 'Viewer'}
+        </span>
+        {status && (
+          <span className={`block truncate text-micro ${status.kind === 'signed' ? 'text-ink-faint' : 'text-warning-5'}`}>
+            {status.kind === 'new_device' ? 'New device: ' : ''}
+            {describeDevices(status)}
+          </span>
+        )}
+      </span>
+      {toAllow && (
+        <button onClick={() => { onAllow(toAllow) }} disabled={busy} className="text-meta text-primary-5 transition hover:underline disabled:opacity-50">
+          Allow
+        </button>
+      )}
+      <button onClick={onRevoke} className="ml-auto text-meta text-ink-muted transition hover:text-error-7">
+        Revoke
+      </button>
+    </li>
+  )
+}
+
+function describeDevices(status: GrantStatus): string {
+  if (status.kind === 'signed') return `Allowed on ${status.keyIds.length} device${status.keyIds.length === 1 ? '' : 's'}`
+  const keys = status.keys
+  if (keys.length === 0) return 'No device yet'
+  return `${keys.length} device${keys.length === 1 ? '' : 's'}: ${keys.map(k => k.label).join(', ')}`
 }
 
 const ROLE_OPTIONS = [
@@ -38,13 +86,18 @@ export function ShareDialog({ machineId, sessionId, sessionName, onClose }: Shar
   const [shares, setShares] = useState<SessionShare[]>([])
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  /** Each share's grant against the grantee's current devices (§6.7). */
+  const [grants, setGrants] = useState<Partial<Record<string, GrantStatus>>>({})
 
   const loadShares = useCallback(async () => {
     try {
       const res = await fetch('/api/shares', { credentials: 'include', headers: workspaceHeaders() })
       if (!res.ok) return
       const data = (await res.json()) as { shared?: SessionShare[] }
-      setShares((data.shared ?? []).filter(s => s.machineId === machineId && s.localSessionId === sessionId))
+      const mine = (data.shared ?? []).filter(s => s.machineId === machineId && s.localSessionId === sessionId)
+      setShares(mine)
+      const statuses = await Promise.all(mine.map(async share => [share.id, grantStatus(share, await fetchGranteeKeys(share.id))] as const))
+      setGrants(Object.fromEntries(statuses))
     } catch {
       // Listing is best-effort; the form still works
     }
@@ -91,7 +144,26 @@ export function ShareDialog({ machineId, sessionId, sessionName, onClose }: Shar
 
   const revoke = async (shareId: string) => {
     await fetch(`/api/shares/${shareId}`, { method: 'DELETE', credentials: 'include' })
+    // The machine keeps its own list, so a relay can't keep replaying the old grant.
+    const t = grantTransport()
+    if (t) await revokeShareGrant(t, shareId).catch(() => {})
     await loadShares()
+  }
+
+  /** Sign the grant for the devices shown (the owner has seen their names). */
+  const allow = async (share: SessionShare, status: GrantStatus) => {
+    const t = grantTransport()
+    if (!t || status.kind === 'signed') return
+    setBusy(true)
+    setError(null)
+    try {
+      await signShareGrant(t, share, status.keys)
+      await loadShares()
+    } catch (err) {
+      setError(err instanceof GrantError || err instanceof Error ? err.message : String(err))
+    } finally {
+      setBusy(false)
+    }
   }
 
   return (
@@ -151,20 +223,15 @@ export function ShareDialog({ machineId, sessionId, sessionName, onClose }: Shar
             <p className="mb-1 text-meta text-ink-muted">Already shared with</p>
             <ul className="flex flex-col gap-1">
               {shares.map(share => (
-                <li
+                <ShareRow
                   key={share.id}
-                  className="flex items-center gap-2 rounded-control border border-edge bg-surface px-3 py-1.5"
-                >
-                  <span className="truncate text-meta text-ink">
-                    {share.permissions.includes('send_prompt') ? 'Editor' : 'Viewer'}
-                  </span>
-                  <button
-                    onClick={() => void revoke(share.id)}
-                    className="ml-auto text-meta text-ink-muted transition hover:text-error-7"
-                  >
-                    Revoke
-                  </button>
-                </li>
+                  share={share}
+                  login={members?.find(m => m.userId === share.granteeUserId)?.login ?? 'Member'}
+                  status={grants[share.id]}
+                  busy={busy}
+                  onAllow={status => void allow(share, status)}
+                  onRevoke={() => void revoke(share.id)}
+                />
               ))}
             </ul>
           </div>

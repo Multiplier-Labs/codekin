@@ -109,8 +109,8 @@ export interface TrustStore {
   credentials: TrustedCredential[]
   /** Enrolment requests, until they expire. */
   pending: PendingEnrolment[]
-  /** Share grants revoked here (slice 6). Kept as written. */
-  revokedGrants: unknown[]
+  /** Share grants the owner revoked on this machine (§6.7). */
+  revokedGrants: RevokedGrant[]
 }
 
 export class TrustStoreError extends Error {
@@ -224,7 +224,9 @@ export function parseTrustStore(text: string): TrustStore {
     credentials,
     // An unreadable request is only a request: dropping it is harmless.
     pending: Array.isArray(v.pending) ? v.pending.map(parsePending).filter((e): e is PendingEnrolment => e !== null) : [],
-    revokedGrants: Array.isArray(v.revokedGrants) ? v.revokedGrants : [],
+    revokedGrants: Array.isArray(v.revokedGrants)
+      ? v.revokedGrants.filter((g): g is RevokedGrant => !!g && typeof g === 'object' && str((g as RevokedGrant).grantId, 200) && str((g as RevokedGrant).at, 64))
+      : [],
   }
 }
 
@@ -291,6 +293,25 @@ export function withTrustStoreLock<T>(file: string, fn: () => T, waitMs = LOCK_W
       if (readFileSync(lock, 'utf-8') === token) rmSync(lock, { force: true })
     } catch { /* already gone */ }
   }
+}
+
+/** A grant the owner revoked on this machine (§6.7), kept past any grant's lifetime. */
+export interface RevokedGrant {
+  grantId: string
+  at: string
+}
+
+/** How long a revocation is kept: longer than a grant can live. */
+const REVOKED_GRANT_KEEP_MS = 31 * 24 * 60 * 60_000
+
+/** Record a revoked grant (owner-signed grant_revoke). */
+export function addRevokedGrant(grantId: string, file: string, machineId: string, now = Date.now()): void {
+  mutateTrustStore(file, machineId, store => {
+    store.revokedGrants = [
+      ...store.revokedGrants.filter(g => g.grantId !== grantId && Date.parse(g.at) > now - REVOKED_GRANT_KEEP_MS),
+      { grantId, at: new Date(now).toISOString() },
+    ]
+  }, now)
 }
 
 /** Drop requests past their expiry. Returns true when any were dropped. */

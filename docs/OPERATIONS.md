@@ -485,9 +485,11 @@ depends on the policy:
 | `warn` | forwarded, logged | forwarded, logged |
 | `required` | forwarded, logged | refused, logged |
 
-Set `required` only once every browser you use is confirmed. Until signed
-share grants arrive, shared sessions stop working for guests on a `required`
-machine. The log is `~/.codekin/relay/intents.jsonl` (0600, hash-chained,
+Set `required` only once every browser you use is confirmed. Sharing a session
+with someone on a `required` machine also needs their devices allowed: the share
+dialog lists them, and **Allow** signs a grant for them. The grant lasts up to
+30 days and renews itself while your browser is open; a device they add later
+has to be allowed again. The log is `~/.codekin/relay/intents.jsonl` (0600, hash-chained,
 rotated at 30 days or 50 MB). It is also shown in Settings → Remote access →
 Activity.
 

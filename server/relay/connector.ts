@@ -6,7 +6,7 @@
  */
 
 import WebSocket from 'ws'
-import { ENROLMENT_FEATURE, envelope, INTENTS_FEATURE, parseEnvelope, RELAY_ERROR, STREAM_CLOSE } from './relay-protocol.js'
+import { ENROLMENT_FEATURE, envelope, INTENTS_FEATURE, isEnrolRequestKind, parseEnvelope, RELAY_ERROR, STREAM_CLOSE } from './relay-protocol.js'
 import type {
   ConnectorHello,
   EnrolRequest,
@@ -72,7 +72,8 @@ export interface ConnectorOptions {
   /** Answers enrol_* frames (enrolment.ts); without it the connector doesn't advertise enrolment. */
   enrolment?: Pick<MachineEnrolment, 'handle'>
   /** Checks signed intents on everything the relay delivers (intent-verify.ts). */
-  intents?: Pick<IntentVerifier, 'checkRequest' | 'checkChannelOpen' | 'checkFrame'> & Partial<Pick<IntentVerifier, 'setRequirePasskey'>>
+  intents?: Pick<IntentVerifier, 'checkRequest' | 'checkChannelOpen' | 'checkFrame'>
+    & Partial<Pick<IntentVerifier, 'setRequirePasskey' | 'effectivePrincipal'>>
 }
 
 export type ConnectorStatus =
@@ -194,8 +195,7 @@ export class RelayConnector {
         void this.advertiseSessions(ws)
       } else if (msg.kind === 'request') {
         void this.handleProxyRequest(ws, msg.id, msg.payload as ProxyRequest)
-      } else if (msg.kind === 'enrol_commit' || msg.kind === 'enrol_reveal' || msg.kind === 'enrol_status'
-        || msg.kind === 'enrol_certify' || msg.kind === 'enrol_revoke') {
+      } else if (isEnrolRequestKind(msg.kind)) {
         this.handleEnrolment(ws, msg.kind, msg.id, msg.payload as EnrolRequest)
       } else if (msg.kind === 'stream_open') {
         this.openChannel(ws, msg.channelId, msg.payload as StreamOpen)
@@ -275,7 +275,9 @@ export class RelayConnector {
       }
       deliveryId = verdict.deliveryId
     }
-    const outcome = await executeProxyRequest(request, {
+    // A grantee acts on what the relay says AND the owner signed (spec §6.7).
+    const effective = this.opts.intents?.effectivePrincipal?.(request.principal)
+    const outcome = await executeProxyRequest(effective && effective !== request.principal ? { ...request, principal: effective } : request, {
       target: this.localTarget,
       fetchImpl: this.opts.fetchImpl,
     })
@@ -364,9 +366,11 @@ export class RelayConnector {
       ws.send(JSON.stringify(envelope('error', intentError(opened.decision), { channelId })))
       return
     }
+    // A grantee acts on what the relay says AND the owner signed (spec §6.7).
+    const effective = intents?.effectivePrincipal?.(principal) ?? principal
     const policy: ChannelPolicy = {
       role: principal.role === 'owner' ? 'owner' : 'grantee',
-      grants: principal.grants as GrantMap,
+      grants: effective.grants as GrantMap,
       userId: principal.userId,
     }
 

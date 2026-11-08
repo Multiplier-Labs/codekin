@@ -86,6 +86,7 @@ const browser = z.discriminatedUnion('kind', [
   frame('enrol_status', z.object({ enrolId: id })).extend({ id }),
   frame('enrol_certify', z.object({ spki: b64, label: z.string().max(256), intent })).extend({ id }),
   frame('enrol_revoke', z.object({ keyId: z.string().max(64), intent })).extend({ id }),
+  frame('enrol_grant_revoke', z.object({ grantId: id, intent })).extend({ id }),
 ])
 
 /** Validate fields before any cast, database binding, or socket operation. */

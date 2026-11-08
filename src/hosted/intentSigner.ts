@@ -11,7 +11,9 @@
 
 import { INTENT_VERSION, MACHINE_TIME_LABEL, MAX_CLOCK_OFFSET_MS, PASSKEY_ANY, intentChallengeInput } from '../../server/relay/intent-actions'
 import type { IntentBody, SignedIntent } from '../../server/relay/intent-actions'
-import { DEVICE_TRUST_CHANGED, currentUserId, fromB64url, toB64url, transcript, trustStorage, type TrustStorage } from './deviceTrust'
+import {
+  DEVICE_TRUST_CHANGED, currentUserId, fromB64url, getOrCreateBrowserKey, toB64url, transcript, trustStorage, type TrustStorage,
+} from './deviceTrust'
 
 export type { SignedIntent }
 
@@ -39,6 +41,12 @@ export interface IntentSigner {
   verifyMachineTime(nonce: string, machineTime: number, sig: string): Promise<boolean>
   /** Remember which of this user's passkeys the machine trusts (from a step-up refusal). */
   learnPasskeys(passkeys: Array<{ credentialId: string; keyId: string }>): Promise<void>
+  /**
+   * The user's standing on the machine, from the relay's hello_ack. A
+   * grantee signs with their browser key without being confirmed on the
+   * machine: the owner's signed grant names that key (§6.7).
+   */
+  setRole(role: 'owner' | 'grantee'): void
 }
 
 const SIGN = { name: 'ECDSA', hash: 'SHA-256' } as const
@@ -59,10 +67,16 @@ interface SigningKey {
 export function createIntentSigner(machineId: string, storage: TrustStorage = trustStorage(), now: () => number = Date.now): IntentSigner {
   let offset = 0
   let key: Promise<SigningKey | null> | null = null
+  let role: 'owner' | 'grantee' = 'owner'
 
   const load = async (): Promise<SigningKey | null> => {
     const userId = await currentUserId()
     if (!userId) return null
+    if (role === 'grantee') {
+      // A grantee's authority is the owner's grant, which names this key.
+      const own = await getOrCreateBrowserKey(userId, storage)
+      return { privateKey: own.keyPair.privateKey, keyId: own.keyId, userId, passkeys: [] }
+    }
     const [browserKey, pin] = await Promise.all([storage.getKey(userId), storage.getPin(userId, machineId)])
     // Sign only where the machine confirmed this very key.
     if (!browserKey || !pin || pin.keyId !== browserKey.keyId) return null
@@ -87,7 +101,7 @@ export function createIntentSigner(machineId: string, storage: TrustStorage = tr
       return null
     }
   }
-  if (typeof window !== 'undefined') {
+  if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
     window.addEventListener(DEVICE_TRUST_CHANGED, () => { key = null })
   }
 
@@ -131,6 +145,10 @@ export function createIntentSigner(machineId: string, storage: TrustStorage = tr
     },
     setClockOffset(ms) {
       offset = clampOffset(ms)
+    },
+    setRole(next) {
+      if (next !== role) key = null
+      role = next
     },
     async verifyMachineTime(nonce, machineTime, sig) {
       try {

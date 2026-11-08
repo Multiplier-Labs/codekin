@@ -56,6 +56,15 @@ export interface SessionShareRow {
   permissions: string
   created_at: string
   expires_at: string | null
+  signed_grant?: string | null
+  signed_grant_expires_at?: string | null
+}
+
+/** What the owner's browser needs to know about a share's signed grant (§6.7). */
+export interface SignedGrantSummary {
+  expiresAt: number
+  permissions: string[]
+  keyIds: string[]
 }
 
 export interface SessionShare {
@@ -68,6 +77,24 @@ export interface SessionShare {
   permissions: SessionPermission[]
   createdAt: string
   expiresAt: string | null
+  /** Set once the owner has signed a grant for this share; null until then, or after its permissions changed. */
+  signedGrant: SignedGrantSummary | null
+}
+
+function summarizeSignedGrant(raw: string | null | undefined): SignedGrantSummary | null {
+  if (!raw) return null
+  try {
+    const { grant } = JSON.parse(raw) as { grant: string }
+    const body = JSON.parse(grant) as { expiresAt?: unknown; permissions?: unknown; granteeKeys?: Array<{ keyId?: unknown }> }
+    if (typeof body.expiresAt !== 'number' || !Array.isArray(body.permissions) || !Array.isArray(body.granteeKeys)) return null
+    return {
+      expiresAt: body.expiresAt,
+      permissions: body.permissions.filter((p): p is string => typeof p === 'string'),
+      keyIds: body.granteeKeys.map(k => k.keyId).filter((k): k is string => typeof k === 'string'),
+    }
+  } catch {
+    return null
+  }
 }
 
 function toShare(row: SessionShareRow): SessionShare {
@@ -81,7 +108,28 @@ function toShare(row: SessionShareRow): SessionShare {
     permissions: parsePermissions(row.permissions),
     createdAt: row.created_at,
     expiresAt: row.expires_at,
+    signedGrant: summarizeSignedGrant(row.signed_grant),
   }
+}
+
+/** Store the owner's signed grant for a share (validated by the route). */
+export function setSignedGrant(db: Database.Database, shareId: string, signed: { grant: string; intent: unknown }, expiresAt: number): void {
+  db.prepare('UPDATE session_shares SET signed_grant = ?, signed_grant_expires_at = ? WHERE id = ?')
+    .run(JSON.stringify(signed), new Date(expiresAt).toISOString(), shareId)
+}
+
+/** The grantee's unexpired signed grants on one machine, for their principal. */
+export function signedGrantsFor(db: Database.Database, userId: string, machineId: string, now = new Date()): Array<{ grant: string; intent: unknown }> {
+  const rows = db.prepare(
+    `SELECT signed_grant FROM session_shares
+     WHERE grantee_user_id = ? AND machine_id = ? AND signed_grant IS NOT NULL
+       AND signed_grant_expires_at > ? AND (expires_at IS NULL OR expires_at > ?)`,
+  ).all(userId, machineId, now.toISOString(), now.toISOString()) as Array<{ signed_grant: string }>
+  const out: Array<{ grant: string; intent: unknown }> = []
+  for (const r of rows) {
+    try { out.push(JSON.parse(r.signed_grant) as { grant: string; intent: unknown }) } catch { /* skip */ }
+  }
+  return out
 }
 
 /** Parse the stored permission list, dropping anything unrecognized. */
@@ -135,7 +183,8 @@ export function upsertShare(db: Database.Database, input: CreateShareInput): Ses
     .get(input.machineId, input.localSessionId, input.granteeUserId) as SessionShareRow | undefined
 
   if (existing) {
-    db.prepare('UPDATE session_shares SET permissions = ?, expires_at = ? WHERE id = ?').run(
+    // New permissions need a new signature: the old grant no longer describes the share.
+  db.prepare('UPDATE session_shares SET permissions = ?, expires_at = ?, signed_grant = NULL, signed_grant_expires_at = NULL WHERE id = ?').run(
       JSON.stringify(input.permissions),
       input.expiresAt ?? null,
       existing.id,
@@ -178,7 +227,8 @@ export function updateSharePermissions(
 ): SessionShare | null {
   const existing = getShare(db, shareId)
   if (!existing) return null
-  db.prepare('UPDATE session_shares SET permissions = ?, expires_at = ? WHERE id = ?').run(
+  // New permissions need a new signature: the old grant no longer describes the share.
+  db.prepare('UPDATE session_shares SET permissions = ?, expires_at = ?, signed_grant = NULL, signed_grant_expires_at = NULL WHERE id = ?').run(
     JSON.stringify(permissions),
     expiresAt === undefined ? existing.expiresAt : expiresAt,
     shareId,

@@ -30,12 +30,13 @@ import {
 } from './enrolment-crypto.js'
 import type { EnrolPasskey } from './enrolment-crypto.js'
 import { keyIdForSpki, loadMachineSigningKey, parseP256Spki, readMachineIdentity } from './machine-identity.js'
-import { mutateTrustStore, readTrustStore, TrustStoreError } from './trust-store.js'
+import { addRevokedGrant, mutateTrustStore, readTrustStore, TrustStoreError } from './trust-store.js'
 import type { PasskeyCredential, PendingEnrolment, TrustedCredential, TrustStore } from './trust-store.js'
 import { coseToKey, keyIdForCoseKey, verifyPasskeyAssertion } from './webauthn-verify.js'
 import type { PasskeyAssertion } from './webauthn-verify.js'
 import {
-  DEVICE_CERTIFY_ACTION, DEVICE_REVOKE_ACTION, PASSKEY_PROOF_LABEL, certifyPayload, encodePasskeyProofs, revokePayload,
+  DEVICE_CERTIFY_ACTION, DEVICE_REVOKE_ACTION, GRANT_REVOKE_ACTION, PASSKEY_PROOF_LABEL, certifyPayload, encodePasskeyProofs,
+  grantRevokePayload, revokePayload,
 } from './intent-actions.js'
 import type { IntentVerifier } from './intent-verify.js'
 import { describeIntentRefusal } from './connector-stream.js'
@@ -327,6 +328,21 @@ export class MachineEnrolment {
     }
   }
 
+  /**
+   * grant_revoke (spec §6.7): the owner revokes a share grant on this machine
+   * itself, so a relay replaying the old signed grant gets nowhere.
+   */
+  revokeGrant(principal: RelayPrincipal | undefined, payload: unknown): EnrolResult {
+    const grantId = (payload as { grantId?: unknown } | null)?.grantId
+    if (typeof grantId !== 'string' || !grantId || grantId.length > 200) throw refuse('Malformed request')
+    if (!this.opts.intents) throw new EnrolmentError('enrol_unavailable', 'This computer cannot check signed requests')
+    const { decision, signer } = this.opts.intents.checkDeviceIntent(
+      principal, (payload as { intent?: unknown }).intent, GRANT_REVOKE_ACTION, grantRevokePayload(grantId), false)
+    if (!signer) throw refuse(describeIntentRefusal(decision.reason))
+    addRevokedGrant(grantId, this.opts.devicesFile, this.opts.machineId, this.now())
+    return { enrolId: `grant_revoke:${grantId}`, state: 'approved' }
+  }
+
   /** device_revoke (spec §5.6): remove a credential, on an owner's signed (and stepped-up) intent. */
   revoke(principal: RelayPrincipal | undefined, payload: unknown): EnrolResult {
     const keyId = (payload as { keyId?: unknown } | null)?.keyId
@@ -353,6 +369,7 @@ export class MachineEnrolment {
       case 'enrol_status': return { kind: 'enrol_result', payload: this.status(principal, payload) }
       case 'enrol_certify': return { kind: 'enrol_result', payload: this.certify(principal, payload) }
       case 'enrol_revoke': return { kind: 'enrol_result', payload: this.revoke(principal, payload) }
+      case 'enrol_grant_revoke': return { kind: 'enrol_result', payload: this.revokeGrant(principal, payload) }
       default: throw refuse('Unknown enrolment message')
     }
   }
