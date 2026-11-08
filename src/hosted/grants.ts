@@ -281,7 +281,13 @@ export async function machineClockOffset(transport: GrantTransport, machineId: s
 
 async function machineNow(transport: GrantTransport, machineId: string, storage: TrustStorage): Promise<number> {
   const offset = await machineClockOffset(transport, machineId, storage)
-  if (offset === null) throw new GrantError('no_clock', "Couldn't check the computer's clock. Make sure it is online, then try again.")
+  if (offset === null) {
+    const userId = await currentUserId()
+    const pin = userId ? await storage.getPin(userId, machineId) : undefined
+    throw new GrantError('no_clock', pin?.via === 'passkey'
+      ? 'This browser was added with a passkey. Confirm it with the codes (Settings → Machines) to allow people on this computer.'
+      : "Couldn't check the computer's clock. Make sure it is online, then try again.")
+  }
   return Date.now() + offset
 }
 

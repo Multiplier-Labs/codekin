@@ -350,7 +350,7 @@ export class MachineEnrolment {
     // stop retrying; a relay can't fake the confirmation.
     const { key } = this.machineKey()
     return {
-      enrolId: keep === undefined ? `grant_revoke:${grantId}` : `grant_revoke:${grantId}>${keep}`,
+      enrolId: `grant_revoke:${grantId}`,
       state: 'approved',
       signature: signP1363(key, transcript(...grantRevokedParts(grantId, keep))).toString('base64url'),
     }
