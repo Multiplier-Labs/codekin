@@ -36,7 +36,9 @@ export interface ConnectorFloors {
 export const CONNECTOR_FLOORS: ConnectorFloors = {
   base: MIN_SUPPORTED_CONNECTOR_VERSION,
   capabilities: {
-    // intents: set when signed intents (L1) ship.
+    // Signed intents (L1) are enforced from the release that carries slice 7
+    // (signed-intents spec §6.8). Raise this if that release is numbered higher.
+    intents: '0.10.6',
     // e2e: set when the end-to-end handshake (L2) ships.
     // credentialClass: set when connectors declare their credential class.
   },

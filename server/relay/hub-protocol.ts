@@ -17,6 +17,7 @@ const intent = z.object({
   sig: b64.optional(),
   webauthn: z.object({ credentialId: b64, authenticatorData: b64, clientDataJSON: b64.max(4096), signature: b64 }).optional(),
 }).optional()
+const intentPolicy = z.enum(['off', 'warn', 'required'])
 const passkeyProof = z.object({ credentialId: b64, authenticatorData: b64, clientDataJSON: b64.max(4096), signature: b64 })
 const base = { version: z.literal(1), id: id.optional(), channelId: id.optional() }
 const frame = <K extends string, S extends z.ZodType>(kind: K, payload: S) => z.object({ ...base, kind: z.literal(kind), payload })
@@ -48,7 +49,10 @@ const connector = z.discriminatedUnion('kind', [
     sessions: summary.optional(),
     // Validated as a P-256 SPKI where it is stored (connector-hub.ts).
     identityKey: z.string().max(256).optional(),
+    intentPolicy: intentPolicy.optional(),
   })),
+  // The machine's intent policy changed (signed-intents spec §6.8).
+  frame('intent_policy', z.object({ policy: intentPolicy })),
   frame('response', z.object({
     status: z.number().int().min(100).max(599),
     headers: z.record(z.string().max(200), text).refine(h => Object.keys(h).length <= 100), body,
@@ -89,6 +93,7 @@ const browser = z.discriminatedUnion('kind', [
   frame('enrol_revoke', z.object({ keyId: z.string().max(64), intent })).extend({ id }),
   frame('enrol_grant_revoke', z.object({ grantId: id, keep: id.optional(), intent })).extend({ id }),
   frame('enrol_time', z.object({ nonce: b64 })).extend({ id }),
+  frame('enrol_policy', z.object({ policy: intentPolicy, intent })).extend({ id }),
 ])
 
 /** Validate fields before any cast, database binding, or socket operation. */

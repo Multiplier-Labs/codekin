@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Signed remote control.** A computer paired with a relay can now refuse anything the relay sends unless a browser you confirmed on that computer signed it, so a compromised relay can't run commands on it (docs/RELAY-SIGNED-INTENTS-AND-E2E-SPEC.md).
+  - **Confirming a browser:** choose **Confirm this browser** under Settings → Machines, type the code it shows on the computer, then type the computer's code back into the browser. Your first confirmed browser turns the protection on.
+  - **Passkeys:** a passkey can add your other browsers, and can be required for privileged actions such as always-allow rules, bypass permissions and device changes.
+  - **Shares:** sessions you share are signed for the other person's devices with **Allow** in the share dialog.
+  - **Workspaces:** owners can **Require confirmed devices**, with an optional grace period.
+  - **On the computer:** Settings → Remote access, and `codekin relay devices` / `codekin relay audit`, show the devices, the policy and a tamper-evident log.
+
 ### Fixed
 - Opening a session always lands at the latest messages. The chat remembered whether you were at the bottom of the *previous* session, so after you had scrolled up anywhere (or WebKit reported a stale scroll position) the next session opened at the very top, where the browser had parked it while the transcript was empty — most visibly in Safari and the desktop app. A newly opened transcript now starts at the bottom and holds there for a moment while code blocks and images settle, unless you scroll it yourself
 

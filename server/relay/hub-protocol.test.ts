@@ -44,6 +44,16 @@ describe('hub wire validation', () => {
     expect((result?.payload as { machineTime?: number }).machineTime).toBe(5)
   })
 
+  it('carries the policy a connector reports, and the owner asking to raise it', () => {
+    const hello = { machineId: 'm', machineSecret: 'secret', intentPolicy: 'required' }
+    expect((parseHubEnvelope(wire('hello', hello), 'connector')?.payload as { intentPolicy?: string }).intentPolicy).toBe('required')
+    expect(parseHubEnvelope(wire('hello', { ...hello, intentPolicy: 'sometimes' }), 'connector')).toBeNull()
+    expect(parseHubEnvelope(wire('intent_policy', { policy: 'warn' }), 'connector')).not.toBeNull()
+    expect(parseHubEnvelope(wire('intent_policy', { policy: 'warn' }), 'browser')).toBeNull()
+    const raise = parseHubEnvelope(wire('enrol_policy', { policy: 'required', intent: { body: '{}', sig: 'AA' } }, { id: 'e' }), 'browser')
+    expect((raise?.payload as { policy?: string }).policy).toBe('required')
+  })
+
   it('leaves stream frame size to the socket limit, so large session replays pass', () => {
     const replay = wire('stream_data', { data: 'x'.repeat(9 * 1024 * 1024) }, { channelId: 'c' })
     expect(parseHubEnvelope(replay, 'connector')).not.toBeNull()

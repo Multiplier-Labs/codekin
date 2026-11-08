@@ -438,7 +438,19 @@ export function grantNeedsStepUp(permissions: readonly string[]): boolean {
   return permissions.includes('approve_shell')
 }
 
-/** Device and policy changes always count as privileged. */
+/**
+ * A remote policy change (§6.8): it may only raise the machine's policy
+ * (off → warn → required); lowering is for local surfaces only. Raising is
+ * the safe direction, so it needs no step-up.
+ */
+export const POLICY_ACTION = 'device_policy'
+
+/** What a device_policy intent covers: the policy asked for. */
+export function policyPayload(policy: string): Uint8Array {
+  return framed([encoder.encode(policy)])
+}
+
+/** Device changes always count as privileged. */
 export function actionNeedsStepUp(action: string): boolean {
   return action === DEVICE_CERTIFY_ACTION || action === DEVICE_REVOKE_ACTION
 }

@@ -16,6 +16,8 @@ export type RelayEnvelopeKind =
   | 'stream_data'
   | 'stream_close'
   | 'event'
+  /** Connector → hub: the machine's intent policy changed (§6.8). */
+  | 'intent_policy'
   | 'error'
   | 'ping'
   | 'pong'
@@ -27,6 +29,7 @@ export type RelayEnvelopeKind =
   | 'enrol_revoke'
   | 'enrol_grant_revoke'
   | 'enrol_time'
+  | 'enrol_policy'
   /** …and connector → browser, each answering one request by id. */
   | 'enrol_challenge'
   | 'enrol_result'
@@ -76,6 +79,12 @@ export interface ConnectorHello {
    * trust only the key they pin during enrolment.
    */
   identityKey?: string
+  /**
+   * The machine's intent policy (signed-intents spec §6.8), resent as an
+   * `intent_policy` frame whenever it changes. A report about the machine's
+   * own enforcement: a forged one only weakens that owner's own machine.
+   */
+  intentPolicy?: 'off' | 'warn' | 'required'
 }
 
 /** Hub → connector on successful auth. */
@@ -95,6 +104,11 @@ export interface ConnectorHelloAck {
   ownerUserId?: string
   /** The workspace requires a passkey for privileged actions (signed-intents spec §6.6). */
   requirePasskeyStepUp?: boolean
+  /**
+   * The workspace requires confirmed devices and this machine doesn't yet
+   * (§6.8): requests and channels are refused, enrolment still works.
+   */
+  unconfirmed?: boolean
 }
 
 /** Browser → hub, first message on a /relay/browser socket. */
@@ -246,7 +260,7 @@ export const RELAY_ERROR = {
 } as const
 
 /** Browser → connector enrolment frames, and the connector's replies. */
-export const ENROL_REQUEST_KINDS = ['enrol_commit', 'enrol_reveal', 'enrol_status', 'enrol_certify', 'enrol_revoke', 'enrol_grant_revoke', 'enrol_time'] as const
+export const ENROL_REQUEST_KINDS = ['enrol_commit', 'enrol_reveal', 'enrol_status', 'enrol_certify', 'enrol_revoke', 'enrol_grant_revoke', 'enrol_time', 'enrol_policy'] as const
 export type EnrolRequestKind = (typeof ENROL_REQUEST_KINDS)[number]
 
 export function isEnrolRequestKind(kind: string): kind is EnrolRequestKind {

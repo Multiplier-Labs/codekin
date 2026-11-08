@@ -9,7 +9,8 @@
  *
  * Credentials are added by the enrolment ceremony (enrolment.ts), whose
  * requests wait in `pending` until the owner types the browser's code on
- * this machine. Nothing enforces the policy yet (slices 4 and 7).
+ * this machine. The connector enforces the policy (intent-verify.ts); the
+ * owner's first confirmed device turns it from `off` to `required` (§6.8).
  *
  * The connector and the local surfaces may be different processes (the CLI,
  * an unmanaged connector), so every read-modify-write holds a lock file.
@@ -113,6 +114,12 @@ export interface TrustStore {
   pending: PendingEnrolment[]
   /** Share grants the owner revoked on this machine (§6.7). */
   revokedGrants: RevokedGrant[]
+  /**
+   * When recent enrolment requests were made (ISO times), including ones
+   * since pushed out of `pending`, so the attempt budget can't be dodged by
+   * never revealing (§5.2).
+   */
+  enrolAttempts?: string[]
 }
 
 export class TrustStoreError extends Error {
@@ -230,6 +237,9 @@ export function parseTrustStore(text: string): TrustStore {
       ? v.revokedGrants.filter((g): g is RevokedGrant => !!g && typeof g === 'object' && str((g as RevokedGrant).grantId, 200) && str((g as RevokedGrant).at, 64)
         && ((g as RevokedGrant).keep === undefined || str((g as RevokedGrant).keep, 200)))
       : [],
+    ...(Array.isArray(v.enrolAttempts)
+      ? { enrolAttempts: v.enrolAttempts.filter((t): t is string => str(t, 64)).slice(-100) }
+      : {}),
   }
 }
 
@@ -468,6 +478,29 @@ export function setIntentPolicy(policy: unknown, file = relayDevicesPath(), mach
     store.policy = policy
     return store
   })
+}
+
+/** How strict each policy is, for "only raise" (§6.8). */
+export function policyRank(policy: IntentPolicy): number {
+  return INTENT_POLICIES.indexOf(policy)
+}
+
+/**
+ * Raise the policy on the owner's signed remote request (§6.8). Never lowers
+ * it; `required` needs an owner credential, as locally. Returns the policy
+ * now in force.
+ */
+export function raiseIntentPolicy(policy: IntentPolicy, file = relayDevicesPath(), machineId?: string, now = Date.now()): IntentPolicy {
+  return mutateTrustStore(file, machineId, store => {
+    if (policyRank(policy) < policyRank(store.policy)) {
+      throw new TrustStoreError('invalid_policy', 'Only this computer can lower its policy (Settings → Remote access)')
+    }
+    if (policy === 'required' && !store.credentials.some(c => store.ownerUserId !== null && c.userId === store.ownerUserId)) {
+      throw new TrustStoreError('no_credentials', 'Confirm at least one of your devices on this computer before requiring confirmed devices')
+    }
+    store.policy = policy
+    return store.policy
+  }, now)
 }
 
 /** Turn passkey-added browsers off (true) or on (false) for this machine. Local surfaces only. */

@@ -1,6 +1,6 @@
 /** Tests for the machine side of the enrolment ceremony (signed-intents spec §5.2, §11). */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { generateKeyPairSync, randomBytes } from 'crypto'
+import { createHash, generateKeyPairSync, randomBytes } from 'crypto'
 import type { KeyObject } from 'crypto'
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
@@ -10,7 +10,9 @@ import {
   transcript, verifyP1363, checkLabel,
 } from './enrolment-crypto.js'
 import { approveEnrolment, ENROL_TTL_MS, EnrolmentError, MachineEnrolment, MAX_ENROLMENTS_PER_WINDOW, MAX_PENDING_ENROLMENTS, rejectEnrolment } from './enrolment.js'
-import { ensureMachineIdentity } from './machine-identity.js'
+import { ensureMachineIdentity, keyIdForSpki } from './machine-identity.js'
+import { IntentVerifier } from './intent-verify.js'
+import { POLICY_ACTION, policyPayload } from './intent-actions.js'
 import { describeTrustStore, emptyTrustStore, readTrustStore, TrustStoreError, writeTrustStore } from './trust-store.js'
 import type { RelayPrincipal } from './relay-protocol.js'
 
@@ -289,4 +291,49 @@ describe('MachineEnrolment', () => {
     expect(readFileSync(devicesFile, 'utf8')).toContain(code)
     expect(quiet.log.mock.calls.flat().join(' ')).not.toContain(code)
   })
+
+  describe('policy (signed-intents spec §6.8)', () => {
+    const policyOf = () => readTrustStore(devicesFile)?.policy
+
+    it("turns enforcement on with the owner's first confirmed device, and only then", () => {
+      const first = approveEnrolment(startCeremony().code, devicesFile, 'm1', () => now)
+      expect(first.policyRaised).toBe(true)
+      expect(policyOf()).toBe('required')
+      const second = approveEnrolment(startCeremony(browser('Firefox')).code, devicesFile, 'm1', () => now)
+      expect(second.policyRaised).toBeUndefined()
+    })
+
+    it('leaves a policy the owner chose alone', () => {
+      writeTrustStore(devicesFile, { ...emptyTrustStore('m1', 'https://relay.test', 'u-owner'), policy: 'warn' })
+      expect(approveEnrolment(startCeremony().code, devicesFile, 'm1', () => now).policyRaised).toBeUndefined()
+      expect(policyOf()).toBe('warn')
+    })
+
+    it("raises the policy on the owner's signed request, never lowers it, and only for the owner", () => {
+      const b = browser()
+      approveEnrolment(startCeremony(b).code, devicesFile, 'm1', () => now)
+      const verifier = new IntentVerifier({ machineId: 'm1', devicesFile, now: () => now })
+      const withIntents = new MachineEnrolment({ machineId: 'm1', identityFile, devicesFile, secretStore: null, now: () => now, log: quiet, intents: verifier })
+      const sign = (policy: string, key = b) => {
+        const body = JSON.stringify({
+          v: 1, machineId: 'm1', sessionId: null, action: POLICY_ACTION, nonce: randomBytes(16).toString('base64url'), ts: now,
+          keyId: keyIdForSpki(key.spki.toString('base64url')),
+          payloadHash: createHash('sha256').update(policyPayload(policy)).digest('base64url'),
+        })
+        return { body, sig: signP1363(key.privateKey as KeyObject, Buffer.from(body)).toString('base64url') }
+      }
+      // Start from warn, as if the owner had lowered it here.
+      writeTrustStore(devicesFile, { ...readTrustStore(devicesFile)!, policy: 'warn' })
+      expect(() => withIntents.raisePolicy(OWNER, { policy: 'off', intent: sign('off') })).toThrow(/Only this computer/)
+      expect(policyOf()).toBe('warn')
+      // The intent must cover the policy asked for, and come from a confirmed key.
+      expect(() => withIntents.raisePolicy(OWNER, { policy: 'required', intent: sign('warn') })).toThrow(EnrolmentError)
+      expect(() => withIntents.raisePolicy(OWNER, { policy: 'required', intent: sign('required', browser()) })).toThrow(EnrolmentError)
+      expect(() => withIntents.raisePolicy(OWNER, { policy: 'required' })).toThrow(EnrolmentError)
+      expect(policyOf()).toBe('warn')
+      expect(withIntents.handle('enrol_policy', OWNER, { policy: 'required', intent: sign('required') }).payload).toMatchObject({ state: 'approved' })
+      expect(policyOf()).toBe('required')
+    })
+  })
 })
+

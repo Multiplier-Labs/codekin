@@ -114,6 +114,10 @@ export function runDevicesCommand(
         }
         const added = approveEnrolment(rest.join(''), devicesFile, paired.machineId)
         io.out(`Confirmed ${added.label}. It can now control this computer.`)
+        if (added.policyRaised) {
+          io.out('This computer now accepts control through the relay only from confirmed devices.')
+          io.out('To undo: codekin relay devices policy off')
+        }
         io.out('')
         io.out(`To finish, type this code in the browser:  ${added.confirmCode}`)
         return 0

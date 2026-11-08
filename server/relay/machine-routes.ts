@@ -55,6 +55,9 @@ export function createMachineRouter(db: Database.Database, hub?: ConnectorHub, c
           // Kept for clients older than updateRequired; same condition.
           connectorOutdated: (hub?.updateRequired(m.id) ?? null) !== null,
           sessions: hub?.sessionSummary(m.id) ?? null,
+          // The policy its connector reports (§6.8): whether the relay alone can control it.
+          intentPolicy: hub?.intentPolicy(m.id) ?? m.intent_policy ?? null,
+          confirmedDevices: hub?.confirmedDevicesState(m.id) ?? 'not_required',
           // Created by an install command that has not been run yet; the UI
           // offers resume/regenerate/cancel rather than "offline".
           setupPending,

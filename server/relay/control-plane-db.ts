@@ -43,6 +43,8 @@ export interface MachineRow {
   hostname: string | null
   platform: string | null
   connector_version: string | null
+  /** The intent policy the machine's connector last reported (§6.8). */
+  intent_policy?: string | null
   local_codekin_version: string | null
   status: 'online' | 'offline' | 'degraded'
   last_seen_at: string | null
@@ -454,6 +456,17 @@ const MIGRATIONS: Array<(db: Database.Database) => void> = [
     db.exec(`
       ALTER TABLE session_shares ADD COLUMN signed_grant TEXT;
       ALTER TABLE session_shares ADD COLUMN signed_grant_expires_at TEXT;
+    `)
+  },
+
+  // 16: enforcement (signed-intents spec §6.8): the policy each machine's
+  // connector reports, and the workspace's "Require confirmed devices" with an
+  // optional grace period during which it only warns.
+  db => {
+    db.exec(`
+      ALTER TABLE machines ADD COLUMN intent_policy TEXT;
+      ALTER TABLE workspaces ADD COLUMN require_confirmed_devices INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE workspaces ADD COLUMN confirmed_devices_grace_until TEXT;
     `)
   },
 ]

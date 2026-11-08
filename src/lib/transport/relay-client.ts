@@ -120,7 +120,7 @@ interface Pending {
 }
 
 /** Enrolment frames (signed-intents spec §5.2) and the reply each expects. */
-export type EnrolKind = 'enrol_commit' | 'enrol_reveal' | 'enrol_status' | 'enrol_certify' | 'enrol_revoke' | 'enrol_grant_revoke' | 'enrol_time'
+export type EnrolKind = 'enrol_commit' | 'enrol_reveal' | 'enrol_status' | 'enrol_certify' | 'enrol_revoke' | 'enrol_grant_revoke' | 'enrol_time' | 'enrol_policy'
 const ENROL_REPLY: Record<EnrolKind, string> = {
   enrol_commit: 'enrol_challenge',
   enrol_reveal: 'enrol_result',
@@ -129,6 +129,7 @@ const ENROL_REPLY: Record<EnrolKind, string> = {
   enrol_revoke: 'enrol_result',
   enrol_grant_revoke: 'enrol_result',
   enrol_time: 'enrol_result',
+  enrol_policy: 'enrol_result',
 }
 
 /** Callbacks for one proxied session stream. */

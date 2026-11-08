@@ -16,7 +16,8 @@
  * on neither of the connector's proxy allowlists, so the relay can never
  * read or change the list (a test in connector-proxy.test.ts pins this).
  * Approving needs the code the browser shows: the waiting requests listed
- * here never include it (enrolment.ts). Nothing enforces the policy yet.
+ * here never include it (enrolment.ts). Only these local surfaces can lower
+ * the policy; a remote request can only raise it (§6.8).
  */
 
 import { Router } from 'express'
@@ -144,7 +145,7 @@ export function createRelayDevicesRouter(
     try {
       const added = approveEnrolment(typeof code === 'string' ? code : '', devicesFile, machineId)
       // The owner types confirmCode in the browser, which pins this machine's key only then.
-      res.json({ added: { keyId: added.keyId, label: added.label, confirmCode: added.confirmCode } })
+      res.json({ added: { keyId: added.keyId, label: added.label, confirmCode: added.confirmCode, policyRaised: added.policyRaised === true } })
     } catch (err) {
       sendError(res, err)
     }

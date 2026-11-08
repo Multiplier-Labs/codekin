@@ -16,7 +16,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { IconCircleCheckFilled } from '@tabler/icons-react'
 import {
-  approveRelayDevice, getRelayDevices, rejectRelayEnrolment, revokeRelayDevice, setRelayLocalConfirmationOnly,
+  approveRelayDevice, getRelayDevices, rejectRelayEnrolment, revokeRelayDevice, setRelayDevicePolicy, setRelayLocalConfirmationOnly,
   type RelayDevices, type RelayDevice,
 } from '../../lib/ccApi'
 import { Block, Row, Rows, checkbox, input } from './Block'
@@ -49,13 +49,19 @@ interface Props {
   onError: (message: string) => void
 }
 
+const POLICY_DESCRIPTION: Record<'off' | 'warn' | 'required', string> = {
+  required: 'Requests through the relay must be signed by a device confirmed here. Only this computer can lower this.',
+  warn: 'Unsigned requests through the relay still run, and are logged. The relay can control this computer.',
+  off: "Signatures aren't checked. The relay can control this computer.",
+}
+
 export function RelayDevicesBlock({ token, onError }: Props) {
   const [data, setData] = useState<RelayDevices | null>(null)
   const [confirming, setConfirming] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [code, setCode] = useState('')
   const [codeError, setCodeError] = useState<string | null>(null)
-  const [added, setAdded] = useState<{ label: string; confirmCode: string } | null>(null)
+  const [added, setAdded] = useState<{ label: string; confirmCode: string; policyRaised?: boolean } | null>(null)
 
   const refresh = useCallback(async () => {
     setData(await getRelayDevices(token))
@@ -76,7 +82,7 @@ export function RelayDevicesBlock({ token, onError }: Props) {
     try {
       const device = await approveRelayDevice(token, code.trim())
       setCode('')
-      setAdded({ label: device.label, confirmCode: device.confirmCode })
+      setAdded({ label: device.label, confirmCode: device.confirmCode, policyRaised: device.policyRaised === true })
       await refresh()
     } catch (err) {
       setCodeError(err instanceof Error ? err.message : "Couldn't confirm the browser")
@@ -91,6 +97,16 @@ export function RelayDevicesBlock({ token, onError }: Props) {
       await refresh()
     } catch (err) {
       onError(err instanceof Error ? err.message : "Couldn't turn the request down")
+    }
+  }
+
+  const changePolicy = async (policy: 'off' | 'warn' | 'required') => {
+    if (policy !== 'required' && !window.confirm('Let the relay control this computer without a confirmed device? Anyone who can act as you on the relay, or the relay itself, could then run commands here.')) return
+    try {
+      await setRelayDevicePolicy(token, policy)
+      await refresh()
+    } catch (err) {
+      onError(err instanceof Error ? err.message : "Couldn't change the setting")
     }
   }
 
@@ -112,13 +128,35 @@ export function RelayDevicesBlock({ token, onError }: Props) {
   const devices = data.devices?.credentials ?? []
   const pending = data.devices?.pending ?? []
   const approved = data.devices?.approved ?? []
+  const policy = data.devices?.policy ?? 'off'
   return (
     <>
     <Block
       title="Devices that can control this computer"
-      description="Browsers you confirmed on this computer. Codekin doesn't check them yet: for now the relay is still trusted to say who is in control."
+      description={policy === 'required'
+        ? 'Browsers you confirmed on this computer. Only they can control it through the relay; the relay alone cannot.'
+        : 'Browsers you confirmed on this computer. The relay can still control it without one: confirm a browser to stop that.'}
     >
       <Rows>
+        {data.devices && (
+          <Row
+            label="Control through the relay"
+            htmlFor="relay-device-policy"
+            description={POLICY_DESCRIPTION[policy]}
+            control={
+              <select
+                id="relay-device-policy"
+                value={policy}
+                onChange={e => { void changePolicy(e.target.value as 'off' | 'warn' | 'required') }}
+                className="rounded-control border border-edge bg-page px-2 py-1.5 text-body text-ink focus:border-focus focus:outline-none"
+              >
+                <option value="required">Confirmed devices only</option>
+                <option value="warn">Anyone, with a warning</option>
+                <option value="off">Anyone the relay lets in</option>
+              </select>
+            }
+          />
+        )}
         <Row
           label="Confirm a browser"
           htmlFor="relay-device-code"
@@ -152,6 +190,11 @@ export function RelayDevicesBlock({ token, onError }: Props) {
               </p>
               <p className="mt-1 text-meta text-ink-muted">To finish, type this code in that browser:</p>
               <p className="mt-1 font-mono text-title tracking-widest text-ink" aria-label="Code for the browser">{added.confirmCode}</p>
+              {added.policyRaised && (
+                <p className="mt-2 text-meta text-ink-muted">
+                  It was your first device here, so this computer now takes control through the relay only from confirmed devices. You can change that below.
+                </p>
+              )}
             </div>
           )}
         </Row>
