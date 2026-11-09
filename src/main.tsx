@@ -7,6 +7,7 @@ import '@fontsource/lato/300.css'
 import '@fontsource/lato/400.css'
 import '@fontsource/lato/700.css'
 import './index.css'
+import { installDesktopLinkHandler } from './lib/desktopLinks'
 
 // VITE_APP_MODE=hosted builds the app.codekin.ai shell; the default build is
 // the local app. Lazy imports keep the other mode's bundle out of the build.
@@ -22,6 +23,9 @@ if (import.meta.env.VITE_APP_MODE === 'hosted') {
   void import('./hosted/errorReporting').then(m => { m.installErrorReporting() })
   void import('./hosted/stagingBadge').then(m => m.showStagingBadgeIfNeeded())
 }
+
+// Desktop app only: links to other sites open in the default browser.
+installDesktopLinkHandler()
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
