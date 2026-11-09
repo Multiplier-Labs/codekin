@@ -13,7 +13,7 @@ Update machines and the relay together. The new protections are enforced on each
 
 ### Added
 - **Confirm a browser with one pasted command.** **Confirm this browser** now shows a `codekin relay devices trust …` command to run once on the computer, and the browser finishes by itself. The hosted install command carries it, so a newly installed machine confirms the browser that set it up. The two codes stay as a fallback (#829, #830).
-- **Fewer passkey prompts.** After a passkey confirmation, that browser can confirm privileged session actions for 15 minutes without asking again. A machine can shorten this or turn it off (`codekin relay devices passkey-window <0-15>`), and the prompt says why it is asking (#834).
+- **Fewer passkey prompts.** After a passkey confirmation, that browser can confirm bypass sessions, pre-approved tools and "always allow" answers for up to 15 minutes without asking again. Device changes, shell-approving shares and standing automation still ask every time. A machine can shorten the window or turn it off (`codekin relay devices passkey-window <0-15>`); lowering it ends windows already open. The prompt says why it is asking (#834, #843).
 - `codekin relay devices passkey-required <on|off>`. Once a workspace turns on "Privileged actions need a passkey", the machine keeps the requirement until it is turned off there (#841).
 
 ### Changed
