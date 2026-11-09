@@ -12,7 +12,7 @@ import { marked } from 'marked'
 import { markedHighlight } from 'marked-highlight'
 import DOMPurify from 'dompurify'
 import hljs from '../lib/hljs'
-import { remoteImageHost, remoteImageLabel } from '../lib/remoteImage'
+import { classifyImageSrc, remoteImageLabel } from '../lib/remoteImage'
 
 let configured = false
 
@@ -36,17 +36,18 @@ function configurePipeline() {
     // Remote images become a link the user can open, never a fetch
     // (see lib/remoteImage.ts). The link is sanitized next, by this hook too.
     if (node.tagName === 'IMG') {
-      const src = node.getAttribute('src')
-      const host = remoteImageHost(src)
-      if (src && host) {
+      const image = classifyImageSrc(node.getAttribute('src'))
+      if (image.kind === 'remote') {
         const link = node.ownerDocument.createElement('a')
-        link.setAttribute('href', src)
-        link.setAttribute('title', src)
+        link.setAttribute('href', image.href)
+        link.setAttribute('title', image.href)
         link.setAttribute('class', 'external-image-link')
-        link.textContent = remoteImageLabel(host, node.getAttribute('alt'))
+        link.textContent = remoteImageLabel(image.host, node.getAttribute('alt'))
         node.replaceWith(link)
         return
       }
+      if (image.kind === 'blocked') node.removeAttribute('src')
+      else node.setAttribute('src', image.src)
     }
     if (node.tagName === 'A' && node.getAttribute('href')?.startsWith('http')) {
       node.setAttribute('target', '_blank')

@@ -6,25 +6,41 @@
  * session, grantees included, would fetch it. Turning the image into a link
  * closes that exfiltration path regardless of the CSP, and keeps transcripts
  * from contacting third-party hosts at all.
+ *
+ * Every src is resolved the way the browser resolves it (against the
+ * document's base URL) and judged by the resulting origin, so spellings that
+ * browsers read as another host, such as `https:/host` on an http page,
+ * `/\host` or `https:\\host`, count as remote too.
  */
 
+/** How an image src in rendered output is shown. */
+export type ImageSource =
+  /** Loads as an `<img>`: a `data:image/…` URL or a same-origin http(s) URL. */
+  | { kind: 'local'; src: string }
+  /** Would load from another origin: shown as a link to `href` instead. */
+  | { kind: 'remote'; href: string; host: string }
+  /** Not an image the page may load (empty, unparseable, or another scheme). */
+  | { kind: 'blocked' }
+
 /**
- * The host of an image URL that would load from another origin, or null for
- * `data:` and same-origin images (and anything that is not http(s)).
+ * Classify an image src. `pageUrl` is the URL relative srcs resolve against;
+ * it defaults to the document's base URL.
  */
-export function remoteImageHost(src: string | undefined | null, pageOrigin = currentOrigin()): string | null {
-  if (!src) return null
-  const trimmed = src.trim()
-  if (!/^(https?:)?\/\//i.test(trimmed)) return null
+export function classifyImageSrc(src: string | undefined | null, pageUrl = currentPageUrl()): ImageSource {
+  const trimmed = src?.trim()
+  if (!trimmed) return { kind: 'blocked' }
+  if (/^data:image\//i.test(trimmed)) return { kind: 'local', src: trimmed }
+  let page: URL
   let url: URL
   try {
-    url = new URL(trimmed, pageOrigin)
+    page = new URL(pageUrl)
+    url = new URL(trimmed, page)
   } catch {
-    return null
+    return { kind: 'blocked' }
   }
-  if (url.protocol !== 'https:' && url.protocol !== 'http:') return null
-  if (url.origin === pageOrigin) return null
-  return url.host
+  if (url.protocol !== 'https:' && url.protocol !== 'http:') return { kind: 'blocked' }
+  if (url.origin !== page.origin) return { kind: 'remote', href: url.href, host: url.host }
+  return { kind: 'local', src: url.href }
 }
 
 /** Text for the link that stands in for a remote image. */
@@ -33,6 +49,7 @@ export function remoteImageLabel(host: string, alt: string | undefined | null): 
   return description ? `External image: ${description} (${host})` : `External image (${host})`
 }
 
-function currentOrigin(): string {
-  return typeof window === 'undefined' ? 'null' : window.location.origin
+function currentPageUrl(): string {
+  if (typeof document !== 'undefined' && document.baseURI) return document.baseURI
+  return typeof window === 'undefined' ? 'about:blank' : window.location.href
 }

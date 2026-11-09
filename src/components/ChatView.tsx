@@ -14,7 +14,7 @@ import { memo, useEffect, useLayoutEffect, useRef, useCallback, useState } from 
 import Markdown, { type Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { ExternalImageLink } from './ExternalImageLink'
-import { remoteImageHost } from '../lib/remoteImage'
+import { classifyImageSrc } from '../lib/remoteImage'
 import DOMPurify from 'dompurify'
 import hljs from '../lib/hljs'
 import { IconArrowDown, IconRobotFace } from '@tabler/icons-react'
@@ -260,14 +260,13 @@ function markdownComponents(fontSize: number): Components {
       img({ src, alt, ...props }) {
         // Remote images become a link the user can open: loading them would let
         // agent output send data to any host (see lib/remoteImage.ts).
-        const remoteHost = remoteImageHost(src)
-        if (src && remoteHost) return <ExternalImageLink src={src} host={remoteHost} alt={alt} />
-        // Otherwise only same-origin https: and data: images load.
-        const safeSrc = src && /^(https:|data:image\/)/i.test(src) ? src : undefined
-        if (!safeSrc) return <span className="text-ink-muted">[image blocked: untrusted source]</span>
+        const image = classifyImageSrc(src)
+        if (image.kind === 'remote') return <ExternalImageLink src={image.href} host={image.host} alt={alt} />
+        // Otherwise only same-origin http(s) and data:image/ images load.
+        if (image.kind === 'blocked') return <span className="text-ink-muted">[image blocked: untrusted source]</span>
         return (
           <img
-            src={safeSrc}
+            src={image.src}
             alt={alt || 'Image'}
             className="max-w-full max-h-96 rounded-control border border-edge-strong my-2"
             loading="lazy"
