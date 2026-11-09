@@ -10,7 +10,18 @@
  * a `WebSocket` through `HostedRelayTransport.openSocket()`.
  */
 
-import type { RelayConnection } from './relay-client'
+import type { RelayConnection, RelayErrorPayload } from './relay-client'
+import { isDesktopApp } from '../../hosted/desktopAuth'
+
+/** What to tell the user about a channel refusal. */
+export function refusalMessage(error: RelayErrorPayload, desktop = isDesktopApp()): string {
+  // The desktop app's web view can't use passkeys (D12), so it can't take
+  // an action that needs one: say what will work instead.
+  if (error.detail === 'intent_step_up_required' && desktop) {
+    return `${error.message}. The Mac app can't use passkeys: start bypass sessions or save "always allow" rules from a browser, or use Auto approve here.`
+  }
+  return error.message
+}
 
 const CONNECTING = 0
 const OPEN = 1
@@ -80,7 +91,15 @@ export class RelayWebSocket {
         this.onmessage?.(makeMessageEvent(data))
       },
       onClose: (code, reason) => { this.finish(code, reason) },
-      onError: () => { this.onerror?.(makeEvent('error')) },
+      onError: error => {
+        // The chat shows a local server's `error` frame; a refusal from the
+        // relay or the machine (say, an action that needs a passkey) would
+        // otherwise only close the socket, and the app would quietly reconnect.
+        if (this.readyState === OPEN && error.message) {
+          this.onmessage?.(makeMessageEvent(JSON.stringify({ type: 'error', message: refusalMessage(error) })))
+        }
+        this.onerror?.(makeEvent('error'))
+      },
     })
   }
 
