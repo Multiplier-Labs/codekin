@@ -347,7 +347,9 @@ fn build_location_window(
         .on_new_window(move |url, _features| {
             open_external(&new_window_app, &url);
             NewWindowResponse::Deny
-        });
+        })
+        // The page's title carries how many sessions need you (Dock badge, notification).
+        .on_document_title_changed(|window, title| crate::attention::on_title(&window, &title));
     builder = match geometry {
         Some((x, y, w, h)) => builder.position(x, y).inner_size(w, h),
         None => builder.inner_size(1400.0, 900.0),
