@@ -24,12 +24,12 @@ import { existsSync, statSync } from 'fs'
 import {
   CHANNEL_OPEN_ACTION, CHANNEL_TOKEN_CHARS, INTENT_MAX_SKEW_MS, INTENT_VERSION, MACHINE_TIME_LABEL, MAX_INTENT_BODY_CHARS,
   GRANT_ACTION, MAX_GRANT_LIFETIME_MS, PASSKEY_ANY, actionNeedsStepUp, grantIssuedAt, grantNeedsStepUp, grantPayload, grantRevokedBy, intentChallengeInput, channelOpenPayload, channelSessionAfter, frameAction, frameNeedsStepUp, framePayload, frameSession,
-  isExemptFrame, requestAction, requestNeedsStepUp, requestPayload, requestSession,
+  frameStepUpReason, isExemptFrame, requestAction, requestNeedsStepUp, requestPayload, requestSession, requestStepUpReason, standingRouteReason,
 } from './intent-actions.js'
 import type { GrantBody, IntentBody, IntentRefusal, SignedGrant, SignedIntent } from './intent-actions.js'
 import { keyIdForSpki, parseP256Spki } from './machine-identity.js'
 import { fromB64url, SIGNATURE_BYTES, transcript, verifyP1363 } from './enrolment-crypto.js'
-import { mutateTrustStore, passkeyWindowMinutes, readTrustStore } from './trust-store.js'
+import { MAX_PASSKEY_WINDOW_MINUTES, mutateTrustStore, passkeyWindowMinutes, readTrustStore } from './trust-store.js'
 import type { BrowserCredential, IntentPolicy, PasskeyCredential, TrustedCredential, TrustStore } from './trust-store.js'
 import { verifyPasskeyAssertion } from './webauthn-verify.js'
 import type { IntentLog, IntentVerdict } from './intent-log.js'
@@ -88,6 +88,14 @@ interface Expected {
   opensChannel?: boolean
   /** A privileged action (§6.2): needs a passkey when the signer has one here. */
   privileged?: boolean
+  /**
+   * A privileged session action a recent passkey step-up may cover (§6.6b),
+   * as the machine classifies it: bypass or pre-approved tools, or an
+   * "always allow" answer. Standing authority (orchestrator trust, scheduled
+   * or triggered automations), device changes and anything unclassifiable
+   * always need the passkey itself.
+   */
+  windowEligible?: boolean
 }
 
 export interface IntentVerifierOptions {
@@ -199,7 +207,7 @@ export class IntentVerifier {
    * privileged session actions with its own key, opened by a passkey
    * step-up that named it. In memory: a restart just asks again.
    */
-  private stepUpWindows = new Map<string, number>()
+  private stepUpWindows = new Map<string, { openedAt: number; passkeyKeyId: string }>()
   private readonly now: () => number
 
   constructor(private readonly opts: IntentVerifierOptions) {
@@ -276,6 +284,7 @@ export class IntentVerifier {
       sessionId: requestSession(req.path),
       payload: requestPayload(req.method, req.path, req.contentType, body),
       privileged: requestNeedsStepUp(req.method, req.path, body),
+      windowEligible: requestStepUpReason(req.method, req.path, body) !== null && standingRouteReason(req.method, req.path) === null,
     }).decision
   }
 
@@ -334,6 +343,7 @@ export class IntentVerifier {
       payload: framePayload(frame),
       channel,
       privileged: frameNeedsStepUp(frame),
+      windowEligible: frameStepUpReason(frame) !== null,
     })
     if (decision.verdict === 'accepted' && body?.seq !== undefined) channel.lastSeq = body.seq
     // What reaches the local server moves the session, signed or not.
@@ -429,7 +439,7 @@ export class IntentVerifier {
     let stepUp: StepUp | undefined
     const deviceChange = actionNeedsStepUp(expected.action)
     if (ownerCredential && (expected.privileged || deviceChange)) {
-      const recent = !deviceChange && ownerCredential.kind === 'browser' && this.withinStepUpWindow(store, ownerCredential)
+      const recent = !deviceChange && expected.windowEligible === true && ownerCredential.kind === 'browser' && this.withinStepUpWindow(store, ownerCredential)
       if (!recent) {
         const refusal = this.stepUpRefusal(store, ownerCredential)
         if (refusal) return refusal
@@ -440,7 +450,7 @@ export class IntentVerifier {
     const replay = this.replay.consume(principal.userId, body.nonce, this.now())
     if (replay) return replay
     if (ownerCredential) this.noteUsed(signerKeyId)
-    if (stepUp === 'passkey' && !deviceChange && ownerCredential) this.openStepUpWindow(store, ownerCredential.userId, body.browserKeyId)
+    if (stepUp === 'passkey' && !deviceChange && ownerCredential) this.openStepUpWindow(store, ownerCredential, body.browserKeyId, body.ts)
     return { keyId: signerKeyId, ...(stepUp ? { stepUp } : {}) }
   }
 
@@ -467,9 +477,16 @@ export class IntentVerifier {
   /** Why a privileged action by this owner credential needs more, or null. */
   /** Whether this browser key is inside a passkey step-up's window (§6.6b). */
   private withinStepUpWindow(store: TrustStore, credential: TrustedCredential): boolean {
-    if (passkeyWindowMinutes(store) === 0) return false
-    const until = this.stepUpWindows.get(`${credential.userId}:${credential.keyId}`)
-    return until !== undefined && until > this.now()
+    const minutes = passkeyWindowMinutes(store)
+    if (minutes === 0) return false
+    const window = this.stepUpWindows.get(`${credential.userId}:${credential.keyId}`)
+    if (!window) return false
+    // The passkey that opened it must still be on the machine.
+    if (!store.credentials.some(c => c.kind === 'passkey' && c.keyId === window.passkeyKeyId)) return false
+    const t = this.now()
+    // Measured from when the passkey was used, against today's setting (a
+    // lowered window takes effect at once); a clock that went back ends it.
+    return t >= window.openedAt - INTENT_MAX_SKEW_MS && t < window.openedAt + minutes * 60_000
   }
 
   /**
@@ -477,14 +494,16 @@ export class IntentVerifier {
    * if it is one of the same user's confirmed browsers here, confirm
    * privileged session actions with its own key for the machine's window.
    */
-  private openStepUpWindow(store: TrustStore, userId: string, browserKeyId: string | undefined): void {
+  private openStepUpWindow(store: TrustStore, passkey: TrustedCredential, browserKeyId: string | undefined, signedAt: number): void {
     const minutes = passkeyWindowMinutes(store)
     if (!browserKeyId || minutes === 0) return
+    const userId = passkey.userId
     const browser = store.credentials.find(c => c.kind === 'browser' && c.keyId === browserKeyId && c.userId === userId)
     if (!browser) return
     const t = this.now()
-    for (const [k, until] of this.stepUpWindows) if (until <= t) this.stepUpWindows.delete(k)
-    this.stepUpWindows.set(`${userId}:${browserKeyId}`, t + minutes * 60_000)
+    for (const [k, w] of this.stepUpWindows) if (w.openedAt + MAX_PASSKEY_WINDOW_MINUTES * 60_000 <= t) this.stepUpWindows.delete(k)
+    // From when the passkey signed, not when the relay chose to deliver it.
+    this.stepUpWindows.set(`${userId}:${browserKeyId}`, { openedAt: Math.min(t, signedAt), passkeyKeyId: passkey.keyId })
   }
 
   private stepUpRefusal(store: TrustStore, credential: TrustedCredential): IntentRefusal | null {

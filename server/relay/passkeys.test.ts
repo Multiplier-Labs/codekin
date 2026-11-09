@@ -14,7 +14,7 @@ import { POP_LABEL, commitment, shortAuthString, signP1363, transcript } from '.
 import type { EnrolPasskey } from './enrolment-crypto.js'
 import {
   DEVICE_CERTIFY_ACTION, DEVICE_REVOKE_ACTION, PASSKEY_ANY, PASSKEY_PROOF_LABEL, certifyPayload, channelSessionAfter, frameAction, framePayload, frameSession,
-  encodePasskeyProofs, frameNeedsStepUp, frameStepUpReason, intentChallengeInput, requestNeedsStepUp, requestStepUpReason, revokePayload,
+  encodePasskeyProofs, frameNeedsStepUp, frameStepUpReason, intentChallengeInput, requestAction, requestNeedsStepUp, requestPayload, requestSession, requestStepUpReason, revokePayload,
 } from './intent-actions.js'
 import type { IntentBody, SignedIntent } from './intent-actions.js'
 import { IntentVerifier } from './intent-verify.js'
@@ -287,9 +287,9 @@ describe('passkeys on the machine', () => {
         const opened = timed.checkChannelOpen(OWNER, browserIntent(b, { action: 'channel:open', payload: new Uint8Array(), channel: ch.token, ts: clock }))
         // The session each frame acts on moves as the client tracks it.
         let session: string | null = null
-        const send = (frame: string, how: 'browser' | 'passkey' | 'passkey-unnamed' = 'browser', named = b) => {
+        const send = (frame: string, how: 'browser' | 'passkey' | 'passkey-unnamed' = 'browser', named = b, signedAgoMs = 0) => {
           const seq = ++ch.seq
-          const fields = { action: frameAction(frame), sessionId: frameSession(frame, session), payload: framePayload(frame), channel: ch.token, seq, ts: clock }
+          const fields = { action: frameAction(frame), sessionId: frameSession(frame, session), payload: framePayload(frame), channel: ch.token, seq, ts: clock - signedAgoMs }
           const intent = how === 'browser' ? browserIntent(b, fields)
             : passkeyIntent(how === 'passkey' ? { ...fields, browserKeyId: named.keyId } : fields)
           const decision = timed.checkFrame(OWNER, frame, intent, opened.channel)
@@ -310,6 +310,53 @@ describe('passkeys on the machine', () => {
         expect(send(always).verdict).toBe('accepted')
         expect(readRecentIntents(logFile, { limit: 1 })[0]).toMatchObject({ stepUp: 'passkey-recent' })
         clock += 2 * 60_000
+        expect(send(bypass).reason).toBe('intent_step_up_required')
+      })
+
+      /** A browser-key-signed REST call, as the hosted UI sends it. */
+      function rest(b: ReturnType<typeof browserKey>, method: string, path: string, bytes: Uint8Array) {
+        const intent = browserIntent(b, {
+          action: requestAction(method, path), sessionId: requestSession(path), payload: requestPayload(method, path, 'application/json', bytes), ts: clock,
+        })
+        return timed.checkRequest({ method, path, contentType: 'application/json', body: Buffer.from(bytes).toString('base64'), principal: OWNER, intent })
+      }
+
+      it('never covers standing authority or unclassifiable requests', () => {
+        const { b } = enrolWithPasskey()
+        const send = open(b)
+        expect(send(bypass, 'passkey').verdict).toBe('accepted')
+        const json = new TextEncoder().encode('{"cron":"0 * * * *"}')
+        expect(rest(b, 'POST', '/api/workflows/schedules', json).reason).toBe('intent_step_up_required')
+        expect(rest(b, 'POST', '/api/orchestrator/trust/pin', json).reason).toBe('intent_step_up_required')
+        expect(rest(b, 'PATCH', '/api/workflows/config/repos/r1', json).reason).toBe('intent_step_up_required')
+        // A body the machine can't read is privileged, and never window-covered.
+        expect(rest(b, 'POST', '/api/sessions/create', new Uint8Array([0xff, 0xfe, 0x7b, 0x00])).reason).toBe('intent_step_up_required')
+        // A readable bypass create is.
+        expect(rest(b, 'POST', '/api/sessions/create', new TextEncoder().encode('{"permissionMode":"bypassPermissions"}')).verdict).toBe('accepted')
+      })
+
+      it('ends a window at once when the machine lowers its setting, or the passkey is removed', () => {
+        const { b } = enrolWithPasskey()
+        const send = open(b)
+        expect(send(bypass, 'passkey').verdict).toBe('accepted')
+        clock += 6 * 60_000
+        expect(send(bypass).verdict).toBe('accepted')
+        setPasskeyWindow(5, devicesFile, 'm1')
+        expect(send(bypass).reason).toBe('intent_step_up_required')
+        setPasskeyWindow(15, devicesFile, 'm1')
+        expect(send(bypass).verdict).toBe('accepted')
+        // With the passkey gone the window is gone too: what's left is the
+        // weaker browser-key step-up (no passkey enrolled here, D2).
+        revokeCredential(keyIdForCoseKey(passkey.cosePublicKey), devicesFile, 'm1')
+        expect(send(bypass).verdict).toBe('accepted')
+        expect(readRecentIntents(logFile, { limit: 1 })[0]).toMatchObject({ stepUp: 'browser-key' })
+      })
+
+      it('runs from when the passkey signed, however late the relay delivers it', () => {
+        const { b } = enrolWithPasskey()
+        const send = open(b)
+        expect(send(bypass, 'passkey', b, 4 * 60_000).verdict).toBe('accepted')
+        clock += 11 * 60_000 + 30_000
         expect(send(bypass).reason).toBe('intent_step_up_required')
       })
 

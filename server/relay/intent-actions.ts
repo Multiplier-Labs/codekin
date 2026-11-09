@@ -333,7 +333,7 @@ const STANDING_ROUTES: ReadonlyArray<{ method: string; route: RegExp; reason: St
   { method: 'PUT', route: /^\/api\/workflows\/(schedules|config\/repos)(\/[^/]+)?$/, reason: 'automation' },
 ]
 
-function standingRouteReason(method: string, path: string): StepUpReason | null {
+export function standingRouteReason(method: string, path: string): StepUpReason | null {
   const m = method.toUpperCase()
   const route = routeOf(path)
   return STANDING_ROUTES.find(r => r.method === m && r.route.test(route))?.reason ?? null
