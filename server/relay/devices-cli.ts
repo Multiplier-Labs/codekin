@@ -17,7 +17,7 @@ import { readRelayCredentialIdentity, relayCredentialPath } from './relay-creden
 import { readMachineIdentity } from './machine-identity.js'
 import { trustPathsFor } from './machine-trust.js'
 import {
-  describeTrustStore, INTENT_POLICIES, MAX_PASSKEY_WINDOW_MINUTES, readTrustStore, revokeCredential, setIntentPolicy, setLocalConfirmationOnly, setPasskeyWindow, setRequirePasskeyStepUp, TrustStoreError,
+  describeTrustStore, INTENT_POLICIES, MAX_PASSKEY_WINDOW_MINUTES, readTrustStore, revokeCredential, setIntentPolicy, setLocalConfirmationOnly, setPasskeyForBypass, setPasskeyWindow, setRequirePasskeyStepUp, TrustStoreError,
 } from './trust-store.js'
 import type { TrustStoreView } from './trust-store.js'
 import { approveEnrolment, approveTrustToken, rejectEnrolment } from './enrolment.js'
@@ -29,7 +29,7 @@ export interface DevicesCliIo {
 }
 
 export const DEVICES_USAGE = [
-  'Usage: codekin relay devices <list|trust|approve|reject|revoke|policy|passkey-adds|passkey-required|passkey-window>',
+  'Usage: codekin relay devices <list|trust|approve|reject|revoke|policy|passkey-adds|passkey-required|passkey-for-bypass|passkey-window>',
   '  list   [--json]                   Show the devices that can control this computer',
   '  trust <token>                     Confirm the browser that showed this command',
   '  approve <code>                    Confirm the browser showing this code',
@@ -38,6 +38,7 @@ export const DEVICES_USAGE = [
   `  policy <${INTENT_POLICIES.join('|')}>         Set whether devices must sign what they send`,
   '  passkey-adds <on|off>             Whether your passkey may add a browser without a code typed here',
   '  passkey-required <on|off>         Whether privileged actions always need a passkey (the workspace can turn it on)',
+  '  passkey-for-bypass <on|off>       Whether bypass permissions need a passkey too (off: a confirmed device will do)',
   `  passkey-window <0-${MAX_PASSKEY_WINDOW_MINUTES}>          Minutes a passkey confirmation covers its browser (0: ask every time)`,
 ]
 
@@ -62,6 +63,7 @@ function printList(view: TrustStoreView, identityKeyId: string | null, io: Devic
     ? 'passkey asked every time'
     : `passkey asked, then not again on that browser for ${view.passkeyWindowMinutes} min`}`)
   io.out(`Privileged:   ${view.requirePasskeyStepUp ? 'always need a passkey' : 'need a passkey from people with one enrolled here'}`)
+  io.out(`Bypass:       ${view.passkeyForBypass ? 'needs a passkey too' : 'a confirmed device will do'}`)
   if (view.policy !== 'required') {
     io.out(view.policy === 'warn'
       ? 'Unsigned or badly signed actions are logged, not refused. To refuse them: codekin relay devices policy required'
@@ -217,6 +219,17 @@ export function runDevicesCommand(
         io.out(rest[0] === 'on'
           ? 'Privileged actions on this computer need a passkey.'
           : 'Privileged actions need a passkey only from people with one enrolled here. The workspace setting can turn this on again.')
+        return 0
+      }
+      case 'passkey-for-bypass': {
+        if (rest[0] !== 'on' && rest[0] !== 'off') {
+          io.err('Usage: codekin relay devices passkey-for-bypass <on|off>')
+          return 1
+        }
+        setPasskeyForBypass(rest[0] === 'on', devicesFile, paired.machineId)
+        io.out(rest[0] === 'on'
+          ? 'Bypass permissions on this computer need a passkey.'
+          : 'A confirmed device can start bypass sessions here. "Always allow" rules, pre-approved tools, automations and device changes still need a passkey.')
         return 0
       }
       case 'passkey-window': {

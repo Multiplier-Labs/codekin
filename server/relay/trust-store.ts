@@ -138,6 +138,12 @@ export interface TrustStore {
    * surface turns it off, so a relay can't drop the requirement.
    */
   requirePasskeyStepUp?: boolean
+  /**
+   * Bypass permissions (creating a session in it, or switching one to it)
+   * need a passkey (§6.2). Off by default: a confirmed device may do it.
+   * Local surfaces only.
+   */
+  passkeyForBypass?: boolean
   credentials: TrustedCredential[]
   /** Enrolment requests, until they expire. */
   pending: PendingEnrolment[]
@@ -265,6 +271,7 @@ export function parseTrustStore(text: string): TrustStore {
     ...(v.localConfirmationOnly === true ? { localConfirmationOnly: true } : {}),
     ...(isPasskeyWindow(v.passkeyWindowMinutes) ? { passkeyWindowMinutes: v.passkeyWindowMinutes } : {}),
     ...(v.requirePasskeyStepUp === true ? { requirePasskeyStepUp: true } : {}),
+    ...(v.passkeyForBypass === true ? { passkeyForBypass: true } : {}),
     credentials,
     // An unreadable request is only a request: dropping it is harmless.
     pending: Array.isArray(v.pending) ? v.pending.map(parsePending).filter((e): e is PendingEnrolment => e !== null) : [],
@@ -586,6 +593,15 @@ export function setPasskeyWindow(minutes: unknown, file = relayDevicesPath(), ma
   })
 }
 
+/** Ask for the passkey for bypass permissions too (true), or let a confirmed device turn it on (false). Local surfaces only. */
+export function setPasskeyForBypass(value: boolean, file = relayDevicesPath(), machineId?: string): TrustStore {
+  return mutateTrustStore(file, machineId, store => {
+    if (value) store.passkeyForBypass = true
+    else delete store.passkeyForBypass
+    return store
+  })
+}
+
 /** Require a passkey for privileged actions (true), or stop requiring it (false). Local surfaces only. */
 export function setRequirePasskeyStepUp(value: boolean, file = relayDevicesPath(), machineId?: string): TrustStore {
   return mutateTrustStore(file, machineId, store => {
@@ -621,6 +637,8 @@ export interface TrustStoreView {
   passkeyWindowMinutes: number
   /** §6.6: privileged actions need a passkey, whether or not one is enrolled for the signer. */
   requirePasskeyStepUp: boolean
+  /** §6.2: bypass permissions need a passkey too. */
+  passkeyForBypass: boolean
   credentials: Array<Pick<TrustedCredential, 'keyId' | 'kind' | 'userId' | 'label' | 'addedAt' | 'addedBy' | 'lastUsedAt'>>
   /**
    * Requests waiting for their code, newest first. The code itself is never
@@ -652,6 +670,7 @@ export function describeTrustStore(store: TrustStore, now = Date.now()): TrustSt
     localConfirmationOnly: store.localConfirmationOnly === true,
     passkeyWindowMinutes: passkeyWindowMinutes(store),
     requirePasskeyStepUp: store.requirePasskeyStepUp === true,
+    passkeyForBypass: store.passkeyForBypass === true,
     credentials: store.credentials.map(c => ({
       keyId: c.keyId,
       kind: c.kind,

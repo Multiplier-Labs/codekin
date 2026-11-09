@@ -35,7 +35,7 @@ import { createIntentSigner } from './intentSigner'
 import { MachineEnrolment, approveEnrolment } from '../../server/relay/enrolment'
 import { IntentVerifier } from '../../server/relay/intent-verify'
 import { ensureMachineIdentity } from '../../server/relay/machine-identity'
-import { emptyTrustStore, readTrustStore, writeTrustStore } from '../../server/relay/trust-store'
+import { emptyTrustStore, readTrustStore, setPasskeyForBypass, writeTrustStore } from '../../server/relay/trust-store'
 import { channelSessionAfter, frameAction, framePayload, frameSession, frameStepUpReason } from '../../server/relay/intent-actions'
 import { PASSKEY_STEP_UP_EVENT, type PasskeyStepUpDetail } from './intentSigner'
 import { keyIdForCoseKey } from '../../server/relay/webauthn-verify'
@@ -126,12 +126,43 @@ describe('passkeys from the browser to the machine', () => {
     expect(verifier.checkFrame(OWNER, always, plain, opened.channel).stepUpPasskeys).toHaveLength(1)
   })
 
+  it('starts bypass sessions without a passkey by default, and learns when a machine asks for one', async () => {
+    vi.stubGlobal('window', { addEventListener: () => {}, dispatchEvent: () => true })
+    vi.stubGlobal('CustomEvent', class<T> { constructor(readonly type: string, init: { detail: T }) { this.detail = init.detail } detail: T })
+    const storage = memoryStorage()
+    await enrolWithCodes(storage)
+    const signer = createIntentSigner('m1', storage)
+    const token = 'C'.repeat(22)
+    const opened = verifier.checkChannelOpen(OWNER, await signer.sign({ action: 'channel:open', sessionId: null, payload: new Uint8Array(), channel: token }))
+    let seq = 0
+    const toBypass = '{"type":"set_permission_mode","permissionMode":"bypassPermissions"}'
+    const send = async () => {
+      seq += 1
+      const intent = await signer.sign({ action: frameAction(toBypass), sessionId: null, payload: framePayload(toBypass), channel: token, seq, stepUp: true, stepUpReason: 'bypass' })
+      return verifier.checkFrame(OWNER, toBypass, intent, opened.channel)
+    }
+    const before = fake.asserted
+    expect((await send()).verdict).toBe('accepted')
+    expect(fake.asserted).toBe(before)
+    // The owner turns the strict setting on: the browser is refused once, learns, then asks.
+    setPasskeyForBypass(true, devicesFile, 'm1')
+    const refused = await send()
+    expect(refused.reason).toBe('intent_step_up_required')
+    await signer.learnPasskeys(refused.stepUpPasskeys!, 'bypass')
+    expect(storage.pins.get('u-owner:m1')?.passkeyForBypass).toBe(true)
+    expect((await send()).verdict).toBe('accepted')
+    expect(fake.asserted).toBe(before + 1)
+  })
+
   it('asks for the passkey once for bypass sessions, then not again on this browser for a while (§6.6b)', async () => {
     const events: PasskeyStepUpDetail[] = []
     vi.stubGlobal('window', { addEventListener: () => {}, dispatchEvent: (e: CustomEvent<PasskeyStepUpDetail>) => { if (e.type === PASSKEY_STEP_UP_EVENT) events.push(e.detail); return true } })
     vi.stubGlobal('CustomEvent', class<T> { constructor(readonly type: string, init: { detail: T }) { this.detail = init.detail } detail: T })
     const storage = memoryStorage()
     await enrolWithCodes(storage)
+    // A machine that asks for the passkey for bypass, and a browser that learned so.
+    setPasskeyForBypass(true, devicesFile, 'm1')
+    storage.pins.set('u-owner:m1', { ...storage.pins.get('u-owner:m1')!, passkeyForBypass: true })
     const signer = createIntentSigner('m1', storage)
     const token = 'B'.repeat(22)
     const opened = verifier.checkChannelOpen(OWNER, await signer.sign({ action: 'channel:open', sessionId: null, payload: new Uint8Array(), channel: token }))
