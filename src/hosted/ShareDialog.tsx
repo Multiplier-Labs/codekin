@@ -9,7 +9,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { currentWorkspaceId, fetchMembers, workspaceHeaders, type WorkspaceMember } from './workspace'
 import {
-  fetchGranteeKeys, fingerprint, flushRevocations, grantStatus, proposeGrant, recordShare, revokeShareGrants, signGrant,
+  fetchGranteeKeys, fingerprint, flushRevocations, grantStatus, proposeGrant, recordShare, revokeShareGrants, revokeUnlistedShares, signGrant,
   type GrantProposal, type GrantStatus, type GrantTransport, type ShareWithGrant,
 } from './grants'
 import { transport } from '../lib/transport'
@@ -101,6 +101,13 @@ export function ShareDialog({ machineId, sessionId, sessionName, onClose }: Shar
       const data = (await res.json()) as { shared?: SessionShare[] }
       const mine = (data.shared ?? []).filter(s => s.machineId === machineId && s.localSessionId === sessionId)
       setShares(mine)
+      // A share the relay dropped (say, its member left the workspace) still
+      // has a grant on the machine until this browser revokes it there.
+      const t = grantTransport()
+      if (t) {
+        const left = await revokeUnlistedShares(t, machineId, sessionId, new Set(mine.map(s => s.id))).catch(() => ['?'])
+        if (left) setPendingRevocations(left.length)
+      }
       const statuses = await Promise.all(mine.map(async share => [share.id, grantStatus(share, await fetchGranteeKeys(share.id))] as const))
       setGrants(Object.fromEntries(statuses))
     } catch {
@@ -141,7 +148,9 @@ export function ShareDialog({ machineId, sessionId, sessionName, onClose }: Shar
       // Remember what the owner chose: Allow signs this, whatever the relay lists later.
       const created = (await res.json().catch(() => null)) as { share?: { id?: string } } | null
       if (created?.share?.id) {
-        await recordShare(machineId, { shareId: created.share.id, sessionId, granteeUserId: granteeId, role, notAfter: null }).catch(() => {})
+        const narrowed = await recordShare(machineId, { shareId: created.share.id, sessionId, granteeUserId: granteeId, role, notAfter: null }).catch(() => false)
+        // Narrowing retires the broader grant on the machine now; say if that is still waiting.
+        if (narrowed) await retryRevocations()
       }
       setGranteeId('')
       await loadShares()
@@ -186,7 +195,9 @@ export function ShareDialog({ machineId, sessionId, sessionName, onClose }: Shar
     setBusy(true)
     setError(null)
     try {
-      await signGrant(t, review)
+      const left = await signGrant(t, review)
+      // Until the machine confirms, an earlier (perhaps broader) grant may still count there.
+      setPendingRevocations(left.length)
       setReview(null)
       await loadShares()
     } catch (err) {
@@ -313,7 +324,7 @@ export function ShareDialog({ machineId, sessionId, sessionName, onClose }: Shar
 
         {pendingRevocations > 0 && (
           <div className="mb-4 flex items-center gap-2 text-meta text-warning-5">
-            <span className="flex-1">Revocation not yet confirmed by the computer ({pendingRevocations}).</span>
+            <span className="flex-1">Not yet confirmed by the computer ({pendingRevocations}): earlier or removed access may still work there.</span>
             <button onClick={() => void retryRevocations()} className="text-primary-5 hover:underline">Retry</button>
           </div>
         )}
