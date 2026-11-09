@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.2] - 2026-11-09
+
+Update machines and the relay together. The new protections are enforced on each machine, so they only take effect on machines running 0.11.2. (0.11.1 was never published.)
+
+### Added
+- **Confirm a browser with one pasted command.** **Confirm this browser** now shows a `codekin relay devices trust …` command to run once on the computer, and the browser finishes by itself. The hosted install command carries it, so a newly installed machine confirms the browser that set it up. The two codes stay as a fallback (#829, #830).
+- **Bypass sessions need only a confirmed device.** Starting a session in bypass permissions, or switching one to it, no longer asks for a passkey, so it works from the Mac app too. Pre-approved tools, "always allow" rules, automations, Joe trust, shell-approving shares and device changes still need the passkey. To keep asking for bypass as well, run `codekin relay devices passkey-for-bypass on` on the computer (#846).
+- **Fewer passkey prompts.** After a passkey confirmation, that browser can confirm pre-approved tools and "always allow" answers (and bypass, where the computer asks for it) for up to 15 minutes without asking again. Device changes, shell-approving shares and standing automation still ask every time. A machine can shorten the window or turn it off (`codekin relay devices passkey-window <0-15>`); lowering it ends windows already open. The prompt says why it is asking (#834, #843).
+- `codekin relay devices passkey-required <on|off>`. Once a workspace turns on "Privileged actions need a passkey", the machine keeps the requirement until it is turned off there (#841).
+
+### Changed
+- The confirm-browser panel is one clear panel per machine, with clearer steps (#827, #828).
+- Pinning or approving Joe's trust, and creating or changing scheduled or webhook-triggered automations, now count as privileged actions (#841).
+- `codekin relay devices trust` and `approve` refuse to run inside a Codekin session. Run them in a terminal on the computer or over SSH (#831, #837).
+- Remote images are judged by the host the browser actually loads them from. The local server and the desktop app allow fewer image sources (#840).
+- The connector keeps webhook replay history in `relay-webhook-deliveries.sqlite`, shared by every connector on the machine. The old JSON file is imported once (#835).
+
+### Fixed
+- The connector checks every message from the relay before acting on it, and a malformed message can no longer stop it (#832).
+- Narrowing a share, or removing its member from the workspace, now takes effect on the machine. The share dialog says while the computer hasn't confirmed it yet (#833).
+- An open session stops receiving output once the device that opened it is removed from the computer (#841).
+- Pasting a trust command into Settings → Remote access works: the field no longer changes its case (#837).
+- The machine limits how much grant checking a single request can cause (#836).
+- The relay limits how many audit rows one user's traffic writes, and answers malformed request bodies with a 400 without logging them (#839).
+- Settings can be closed from the home screen when a machine can be opened (#838).
+- In the web app and the Mac app, an action the computer refuses (for example a bypass session that needs a passkey) now shows an error instead of doing nothing. The Mac app, which can't use passkeys, says what works instead (#844).
+- In the Mac app, links to other sites in the chat open in your default browser (#845).
+- `codekin relay devices list` no longer says signatures aren't checked (#841).
+
 ## [0.11.0] - 2026-11-08
 
 Relays and machines should update together. A relay on 0.11.0 applies schema migrations 12–16 at start. Machines on older Codekin keep working unsigned, but only 0.11.0 or later can confirm browsers and enforce signed control (the relay's `intents` floor).
