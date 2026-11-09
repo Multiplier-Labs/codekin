@@ -53,6 +53,23 @@ export function liveChannelPolicy(
   }
 }
 
+/** How often an owner channel re-checks its device while output flows. */
+const OWNER_CHANNEL_CHECK_MS = 1000
+
+/** Check at most once a second; once ended, stay ended. */
+function ownerChannelCheck(check: () => string | null): () => string | null {
+  let lastAt = -Infinity
+  let ended: string | null = null
+  return () => {
+    if (ended) return ended
+    const now = Date.now()
+    if (now - lastAt < OWNER_CHANNEL_CHECK_MS) return null
+    lastAt = now
+    ended = check()
+    return ended
+  }
+}
+
 /** The relay error for a refused intent (signed-intents spec §6.4, "Refusals"). */
 function intentError(verdict: IntentDecision): RelayError {
   return {
@@ -97,7 +114,7 @@ export interface ConnectorOptions {
   policyWatchMs?: number
   /** Checks signed intents on everything the relay delivers (intent-verify.ts). */
   intents?: Pick<IntentVerifier, 'checkRequest' | 'checkChannelOpen' | 'checkFrame'>
-    & Partial<Pick<IntentVerifier, 'setRequirePasskey' | 'effectivePrincipal' | 'grantsVersion' | 'policy'>>
+    & Partial<Pick<IntentVerifier, 'setRequirePasskey' | 'effectivePrincipal' | 'grantsVersion' | 'policy' | 'ownerChannelEnded'>>
 }
 
 export type ConnectorStatus =
@@ -492,6 +509,7 @@ export class RelayConnector {
       this.opts.socketFactory,
       policy,
       intents && opened ? (frame, intent) => intents.checkFrame(principal, frame, intent, opened.channel) : undefined,
+      principal.role === 'owner' && intents?.ownerChannelEnded && opened ? ownerChannelCheck(() => intents.ownerChannelEnded!(opened.channel)) : undefined,
     )
 
     this.channels.set(channelId, channel)

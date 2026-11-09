@@ -73,6 +73,8 @@ export interface IntentChannel {
   lastSeq: number
   /** The session frames on this channel act on (intent-actions channelSessionAfter). */
   session: string | null
+  /** The device-list key that signed the open; null when it went through unsigned. */
+  signerKeyId?: string | null
 }
 
 /** What a message claims to do, worked out from the message itself. */
@@ -239,12 +241,24 @@ export class IntentVerifier {
   }
 
   /**
-   * Set from the relay's hello_ack. The relay can only make this stricter
-   * for itself by lying: claiming false just leaves the machine-side rule
-   * (a passkey enrolled here is always required) in force.
+   * The workspace's "Privileged actions need a passkey", from the relay's
+   * hello_ack and policy events. Turning it on is recorded on the machine
+   * (relay-devices.json → requirePasskeyStepUp), where only a local surface
+   * turns it off again: the relay can raise the requirement, never drop it.
    */
   setRequirePasskey(value: boolean): void {
     this.requirePasskey = value
+    if (!value) return
+    const store = this.currentStore()
+    if (!store || store.requirePasskeyStepUp === true) return
+    try {
+      // No waiting for the lock: this runs on the connector's message path.
+      mutateTrustStore(this.opts.devicesFile, this.opts.machineId, s => { s.requirePasskeyStepUp = true }, this.now(), 0)
+      this.storeSignature = null
+    } catch {
+      // Not recorded this time (lock busy, file unreadable): it still holds
+      // in memory, and the relay says it again at the next connect.
+    }
   }
 
   /** The machine's intent policy right now. */
@@ -288,11 +302,27 @@ export class IntentVerifier {
 
   /** Check a channel open; the returned channel goes with every frame on it. */
   checkChannelOpen(principal: RelayPrincipal | undefined, intent: unknown): { decision: IntentDecision; channel: IntentChannel } {
-    const { decision, body } = this.check(principal, intent, {
+    const { decision, body, signerKeyId } = this.check(principal, intent, {
       action: CHANNEL_OPEN_ACTION, sessionId: null, payload: channelOpenPayload(), opensChannel: true,
     })
-    const token = decision.verdict === 'accepted' && body?.channel ? body.channel : null
-    return { decision, channel: { token, lastSeq: 0, session: null } }
+    const accepted = decision.verdict === 'accepted'
+    const token = accepted && body?.channel ? body.channel : null
+    return { decision, channel: { token, lastSeq: 0, session: null, signerKeyId: accepted ? signerKeyId : null } }
+  }
+
+  /**
+   * Why an owner's open channel may no longer carry session output, or null
+   * while it may: the device that opened it was removed from the device
+   * list, the list can't be read, or the policy now requires a confirmed
+   * device and the channel was opened unsigned. (Grantee channels are
+   * re-checked against their grants on every frame.)
+   */
+  ownerChannelEnded(channel: IntentChannel): string | null {
+    const store = this.currentStore()
+    const policy = store?.policy ?? this.lastPolicy
+    if (!channel.signerKeyId) return policy === 'required' ? 'This computer now accepts only confirmed devices' : null
+    if (!store) return "This computer can't read its device list"
+    return store.credentials.some(c => c.keyId === channel.signerKeyId) ? null : 'This device was removed from this computer'
   }
 
   /** Check a client frame against its channel, and advance the channel when it goes through. */
@@ -311,7 +341,7 @@ export class IntentVerifier {
     return decision
   }
 
-  private check(principal: RelayPrincipal | undefined, rawIntent: unknown, expected: Expected): { decision: IntentDecision; body: IntentBody | null } {
+  private check(principal: RelayPrincipal | undefined, rawIntent: unknown, expected: Expected): { decision: IntentDecision; body: IntentBody | null; signerKeyId?: string | null } {
     const store = this.currentStore()
     const policy = store?.policy ?? this.lastPolicy
 
@@ -331,7 +361,7 @@ export class IntentVerifier {
         .filter((c): c is PasskeyCredential => c.kind === 'passkey' && c.userId === principal.userId)
         .map(c => ({ credentialId: c.credentialId, keyId: c.keyId }))
     }
-    return { decision, body }
+    return { decision, body, signerKeyId: accepted?.keyId ?? null }
   }
 
   /** The device-list credential an intent names: a browser key by keyId, or a passkey by keyId or credential id. */
@@ -459,7 +489,8 @@ export class IntentVerifier {
 
   private stepUpRefusal(store: TrustStore, credential: TrustedCredential): IntentRefusal | null {
     const hasPasskey = store.credentials.some(c => c.kind === 'passkey' && c.userId === credential.userId)
-    return credential.kind !== 'passkey' && (hasPasskey || this.requirePasskey) ? 'intent_step_up_required' : null
+    const required = hasPasskey || this.requirePasskey || store.requirePasskeyStepUp === true
+    return credential.kind !== 'passkey' && required ? 'intent_step_up_required' : null
   }
 
   // --- Grants (§6.7) -------------------------------------------------------

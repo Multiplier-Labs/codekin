@@ -131,6 +131,8 @@ export class StreamChannel {
     /** Owner by default: an unshared channel belongs to the machine's owner. */
     private policy: ChannelPolicy = { role: 'owner', grants: {} },
     private gate?: FrameGate,
+    /** Asked before session output is relayed: a reason ends the channel (a removed device). */
+    private ended?: () => string | null,
   ) {}
 
   /** Open the local socket and perform the local auth handshake. */
@@ -173,6 +175,12 @@ export class StreamChannel {
         && !hasPermission(this.policy, this.state.sessionId, 'view')) {
         this.close(STREAM_CLOSE.normal, 'Session access ended')
         this.callbacks.onClose(STREAM_CLOSE.normal, 'Session access ended')
+        return
+      }
+      const endedBecause = this.ended?.()
+      if (endedBecause) {
+        this.close(STREAM_CLOSE.normal, endedBecause)
+        this.callbacks.onClose(STREAM_CLOSE.normal, endedBecause)
         return
       }
       if (!checkServerFrame(this.policy, this.state, text)) return
