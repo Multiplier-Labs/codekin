@@ -134,6 +134,13 @@ function HostedHome({ onOpen, onSignOut, signedInAs }: {
     onOpen(machine)
   }, [onOpen])
 
+  // Closing Settings opens a machine: the one last used if it is reachable,
+  // else the first online one. Nothing reachable, nothing to close to.
+  const closeTarget = useMemo(() => {
+    const reachable = (setup.machines ?? []).filter(m => isUsableMachine(m) && m.status !== 'offline')
+    return reachable.find(m => m.id === lastMachineId()) ?? reachable.find(m => m.status === 'online') ?? null
+  }, [setup.machines])
+
   // Latch during render (React's "adjust state while rendering" pattern).
   if (firstRun === null && setup.machines !== null) {
     setFirstRun(!setup.machines.some(isUsableMachine))
@@ -157,7 +164,7 @@ function HostedHome({ onOpen, onSignOut, signedInAs }: {
         connected={false}
         section={route.view === 'settings' ? route.settingsSection : 'machines'}
         onNavigate={(section, replace) => { route.navigate(section ? `/settings/${section}` : '/settings', replace) }}
-        onClose={() => { /* the home screen: nothing to close to */ }}
+        onClose={closeTarget ? () => { openMachine(closeTarget) } : undefined}
         settings={settings}
         onUpdate={updateSettings}
         isMobile={isMobile}

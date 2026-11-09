@@ -248,14 +248,23 @@ describe('SettingsView', () => {
       expect(onSwitchMachine).toHaveBeenCalledWith({ id: 'm1' })
     })
 
-    it('offers sign out and who is signed in instead of a close button', async () => {
+    it('offers sign out and who is signed in, and no close button with nothing to close to', async () => {
       stubMe(false)
       const onSignOut = vi.fn()
-      const el = await render(home({ onSignOut, signedInAs: 'alari76' }))
+      const el = await render(home({ onSignOut, signedInAs: 'alari76', onClose: undefined }))
       expect(el.querySelector('button[aria-label="Close settings"]')).toBeNull()
       expect(el.textContent).toContain('alari76')
       await act(async () => { [...el.querySelectorAll('button')].find(b => b.textContent === 'Sign out')!.click() })
       expect(onSignOut).toHaveBeenCalled()
+    })
+
+    it('can be closed alongside sign out when there is a machine to go to', async () => {
+      stubMe(false)
+      const onClose = vi.fn()
+      const el = await render(home({ onSignOut: vi.fn(), onClose }))
+      expect([...el.querySelectorAll('button')].some(b => b.textContent === 'Sign out')).toBe(true)
+      await act(async () => { el.querySelector<HTMLButtonElement>('button[aria-label="Close settings"]')!.click() })
+      expect(onClose).toHaveBeenCalled()
     })
   })
 })

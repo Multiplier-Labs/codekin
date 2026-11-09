@@ -40,8 +40,11 @@ interface Props {
   /** From the URL; null for bare /settings. */
   section: string | null
   onNavigate: (section: SettingsSectionId | null, replace?: boolean) => void
-  /** Leave Settings (back to where the user was working). */
-  onClose: () => void
+  /**
+   * Leave Settings (back to where the user was working). Omitted when there
+   * is nowhere to go — the hosted home with no machine to open.
+   */
+  onClose?: () => void
   settings: SettingsType
   onUpdate: (patch: Partial<SettingsType>) => void
   isMobile?: boolean
@@ -58,7 +61,7 @@ interface Props {
   onDisconnectMachine?: () => void
   /**
    * Hosted, no machine connected: Settings is the home screen. Machine
-   * sections are listed as unavailable, and there is nothing to close to.
+   * sections are listed as unavailable; closing (when offered) opens a machine.
    */
   connected?: boolean
   /** Hosted home: machine list/setup state shared with the first-run surface. */
@@ -345,12 +348,8 @@ export function SettingsView({
           </div>
         )}
         <div className="flex-1" />
-        {connected ? (
-          <button onClick={onClose} aria-label="Close settings" title="Close settings" className="rounded-control p-1.5 text-ink-muted transition hover:bg-surface-raised hover:text-ink">
-            <IconX size={18} />
-          </button>
-        ) : (
-          // The home screen: nothing to close to; who is signed in, and the way out.
+        {!connected && (
+          // The home screen: who is signed in, and the way out.
           <div className="flex items-center gap-3">
             {signedInAs && <span className="hidden text-meta text-ink-muted sm:inline">{signedInAs}</span>}
             {onSignOut && (
@@ -359,6 +358,11 @@ export function SettingsView({
               </button>
             )}
           </div>
+        )}
+        {onClose && (
+          <button onClick={onClose} aria-label="Close settings" title="Close settings" className="rounded-control p-1.5 text-ink-muted transition hover:bg-surface-raised hover:text-ink">
+            <IconX size={18} />
+          </button>
         )}
       </header>
       <div className="flex min-h-0 flex-1">
