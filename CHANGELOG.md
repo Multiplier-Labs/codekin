@@ -32,6 +32,7 @@ Update machines and the relay together. The new protections are enforced on each
 - The relay limits how many audit rows one user's traffic writes, and answers malformed request bodies with a 400 without logging them (#839).
 - Settings can be closed from the home screen when a machine can be opened (#838).
 - In the web app and the Mac app, an action the computer refuses (for example a bypass session that needs a passkey) now shows an error instead of doing nothing. The Mac app, which can't use passkeys, says what works instead (#844).
+- In the Mac app, links to other sites in the chat open in your default browser (#845).
 - `codekin relay devices list` no longer says signatures aren't checked (#841).
 
 ## [0.11.0] - 2026-11-08
