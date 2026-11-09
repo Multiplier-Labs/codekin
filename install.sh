@@ -6,7 +6,10 @@
 # Hosted setup (the command generated at app.codekin.ai pairs this machine in
 # the same run; the token travels in the environment, not on the command line):
 #
-#   curl -fsSL https://codekin.ai/install.sh | CODEKIN_PAIR_TOKEN=<token> bash
+#   curl -fsSL https://codekin.ai/install.sh | CODEKIN_PAIR_TOKEN=<token> CODEKIN_TRUST_TOKEN=<token> bash
+#
+# CODEKIN_TRUST_TOKEN, when set, confirms the browser that generated the
+# command, so it can control this machine without typing a code.
 #
 # `bash -s -- --pair <token> [--relay <url>]` is still accepted for older
 # generated commands.
@@ -32,6 +35,7 @@ die()     { printf '\033[0;31m[codekin]\033[0m ERROR: %s\n' "$*" >&2; exit 1; }
 # ---------------------------------------------------------------------------
 
 PAIR_TOKEN="${CODEKIN_PAIR_TOKEN:-}"
+TRUST_TOKEN="${CODEKIN_TRUST_TOKEN:-}"
 RELAY_URL="${CODEKIN_RELAY_URL:-}"
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -42,7 +46,7 @@ while [ $# -gt 0 ]; do
 done
 # Keep the token out of every child process that does not need it
 # (npm, codekin setup, the service unit).
-unset CODEKIN_PAIR_TOKEN
+unset CODEKIN_PAIR_TOKEN CODEKIN_TRUST_TOKEN
 RELAY_URL="${RELAY_URL:-$DEFAULT_RELAY_URL}"
 RELAY_URL="${RELAY_URL%/}"
 
@@ -260,6 +264,23 @@ install_service() {
 }
 
 # ---------------------------------------------------------------------------
+# 7b. Confirm the browser that generated the command (signed-intents spec
+#     §5.2b): it gets in without typing a code. Never fatal; the browser
+#     can still be confirmed later from the web app.
+# ---------------------------------------------------------------------------
+
+trust_browser() {
+  [ -n "$TRUST_TOKEN" ] || return 0
+  [ "$PAIR_STATE" = "paired" ] || return 0
+  if CODEKIN_TRUST_TOKEN="$TRUST_TOKEN" codekin relay devices trust >/dev/null 2>&1; then
+    success "The browser that set this up can control this machine (no code needed)."
+  else
+    warn "Could not confirm your browser here; do it later from the web app (Confirm this browser)."
+  fi
+  TRUST_TOKEN=""
+}
+
+# ---------------------------------------------------------------------------
 # 8. Hosted connection check — ask the local service (GET /api/relay/status)
 #    whether its embedded connector reached the relay. Prints one state word:
 #    connected | connecting | disconnected | replaced | auth_failed |
@@ -403,5 +424,6 @@ check_github
 install_codekin
 run_setup
 install_service
+trust_browser
 wait_for_online
 print_summary

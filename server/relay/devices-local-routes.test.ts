@@ -16,10 +16,10 @@ import type { TrustedCredential } from './trust-store.js'
 import { generateKeyPairSync, randomBytes } from 'crypto'
 import type { KeyObject } from 'crypto'
 import { MachineEnrolment } from './enrolment.js'
-import { POP_LABEL, commitment, formatCode, shortAuthString, signP1363, transcript } from './enrolment-crypto.js'
+import { POP_LABEL, commitment, formatCode, shortAuthString, signP1363, transcript, trustRevealMac, trustTokenId } from './enrolment-crypto.js'
 
 /** Have a browser reach "awaiting code" on m1; returns the code it would show. */
-function browserWaiting(label = 'Edge · Windows'): { code: string; enrolId: string } {
+function browserWaiting(label = 'Edge · Windows', trustSecret?: Buffer): { code: string; enrolId: string } {
   const owner = { userId: 'u1', role: 'owner' as const, grants: {} }
   const machine = new MachineEnrolment({ machineId: 'm1', identityFile: join(dir, 'relay-identity.json'), devicesFile, secretStore: null })
   const { publicKey, privateKey } = generateKeyPairSync('ec', { namedCurve: 'P-256' })
@@ -27,9 +27,13 @@ function browserWaiting(label = 'Edge · Windows'): { code: string; enrolId: str
   const nonceB = randomBytes(32)
   const ch = machine.commit(owner, { commit: commitment(spki, [], label, nonceB).toString('base64url') })
   const nonceM = Buffer.from(ch.nonceM, 'base64url')
+  const spkiM = Buffer.from(ch.machineKey, 'base64url')
   machine.reveal(owner, {
     enrolId: ch.enrolId, spki: spki.toString('base64url'), passkeys: [], label, nonceB: nonceB.toString('base64url'),
     pop: signP1363(privateKey as KeyObject, transcript(POP_LABEL, ch.enrolId, nonceM, '[]')).toString('base64url'),
+    ...(trustSecret ? {
+      trust: { id: trustTokenId(trustSecret), mac: trustRevealMac(trustSecret, ch.enrolId, spkiM, spki, [], label, nonceB, nonceM).toString('base64url') },
+    } : {}),
   })
   return { enrolId: ch.enrolId, code: formatCode(shortAuthString(Buffer.from(ch.machineKey, 'base64url'), spki, [], nonceB, nonceM)) }
 }
@@ -149,6 +153,18 @@ describe('/api/relay/devices', () => {
     expect(ok.status).toBe(200)
     expect(await ok.json()).toMatchObject({ added: { label: 'Edge · Windows', confirmCode: expect.stringMatching(/^[A-Z2-7]{3}-[A-Z2-7]{3}$/) } })
     expect(readTrustStore(devicesFile)?.credentials).toHaveLength(1)
+  })
+
+  it("takes the browser's trust command pasted whole", async () => {
+    pair()
+    prepareMachineTrust(credentialFile, 'm1', 'https://relay.test', null, quiet)
+    writeTrustStore(devicesFile, emptyTrustStore('m1', 'https://relay.test', 'u1'))
+    const secret = randomBytes(16)
+    browserWaiting('Edge · Windows', secret)
+    const res = await fetch(`${base}/approve`, { method: 'POST', headers: auth, body: JSON.stringify({ code: `codekin relay devices trust ${secret.toString('base64url')}` }) })
+    expect(await res.json()).toMatchObject({ added: { label: 'Edge · Windows', confirmCode: null, policyRaised: true } })
+    const early = await fetch(`${base}/approve`, { method: 'POST', headers: auth, body: JSON.stringify({ code: randomBytes(16).toString('base64url') }) })
+    expect(await early.json()).toMatchObject({ waiting: { expiresAt: expect.any(String) } })
   })
 
   it('turns a waiting browser down', async () => {
@@ -277,6 +293,22 @@ describe('codekin relay devices', () => {
     expect(run(['list']).out).toContain(`${finishing!}  Edge · Windows`)
     expect(run(['reject', second.enrolId])).toMatchObject({ code: 0 })
     expect(readTrustStore(devicesFile)?.credentials.map(c => c.label)).toEqual(['Edge · Windows'])
+  })
+
+  it('confirms a browser by its pasted trust token, before or after it asked', () => {
+    pair()
+    prepareMachineTrust(credentialFile, 'm1', 'https://relay.test', null, quiet)
+    writeTrustStore(devicesFile, emptyTrustStore('m1', 'https://relay.test', 'u1'))
+    expect(run(['trust'])).toMatchObject({ code: 1 })
+    expect(run(['trust', 'K7QM-2XPA'])).toMatchObject({ code: 1, err: expect.stringContaining('not a trust token') })
+    const secret = randomBytes(16)
+    browserWaiting('Edge · Windows', secret)
+    expect(run(['trust', secret.toString('base64url')])).toMatchObject({ code: 0, out: expect.stringContaining('Confirmed Edge · Windows') })
+    // Pasted first: it waits for its browser, which is then confirmed as it asks.
+    const early = randomBytes(16)
+    expect(run(['trust', early.toString('base64url')])).toMatchObject({ code: 0, out: expect.stringContaining('as soon as it asks') })
+    browserWaiting('Safari · iPad', early)
+    expect(readTrustStore(devicesFile)?.credentials.map(c => c.label)).toEqual(['Edge · Windows', 'Safari · iPad'])
   })
 
   it('revokes and sets the policy', () => {

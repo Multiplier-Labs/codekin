@@ -925,11 +925,25 @@ export async function getRelayDevices(token: string): Promise<RelayDevices> {
 }
 
 /** Confirm the browser showing `code`. Rejects with the server's message (e.g. no such code). */
-export async function approveRelayDevice(token: string, code: string): Promise<{ keyId: string; label: string; confirmCode: string; policyRaised?: boolean }> {
+/**
+ * Confirm a browser on this computer: with the 8-character code it shows,
+ * or its trust command pasted whole. `confirmCode` is null when a trust
+ * command did it (the browser finishes by itself); `waiting` when no browser
+ * has asked with that command yet.
+ */
+export async function approveRelayDevice(token: string, code: string): Promise<
+  | { keyId: string; label: string; confirmCode: string | null; policyRaised?: boolean; waiting?: undefined }
+  | { waiting: { expiresAt: string } }
+> {
   const res = await transport.authFetch('/api/relay/devices/approve', {
     method: 'POST', headers: headers(token), body: JSON.stringify({ code }),
   })
-  const body = await jsonBody<{ added?: { keyId: string; label: string; confirmCode: string; policyRaised?: boolean }; message?: string }>(res).catch(() => ({ added: undefined, message: undefined }))
+  const body = await jsonBody<{
+    added?: { keyId: string; label: string; confirmCode: string | null; policyRaised?: boolean }
+    waiting?: { expiresAt: string }
+    message?: string
+  }>(res).catch(() => ({ added: undefined, waiting: undefined, message: undefined }))
+  if (res.ok && body.waiting) return { waiting: body.waiting }
   if (!res.ok || !body.added) throw new Error(body.message ?? `Failed to confirm the browser: ${res.status}`)
   return body.added
 }

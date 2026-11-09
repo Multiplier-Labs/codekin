@@ -5,8 +5,10 @@
  * the row for a setup started earlier whose command can no longer be shown.
  */
 
+import { useState } from 'react'
 import { IconCheck, IconCircleCheck, IconPlayerPlay } from '@tabler/icons-react'
 import { InstallCommand } from './InstallCommand'
+import { TrustSheet } from './TrustSheet'
 import { formatTimeLeft, type Machine } from './machines'
 import type { MachineSetup, SetupStep } from './useMachineSetup'
 
@@ -65,6 +67,9 @@ export function PairingPanel({ setup, onOpen, showSteps = true }: {
   showSteps?: boolean
 }) {
   const { pairing, pairingMachine: machine, step } = setup
+  // The install pasted this tab's trust token on the machine: once it is
+  // online, confirm this browser there, which the machine does at once.
+  const [closedFor, setClosedFor] = useState<string | null>(null)
   if (!pairing || !step) return null
 
   return (
@@ -103,6 +108,15 @@ export function PairingPanel({ setup, onOpen, showSteps = true }: {
             there.
           </p>
         </div>
+      )}
+
+      {step === 'online' && machine && pairing.trustSecret && closedFor !== machine.id && (
+        <TrustSheet
+          machineId={machine.id}
+          machineName={machine.displayName}
+          trustSecret={pairing.trustSecret}
+          onClose={() => { setClosedFor(machine.id) }}
+        />
       )}
 
       {step === 'online' && machine && (

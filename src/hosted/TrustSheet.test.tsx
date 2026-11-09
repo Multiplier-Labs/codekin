@@ -108,6 +108,42 @@ describe('TrustSheet', () => {
     expect(onTrusted).toHaveBeenCalledTimes(1)
   })
 
+  it('leads with one command to paste on the machine, and finishes by itself', async () => {
+    const check = vi.fn().mockResolvedValueOnce(null).mockResolvedValueOnce('confirmed')
+    trust.startEnrolment.mockResolvedValue({ enrolId: 'e1', code: 'K7QM-2XPA', machineKeyId: 'mk', trustOffered: true, check, confirm: vi.fn() })
+    const { onTrusted } = await render()
+    const opts = trust.startEnrolment.mock.calls[0][1] as { trustSecret: Uint8Array }
+    expect(opts.trustSecret).toHaveLength(16)
+    expect(el!.textContent).toContain('Run this once in a terminal on Dev box')
+    expect(el!.textContent).toMatch(/codekin relay devices trust [A-Za-z0-9_-]{22}/)
+    // The codes stay out of the way unless asked for.
+    expect(el!.textContent).not.toContain('K7QM-2XPA')
+    await act(async () => { await vi.advanceTimersByTimeAsync(2000) })
+    await act(async () => { await vi.advanceTimersByTimeAsync(2000) })
+    expect(el!.textContent).toContain('This browser is confirmed on Dev box.')
+    expect(onTrusted).toHaveBeenCalledTimes(1)
+  })
+
+  it('offers the two codes when the command can\'t be pasted', async () => {
+    trust.startEnrolment.mockResolvedValue({ enrolId: 'e1', code: 'K7QM-2XPA', machineKeyId: 'mk', trustOffered: true, check: vi.fn().mockResolvedValue(null), confirm: vi.fn() })
+    await render()
+    await act(async () => { [...el!.querySelectorAll('button')].find(b => b.textContent?.includes('Use codes instead'))!.click() })
+    expect(el!.textContent).toContain('codekin relay devices approve K7QM-2XPA')
+  })
+
+  it('only says it is confirming when the install already pasted the command', async () => {
+    const secret = new Uint8Array(16).fill(3)
+    trust.startEnrolment.mockResolvedValue({ enrolId: 'e1', code: 'K7QM-2XPA', machineKeyId: 'mk', trustOffered: true, check: vi.fn().mockResolvedValue('confirmed'), confirm: vi.fn() })
+    keys.list = [{ credentialId: 'c1', cosePublicKey: 'k', rpId: 'relay.test' }]
+    const { onTrusted } = await render({ trustSecret: secret })
+    expect((trust.startEnrolment.mock.calls[0][1] as { trustSecret: Uint8Array }).trustSecret).toBe(secret)
+    expect(el!.textContent).toContain('Confirming this browser on Dev box')
+    expect(el!.textContent).not.toContain('codekin relay devices trust')
+    await act(async () => { await vi.advanceTimersByTimeAsync(500) })
+    expect(el!.textContent).toContain('This browser is confirmed on Dev box.')
+    expect(onTrusted).toHaveBeenCalled()
+  })
+
   it('waits for a machine that is still coming online', async () => {
     trust.startEnrolment
       .mockRejectedValueOnce(new RelayRequestError('machine_offline', 'Machine is not connected'))

@@ -145,6 +145,11 @@ export interface Pairing {
   /** The account the machine pairs into, as the relay saw the request. */
   ownerLogin?: string | null
   workspaceName?: string | null
+  /**
+   * A trust token secret this tab made for the command (never from the
+   * relay, never stored): the install confirms this browser with it.
+   */
+  trustSecret?: Uint8Array
 }
 
 /**
@@ -205,10 +210,16 @@ export const DEFAULT_RELAY_URL = 'https://app.codekin.ai'
  * not visible in the process list while the installer runs, and the script is
  * fetched over https so nothing can be injected before a redirect.
  */
-export function installCommands(token: string, origin: string): { install: string; login: string } {
+/**
+ * The install and login commands. `trustToken` (spec §5.2b) also confirms
+ * the browser that generated them, so it needs no code afterwards; like the
+ * pairing token it travels in the environment, never as an argument.
+ */
+export function installCommands(token: string, origin: string, trustToken?: string): { install: string; login: string } {
   const custom = origin.replace(/\/$/, '') !== DEFAULT_RELAY_URL
+  const env = `CODEKIN_PAIR_TOKEN=${token}${trustToken ? ` CODEKIN_TRUST_TOKEN=${trustToken}` : ''}`
   return {
-    install: `curl -fsSL https://codekin.ai/install.sh | CODEKIN_PAIR_TOKEN=${token} bash${custom ? ` -s -- --relay ${origin}` : ''}`,
-    login: `CODEKIN_PAIR_TOKEN=${token} codekin relay login${custom ? ` --url ${origin}` : ''}`,
+    install: `curl -fsSL https://codekin.ai/install.sh | ${env} bash${custom ? ` -s -- --relay ${origin}` : ''}`,
+    login: `${env} codekin relay login${custom ? ` --url ${origin}` : ''}`,
   }
 }

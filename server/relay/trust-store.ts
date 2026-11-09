@@ -94,8 +94,24 @@ export interface PendingEnrolment {
     /** The 6-character code shown after approval, for the owner to type in the browser. */
     confirmCode?: string
     revealedAt: string
+    /** The browser offered a trust token (spec §5.2b): its id and macB. */
+    trust?: { id: string; mac: string }
   }
-  outcome?: { state: 'approved' | 'rejected'; at: string }
+  /** `trustMac`: macM, when a trust token approved it; the browser pins on it. */
+  outcome?: { state: 'approved' | 'rejected'; at: string; trustMac?: string }
+}
+
+/**
+ * A trust token pasted on this machine before its browser asked (the
+ * one-line install pastes it first). The next request carrying its id and a
+ * valid macB is approved at once; the token is then spent.
+ */
+export interface StoredTrustToken {
+  id: string
+  /** base64url S. Kept only until used or expired, in this 0600 file. */
+  secret: string
+  createdAt: string
+  expiresAt: string
 }
 
 export interface TrustStore {
@@ -121,6 +137,8 @@ export interface TrustStore {
    * never revealing (§5.2).
    */
   enrolAttempts?: string[]
+  /** Trust tokens waiting for their browser (spec §5.2b). */
+  trustTokens?: StoredTrustToken[]
 }
 
 export class TrustStoreError extends Error {
@@ -179,16 +197,18 @@ function parsePending(value: unknown): PendingEnrolment | null {
     const r = p.reveal as Record<string, unknown> | null
     if (!r || !str(r.spki, 1024) || !str(r.keyId, 64) || !str(r.label, 200) || !str(r.nonceB, 128) || !str(r.code, 16) || !str(r.revealedAt, 64)) return null
     if (!Array.isArray(r.passkeys)) return null
+    const t = r.trust as Record<string, unknown> | undefined
     entry.reveal = {
       spki: r.spki, keyId: r.keyId, label: r.label, nonceB: r.nonceB, code: r.code, revealedAt: r.revealedAt,
       passkeys: r.passkeys as EnrolPasskey[],
       ...(str(r.confirmCode, 16) ? { confirmCode: r.confirmCode } : {}),
+      ...(t && str(t.id, 64) && str(t.mac, 128) ? { trust: { id: t.id, mac: t.mac } } : {}),
     }
   }
   if (p.outcome !== undefined) {
     const o = p.outcome as Record<string, unknown> | null
     if (!o || (o.state !== 'approved' && o.state !== 'rejected') || !str(o.at, 64)) return null
-    entry.outcome = { state: o.state, at: o.at }
+    entry.outcome = { state: o.state, at: o.at, ...(str(o.trustMac, 128) ? { trustMac: o.trustMac } : {}) }
   }
   return entry
 }
@@ -240,6 +260,13 @@ export function parseTrustStore(text: string): TrustStore {
       : [],
     ...(Array.isArray(v.enrolAttempts)
       ? { enrolAttempts: v.enrolAttempts.filter((t): t is string => str(t, 64)).slice(-100) }
+      : {}),
+    ...(Array.isArray(v.trustTokens)
+      ? {
+          trustTokens: v.trustTokens.filter((t): t is StoredTrustToken => !!t && typeof t === 'object'
+            && str((t as StoredTrustToken).id, 64) && str((t as StoredTrustToken).secret, 64)
+            && str((t as StoredTrustToken).createdAt, 64) && str((t as StoredTrustToken).expiresAt, 64)),
+        }
       : {}),
   }
 }
@@ -369,7 +396,13 @@ function isEarlier(a: string, b: string, shareId: string): boolean {
 /** Drop requests past their expiry. Returns true when any were dropped. */
 export function prunePending(store: TrustStore, now = Date.now()): boolean {
   const kept = store.pending.filter(p => Date.parse(p.expiresAt) > now)
-  if (kept.length === store.pending.length) return false
+  const tokens = store.trustTokens?.filter(t => Date.parse(t.expiresAt) > now)
+  const tokensChanged = tokens !== undefined && tokens.length !== store.trustTokens?.length
+  if (tokensChanged) {
+    if (tokens.length > 0) store.trustTokens = tokens
+    else delete store.trustTokens
+  }
+  if (kept.length === store.pending.length) return tokensChanged
   store.pending = kept
   return true
 }

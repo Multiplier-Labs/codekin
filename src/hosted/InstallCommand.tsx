@@ -15,6 +15,7 @@
 import { useState, useEffect } from 'react'
 import { IconCopy, IconCheck, IconTerminal2, IconRefresh } from '@tabler/icons-react'
 import { formatTimeLeft, installCommands, type Pairing } from './machines'
+import { toB64url } from './deviceTrust'
 
 /** A command with a copy button. Also used by the "Confirm this browser" sheet. */
 export function CopyBlock({ label, command }: { label: string; command: string }) {
@@ -112,7 +113,7 @@ export function InstallCommand({ pairing, onGenerate, generating, error }: Insta
     )
   }
 
-  const commands = installCommands(pairing.pairingToken, window.location.origin)
+  const commands = installCommands(pairing.pairingToken, window.location.origin, pairing.trustSecret ? toB64url(pairing.trustSecret) : undefined)
   return (
     <div className="mt-3">
       <CopyBlock

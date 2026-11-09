@@ -24,14 +24,14 @@
 import { randomBytes, randomUUID } from 'crypto'
 import type { KeyObject } from 'crypto'
 import {
-  CHALLENGE_LABEL, DIGEST_BYTES, NONCE_BYTES, POP_LABEL, RESULT_LABEL, SIGNATURE_BYTES,
-  checkLabel, codesEqual, sha256, commitment, confirmationCode, formatCode, fromB64url, normalizeCode, shortAuthString, signP1363,
-  transcript, verifyP1363,
+  CHALLENGE_LABEL, DIGEST_BYTES, NONCE_BYTES, POP_LABEL, RESULT_LABEL, SIGNATURE_BYTES, TRUST_ID_CHARS,
+  bytesEqual, checkLabel, codesEqual, sha256, commitment, confirmationCode, formatCode, fromB64url, normalizeCode, parseTrustToken, shortAuthString, signP1363,
+  transcript, trustResultMac, trustRevealMac, trustTokenId, verifyP1363,
 } from './enrolment-crypto.js'
 import type { EnrolPasskey } from './enrolment-crypto.js'
 import { keyIdForSpki, loadMachineSigningKey, parseP256Spki, readMachineIdentity } from './machine-identity.js'
-import { addRevokedGrant, isIntentPolicy, mutateTrustStore, raiseIntentPolicy, readTrustStore, TrustStoreError } from './trust-store.js'
-import type { PasskeyCredential, PendingEnrolment, TrustedCredential, TrustStore } from './trust-store.js'
+import { addRevokedGrant, ensureTrustStore, isIntentPolicy, mutateTrustStore, raiseIntentPolicy, readTrustStore, TrustStoreError } from './trust-store.js'
+import type { PasskeyCredential, PendingEnrolment, StoredTrustToken, TrustedCredential, TrustStore } from './trust-store.js'
 import { coseToKey, keyIdForCoseKey, verifyPasskeyAssertion } from './webauthn-verify.js'
 import type { PasskeyAssertion } from './webauthn-verify.js'
 import {
@@ -55,6 +55,10 @@ export const MAX_PENDING_ENROLMENTS = 3
  * guesses it gets, however fast it retries.
  */
 export const MAX_ENROLMENTS_PER_WINDOW = 20
+/** How long a trust token pasted before its browser asked stays usable (the install can take a while). */
+export const TRUST_TOKEN_TTL_MS = 30 * 60_000
+/** Trust tokens a machine holds at once; a new one replaces the oldest. */
+export const MAX_TRUST_TOKENS = 3
 /** After the identity key can't be read, how long to wait before trying again (each try may prompt the Keychain). */
 const KEY_RETRY_MS = 60_000
 
@@ -67,6 +71,8 @@ export interface EnrolChallenge {
   nonceM: string
   /** sign_kM(T(challenge, enrolId, C, nonceM)), base64url. */
   signature: string
+  /** This machine accepts a trust token in place of the codes (spec §5.2b). A hint: the browser falls back to codes without it. */
+  trustTokens?: boolean
 }
 
 export interface EnrolResult {
@@ -86,6 +92,8 @@ export interface EnrolResult {
   passkeys?: Array<{ credentialId: string; keyId: string }>
   /** device_certify only: the machine key, which the browser pins (on first use: no code). */
   machineKey?: string
+  /** Approved by a trust token: macM (spec §5.2b), base64url. The browser pins the machine key on it, no code typed. */
+  trustMac?: string
 }
 
 /** Most passkeys one enrolment may add. */
@@ -190,7 +198,9 @@ export class MachineEnrolment {
         expiresAt: new Date(now + ENROL_TTL_MS).toISOString(),
       })
       const signature = signP1363(key, transcript(CHALLENGE_LABEL, enrolId, commit, nonceM))
-      return { enrolId, machineKey: spki.toString('base64url'), nonceM: nonceM.toString('base64url'), signature: signature.toString('base64url') }
+      return {
+        enrolId, machineKey: spki.toString('base64url'), nonceM: nonceM.toString('base64url'), signature: signature.toString('base64url'), trustTokens: true,
+      }
     })
   }
 
@@ -205,6 +215,8 @@ export class MachineEnrolment {
     const passkeys = parsePasskeys(p.passkeys)
     const proofs = parseProofs(Array.isArray(p.passkeyProofs) ? p.passkeyProofs as unknown[] : [])
     if (!passkeys || !proofs || proofs.length !== passkeys.length) throw refuse('Malformed enrolment request')
+    const trust = parseTrustOffer(p.trust)
+    if (trust === false) throw refuse('Malformed enrolment request')
     const { spki: machineSpki } = this.machineKey()
     const spkiB = Buffer.from(spki, 'base64url')
 
@@ -243,8 +255,26 @@ export class MachineEnrolment {
         code: shortAuthString(machineSpki, spkiB, passkeys, nonceB, nonceM),
         confirmCode: confirmationCode(machineSpki, spkiB, passkeys, nonceB, nonceM),
         revealedAt: new Date(this.now()).toISOString(),
+        ...(trust ? { trust } : {}),
       }
-      this.opts.log?.log(`[relay] A browser ("${label}") is asking to control this computer. Type the code it shows in Settings → Remote access, or run \`codekin relay devices approve <code>\`.`)
+      // Its trust token may already be here (pasted by the install):
+      // approve at once, and spend the token.
+      if (trust) {
+        const token = store.trustTokens?.find(t => t.id === trust.id && Date.parse(t.expiresAt) > this.now())
+        if (token) {
+          if (approveByTrustToken(store, entry, Buffer.from(token.secret, 'base64url'), machineSpki, this.now())) {
+            // Spent only on success: the id crosses the relay, so a relay
+            // copying it into requests of its own must not burn the token.
+            const rest = (store.trustTokens ?? []).filter(t => t !== token)
+            if (rest.length > 0) store.trustTokens = rest
+            else delete store.trustTokens
+            this.opts.log?.log(`[relay] A browser ("${label}") was confirmed on this computer with the trust token pasted here.`)
+            return { enrolId, state: 'awaiting_code' }
+          }
+          return spend('The browser did not prove it holds the trust token pasted here')
+        }
+      }
+      this.opts.log?.log(`[relay] A browser ("${label}") is asking to control this computer. Paste the command it shows, type its code in Settings → Remote access, or run \`codekin relay devices approve <code>\`.`)
       return { enrolId, state: 'awaiting_code' }
     })
     if ('refused' in outcome) throw refuse(outcome.refused)
@@ -268,6 +298,7 @@ export class MachineEnrolment {
       enrolId,
       state,
       ...(state === 'approved' ? { keyId: entry.reveal.keyId, passkeys: passkeysOf(store, userId) } : {}),
+      ...(state === 'approved' && entry.outcome.trustMac ? { trustMac: entry.outcome.trustMac } : {}),
       signature: signature.toString('base64url'),
     }
   }
@@ -458,6 +489,15 @@ export class MachineEnrolment {
   }
 }
 
+/** A reveal's trust token offer: absent (undefined), well-formed, or malformed (false). */
+function parseTrustOffer(value: unknown): { id: string; mac: string } | undefined | false {
+  if (value === undefined) return undefined
+  const t = value as { id?: unknown; mac?: unknown } | null
+  if (!t || typeof t.id !== 'string' || !new RegExp(`^[A-Za-z0-9_-]{${TRUST_ID_CHARS}}$`).test(t.id)) return false
+  if (!fromB64url(t.mac, DIGEST_BYTES)) return false
+  return { id: t.id, mac: t.mac as string }
+}
+
 /** Passkeys sent in a reveal: credential id, COSE key and RP ID, each bounded. Null when malformed. */
 function parsePasskeys(value: unknown[]): EnrolPasskey[] | null {
   if (value.length > MAX_ENROL_PASSKEYS) return null
@@ -525,7 +565,6 @@ export function approveEnrolment(
   if (!code) throw new TrustStoreError('not_found', 'That is not a code: it has 8 letters and digits, like K7QM-2XPA')
   return mutateTrustStore(devicesFile, machineId, store => {
     const t = now()
-    let policyRaised = false
     // Compare against every waiting request, without stopping at a match.
     let match: PendingEnrolment | null = null
     for (const entry of store.pending) {
@@ -533,42 +572,7 @@ export function approveEnrolment(
       if (codesEqual(entry.reveal.code, code) && !match) match = entry
     }
     if (!match?.reveal) throw new TrustStoreError('not_found', 'No browser is waiting with that code. Check it, or start again in the browser.')
-    const at = new Date(t).toISOString()
-    const credential: TrustedCredential = {
-      keyId: match.reveal.keyId,
-      kind: 'browser',
-      userId: match.userId,
-      spki: match.reveal.spki,
-      label: match.reveal.label,
-      addedAt: at,
-      addedBy: 'local',
-    }
-    // The passkeys proven in the ceremony come in with the browser.
-    const passkeys: TrustedCredential[] = match.reveal.passkeys.map(p => ({
-      keyId: keyIdForCoseKey(p.cosePublicKey),
-      kind: 'passkey',
-      userId: match.userId,
-      credentialId: p.credentialId,
-      cosePublicKey: p.cosePublicKey,
-      rpId: p.rpId,
-      label: 'Passkey',
-      addedAt: at,
-      addedBy: 'local',
-    }))
-    // Re-confirming a browser or passkey that is already listed replaces its entry.
-    const added = new Set([credential.keyId, ...passkeys.map(c => c.keyId)])
-    // The owner's first confirmed device turns enforcement on (§5.3, §6.8,
-    // D7). Only from `off`, the default: an owner who chose `warn` keeps it.
-    const firstOwnerDevice = store.ownerUserId !== null && match.userId === store.ownerUserId
-      && !store.credentials.some(c => c.userId === store.ownerUserId)
-    if (firstOwnerDevice && store.policy === 'off') {
-      store.policy = 'required'
-      policyRaised = true
-    }
-    store.credentials = [...store.credentials.filter(c => !added.has(c.keyId)), credential, ...passkeys]
-    match.outcome = { state: 'approved', at }
-    match.expiresAt = new Date(t + RESULT_TTL_MS).toISOString()
-    return { ...credential, confirmCode: formatCode(match.reveal.confirmCode ?? ''), ...(policyRaised ? { policyRaised } : {}) }
+    return addApproved(store, match, t)
   }, now())
 }
 
@@ -580,5 +584,121 @@ export function rejectEnrolment(enrolId: string, devicesFile: string, machineId:
     const t = now()
     entry.outcome = { state: 'rejected', at: new Date(t).toISOString() }
     entry.expiresAt = new Date(t + RESULT_TTL_MS).toISOString()
+  }, now())
+}
+
+/**
+ * Add the browser (and the passkeys it brought) whose request `match` is,
+ * and record the approval. Shared by the code and the trust token.
+ */
+function addApproved(store: TrustStore, match: PendingEnrolment, t: number, trustMac?: string): ApprovedEnrolment {
+  if (!match.reveal) throw new TrustStoreError('not_found', 'That request has no browser key yet')
+  let policyRaised = false
+  const at = new Date(t).toISOString()
+  const credential: TrustedCredential = {
+    keyId: match.reveal.keyId,
+    kind: 'browser',
+    userId: match.userId,
+    spki: match.reveal.spki,
+    label: match.reveal.label,
+    addedAt: at,
+    addedBy: 'local',
+  }
+  // The passkeys proven in the ceremony come in with the browser.
+  const passkeys: TrustedCredential[] = match.reveal.passkeys.map(p => ({
+    keyId: keyIdForCoseKey(p.cosePublicKey),
+    kind: 'passkey',
+    userId: match.userId,
+    credentialId: p.credentialId,
+    cosePublicKey: p.cosePublicKey,
+    rpId: p.rpId,
+    label: 'Passkey',
+    addedAt: at,
+    addedBy: 'local',
+  }))
+  // Re-confirming a browser or passkey that is already listed replaces its entry.
+  const added = new Set([credential.keyId, ...passkeys.map(c => c.keyId)])
+  // The owner's first confirmed device turns enforcement on (§5.3, §6.8,
+  // D7). Only from `off`, the default: an owner who chose `warn` keeps it.
+  const firstOwnerDevice = store.ownerUserId !== null && match.userId === store.ownerUserId
+    && !store.credentials.some(c => c.userId === store.ownerUserId)
+  if (firstOwnerDevice && store.policy === 'off') {
+    store.policy = 'required'
+    policyRaised = true
+  }
+  store.credentials = [...store.credentials.filter(c => !added.has(c.keyId)), credential, ...passkeys]
+  match.outcome = { state: 'approved', at, ...(trustMac ? { trustMac } : {}) }
+  match.expiresAt = new Date(t + RESULT_TTL_MS).toISOString()
+  return { ...credential, confirmCode: formatCode(match.reveal.confirmCode ?? ''), ...(policyRaised ? { policyRaised } : {}) }
+}
+
+/**
+ * Approve `entry` if its macB checks out under `secret` (spec §5.2b), with
+ * macM recorded for the browser. False, changing nothing, when it doesn't.
+ */
+function approveByTrustToken(store: TrustStore, entry: PendingEnrolment, secret: Buffer, spkiM: Buffer, t: number): ApprovedEnrolment | false {
+  const reveal = entry.reveal
+  if (!reveal?.trust || entry.outcome) return false
+  const spkiB = Buffer.from(reveal.spki, 'base64url')
+  const expected = trustRevealMac(secret, entry.enrolId, spkiM, spkiB, reveal.passkeys, reveal.label,
+    Buffer.from(reveal.nonceB, 'base64url'), Buffer.from(entry.nonceM, 'base64url'))
+  if (!bytesEqual(expected, Buffer.from(reveal.trust.mac, 'base64url'))) return false
+  const trustMac = trustResultMac(secret, entry.enrolId, spkiM, spkiB, reveal.passkeys).toString('base64url')
+  return addApproved(store, entry, t, trustMac)
+}
+
+/** What pasting a trust token did. */
+export type TrustTokenOutcome =
+  | { kind: 'approved'; added: ApprovedEnrolment }
+  /** No browser has asked with it yet: it waits here for TRUST_TOKEN_TTL_MS. */
+  | { kind: 'waiting'; expiresAt: string }
+  /** Browsers asked with it, but none proved it holds it (each request is now spent). */
+  | { kind: 'refused' }
+
+/**
+ * The owner pasted a trust token on this machine (spec §5.2b): approve the
+ * browser that offered it, or keep it for the browser about to ask. Throws
+ * TrustStoreError when it isn't a token, or a browser offered it without
+ * proving it holds it.
+ */
+export function approveTrustToken(
+  input: string,
+  paths: { devicesFile: string; identityFile: string },
+  paired: { machineId: string; relayOrigin: string },
+  now: () => number = Date.now,
+): TrustTokenOutcome {
+  const secret = parseTrustToken(input)
+  if (!secret) throw new TrustStoreError('not_found', 'That is not a trust token. Copy the whole command from the browser again.')
+  const identity = readMachineIdentity(paths.identityFile)
+  // The install pastes the token before the connector first starts: make the
+  // device list now so the token has somewhere to wait. The browser can't
+  // ask before the connector (and so the identity key) exists.
+  if (!readTrustStore(paths.devicesFile)) ensureTrustStore(paired.machineId, paired.relayOrigin, { file: paths.devicesFile, log: { log: () => {}, warn: () => {} } })
+  const id = trustTokenId(secret)
+  return mutateTrustStore(paths.devicesFile, paired.machineId, (store): TrustTokenOutcome => {
+    const t = now()
+    // The id crosses the relay, so a relay may have copied it into requests
+    // of its own: try each, approve the one that proves S, spend the rest.
+    const candidates = store.pending.filter(e => e.reveal?.trust?.id === id && !e.outcome && Date.parse(e.expiresAt) > t)
+    if (candidates.length > 0) {
+      if (!identity || identity.machineId !== paired.machineId) throw new TrustStoreError('not_found', "This computer's identity key is missing; restart Codekin on it")
+      const spkiM = Buffer.from(identity.publicKey, 'base64url')
+      let added: ApprovedEnrolment | false = false
+      for (const entry of candidates) {
+        const result: ApprovedEnrolment | false = added ? false : approveByTrustToken(store, entry, secret, spkiM, t)
+        if (result) added = result
+        else if (!entry.outcome) entry.outcome = { state: 'rejected', at: new Date(t).toISOString() }
+      }
+      if (added) return { kind: 'approved', added }
+      // Written back (the failed requests are spent) without a throw:
+      // mutateTrustStore only writes when fn returns.
+      return { kind: 'refused' }
+    }
+    const token: StoredTrustToken = {
+      id, secret: secret.toString('base64url'), createdAt: new Date(t).toISOString(), expiresAt: new Date(t + TRUST_TOKEN_TTL_MS).toISOString(),
+    }
+    const others = (store.trustTokens ?? []).filter(k => k.id !== id).sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+    store.trustTokens = [...others.slice(Math.max(0, others.length - MAX_TRUST_TOKENS + 1)), token]
+    return { kind: 'waiting', expiresAt: token.expiresAt }
   }, now())
 }

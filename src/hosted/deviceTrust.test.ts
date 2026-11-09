@@ -8,11 +8,12 @@ import { mkdtempSync, rmSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import {
-  base32, commitment, confirmationCode, defaultBrowserLabel, formatCode, fromB64url, getOrCreateBrowserKey, shortAuthString, startEnrolment,
-  toB64url, transcript, EnrolmentFailure,
+  base32, commitment, confirmationCode, defaultBrowserLabel, formatCode, fromB64url, getOrCreateBrowserKey, newTrustSecret, shortAuthString, startEnrolment,
+  toB64url, transcript, trustCommand, trustResultMac, trustRevealMac, trustTokenId, EnrolmentFailure,
   type BrowserKey, type EnrolSend, type MachinePin, type TrustStorage,
 } from './deviceTrust'
-import { MachineEnrolment, approveEnrolment, rejectEnrolment } from '../../server/relay/enrolment'
+import { MachineEnrolment, approveEnrolment, approveTrustToken, rejectEnrolment } from '../../server/relay/enrolment'
+import * as machineCrypto from '../../server/relay/enrolment-crypto'
 import { ensureMachineIdentity } from '../../server/relay/machine-identity'
 import { emptyTrustStore, readTrustStore, writeTrustStore } from '../../server/relay/trust-store'
 
@@ -57,6 +58,7 @@ describe('encoding', () => {
 describe('enrolment against the machine', () => {
   let dir: string
   let devicesFile: string
+  let identityFile: string
   let machine: MachineEnrolment
   let storage: ReturnType<typeof memoryStorage>
   let send: EnrolSend
@@ -64,7 +66,7 @@ describe('enrolment against the machine', () => {
 
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), 'codekin-browser-enrol-'))
-    const identityFile = join(dir, 'relay-identity.json')
+    identityFile = join(dir, 'relay-identity.json')
     devicesFile = join(dir, 'relay-devices.json')
     ensureMachineIdentity('m1', 'https://relay.test', { file: identityFile, store: null, log: { log: vi.fn(), warn: vi.fn() } })
     writeTrustStore(devicesFile, emptyTrustStore('m1', 'https://relay.test', 'u-owner'))
@@ -132,6 +134,126 @@ describe('enrolment against the machine', () => {
     // The only code the relay could offer is its own; the owner reads codes off the machine.
     expect(storage.pins.size).toBe(0)
     expect(realNonceM).not.toBe('')
+  })
+
+  describe('trust token: one pasted command instead of two codes (§5.2b)', () => {
+    const paste = (secret: Uint8Array) =>
+      approveTrustToken(trustCommand(secret).split(' ').pop()!, { devicesFile, identityFile }, { machineId: 'm1', relayOrigin: 'https://relay.test' })
+
+    it('agrees with the machine on the token id and both MACs', async () => {
+      const secret = new Uint8Array(16).fill(7)
+      const spkiM = fromB64url('MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEmachine')
+      const spkiB = fromB64url('MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEbrowser')
+      const n1 = new Uint8Array(32).fill(1)
+      const n2 = new Uint8Array(32).fill(2)
+      expect(await trustTokenId(secret)).toBe(machineCrypto.trustTokenId(secret))
+      expect(toB64url(await trustRevealMac(secret, 'e1', spkiM, spkiB, [], 'L', n1, n2)))
+        .toBe(machineCrypto.trustRevealMac(secret, 'e1', spkiM, spkiB, [], 'L', n1, n2).toString('base64url'))
+      expect(toB64url(await trustResultMac(secret, 'e1', spkiM, spkiB, [])))
+        .toBe(machineCrypto.trustResultMac(secret, 'e1', spkiM, spkiB, []).toString('base64url'))
+      expect(trustCommand(secret)).toMatch(/^codekin relay devices trust [A-Za-z0-9_-]{22}$/)
+    })
+
+    it('confirms and pins once the command is pasted on the machine, with nothing typed back', async () => {
+      const secret = newTrustSecret()
+      const enrolment = await startEnrolment(send, { userId: 'u-owner', machineId: 'm1', label: 'Chrome · Mac', storage, trustSecret: secret })
+      expect(enrolment.trustOffered).toBe(true)
+      expect(await enrolment.check()).toBeNull()
+      const outcome = paste(secret)
+      expect(outcome).toMatchObject({ kind: 'approved', added: { label: 'Chrome · Mac', addedBy: 'local' } })
+      expect(await enrolment.check()).toBe('confirmed')
+      const key = await getOrCreateBrowserKey('u-owner', storage)
+      expect(storage.pins.get('u-owner:m1')).toMatchObject({ keyId: key.keyId, via: 'code' })
+      expect(readTrustStore(devicesFile)?.policy).toBe('required')
+    })
+
+    it('confirms at once when the command was pasted before the browser asked (the install)', async () => {
+      const secret = newTrustSecret()
+      expect(paste(secret)).toMatchObject({ kind: 'waiting' })
+      expect(readTrustStore(devicesFile)?.trustTokens).toHaveLength(1)
+      const enrolment = await startEnrolment(send, { userId: 'u-owner', machineId: 'm1', label: 'Chrome · Mac', storage, trustSecret: secret })
+      expect(await enrolment.check()).toBe('confirmed')
+      expect(readTrustStore(devicesFile)?.credentials).toHaveLength(1)
+      // Spent: a second browser offering the same token gets nothing.
+      expect(readTrustStore(devicesFile)?.trustTokens).toBeUndefined()
+    })
+
+    it('never confirms with someone else’s token', async () => {
+      const enrolment = await startEnrolment(send, { userId: 'u-owner', machineId: 'm1', label: 'Chrome · Mac', storage, trustSecret: newTrustSecret() })
+      expect(paste(newTrustSecret())).toMatchObject({ kind: 'waiting' })
+      expect(await enrolment.check()).toBeNull()
+      expect(readTrustStore(devicesFile)?.credentials).toEqual([])
+    })
+
+    it('defeats a relay that swaps the machine key, and one that forges the approval', async () => {
+      const { generateKeyPairSync, sign } = await import('crypto')
+      const fake = generateKeyPairSync('ec', { namedCurve: 'P-256' })
+      const fakeSpki = fake.publicKey.export({ format: 'der', type: 'spki' }).toString('base64url')
+      const signFake = (data: Uint8Array) => toB64url(sign('sha256', data, { key: fake.privateKey, dsaEncoding: 'ieee-p1363' }))
+      let spkiB = new Uint8Array()
+      const mitm: EnrolSend = async (kind, payload) => {
+        const p = payload as Record<string, string>
+        if (kind === 'enrol_commit') {
+          const real = await send(kind, payload) as Record<string, string>
+          return { ...real, machineKey: fakeSpki, signature: signFake(transcript('ck-enrol-challenge-v1', real.enrolId, fromB64url(p.commit), fromB64url(real.nonceM))) }
+        }
+        if (kind === 'enrol_reveal') {
+          spkiB = fromB64url(p.spki)
+          return send(kind, payload)
+        }
+        // A forged approval: signed by the relay's key, with a made-up MAC.
+        return { enrolId: p.enrolId, state: 'approved', trustMac: toB64url(new Uint8Array(32)), signature: signFake(transcript('ck-enrol-result-v1', p.enrolId, spkiB, 'approved')) }
+      }
+      const secret = newTrustSecret()
+      const enrolment = await startEnrolment(mitm, { userId: 'u-owner', machineId: 'm1', label: 'Chrome · Mac', storage, trustSecret: secret })
+      // The browser's MAC covers the relay's key, so the real machine refuses it.
+      expect(paste(secret)).toEqual({ kind: 'refused' })
+      expect(readTrustStore(devicesFile)?.credentials).toEqual([])
+      // And the relay can't make the MAC that would pin its key.
+      expect(await enrolment.check()).toBe('approved')
+      expect(storage.pins.size).toBe(0)
+    })
+
+    it('ignores a relay that copies the token id into a request of its own', async () => {
+      const secret = newTrustSecret()
+      expect(paste(secret)).toMatchObject({ kind: 'waiting' })
+      // The relay saw the id go by and front-runs with its own key and a made-up MAC.
+      const id = await trustTokenId(secret)
+      const forged: EnrolSend = async (kind, payload) => {
+        if (kind === 'enrol_reveal') return send(kind, { ...(payload as object), trust: { id, mac: toB64url(new Uint8Array(32)) } })
+        return send(kind, payload)
+      }
+      await expect(startEnrolment(forged, { userId: 'u-owner', machineId: 'm1', label: 'Relay', storage: memoryStorage() })).rejects.toThrow(/did not prove/)
+      // The token survived: the honest browser is still confirmed with it.
+      const enrolment = await startEnrolment(send, { userId: 'u-owner', machineId: 'm1', label: 'Chrome · Mac', storage, trustSecret: secret })
+      expect(await enrolment.check()).toBe('confirmed')
+      expect(readTrustStore(devicesFile)?.credentials.map(c => c.label)).toEqual(['Chrome · Mac'])
+    })
+
+    it('approves the honest request when a relay copied the id into another one first', async () => {
+      const secret = newTrustSecret()
+      const id = await trustTokenId(secret)
+      const forged: EnrolSend = async (kind, payload) => {
+        if (kind === 'enrol_reveal') return send(kind, { ...(payload as object), trust: { id, mac: toB64url(new Uint8Array(32)) } })
+        return send(kind, payload)
+      }
+      await startEnrolment(forged, { userId: 'u-owner', machineId: 'm1', label: 'Relay', storage: memoryStorage() })
+      const enrolment = await startEnrolment(send, { userId: 'u-owner', machineId: 'm1', label: 'Chrome · Mac', storage, trustSecret: secret })
+      expect(paste(secret)).toMatchObject({ kind: 'approved', added: { label: 'Chrome · Mac' } })
+      expect(await enrolment.check()).toBe('confirmed')
+      expect(readTrustStore(devicesFile)?.credentials.map(c => c.label)).toEqual(['Chrome · Mac'])
+    })
+
+    it('falls back to codes against a machine that does not take tokens', async () => {
+      const old: EnrolSend = async (kind, payload) => {
+        const reply = await send(kind, payload) as Record<string, unknown>
+        if (kind === 'enrol_commit') delete reply.trustTokens
+        if (kind === 'enrol_reveal') expect((payload as Record<string, unknown>).trust).toBeUndefined()
+        return reply
+      }
+      const enrolment = await startEnrolment(old, { userId: 'u-owner', machineId: 'm1', label: 'Chrome · Mac', storage, trustSecret: newTrustSecret() })
+      expect(enrolment.trustOffered).toBe(false)
+    })
   })
 
   it('reports a rejection without pinning', async () => {
