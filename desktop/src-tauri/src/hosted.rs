@@ -20,6 +20,7 @@ use tauri_plugin_opener::OpenerExt;
 
 use crate::locations::{self, Handoff, Location, SchemeRequest};
 use crate::{local_page, open_external, BackgroundState, MAIN};
+use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 
 pub(crate) const LOCATION_PREFIX: &str = "location-";
 const MANAGER: &str = "locations";
@@ -174,6 +175,31 @@ fn save_last_location(app: &AppHandle, id: Option<String>) {
     let _ = prefs.save(&bg.prefs_file);
 }
 
+/// What the keychain note says (`keychain_note_needed`).
+const KEYCHAIN_NOTE: &str = "macOS may now ask for your Mac password so Codekin can open \
+the key it keeps for this computer (\"Codekin WebCrypto Master Key\").\n\n\
+Enter your Mac login password and choose Always Allow. \"Allow\" works only once, \
+so macOS would keep asking.\n\n\
+Until Codekin is signed by its developer, macOS asks again after each update.";
+
+/// Whether to show the keychain note before a hosted window opens: once per
+/// app version (an ad-hoc signed app looks new to the keychain after every
+/// update, and WebKit's WebCrypto key lives there). Records it as shown.
+fn keychain_note_needed(app: &AppHandle) -> bool {
+    if !cfg!(target_os = "macos") {
+        return false;
+    }
+    let version = app.package_info().version.to_string();
+    let bg = app.state::<BackgroundState>();
+    let mut prefs = bg.prefs.lock().unwrap();
+    if prefs.keychain_note_version.as_deref() == Some(version.as_str()) {
+        return false;
+    }
+    prefs.keychain_note_version = Some(version);
+    let _ = prefs.save(&bg.prefs_file);
+    true
+}
+
 /// Show `target` (`None` = This Mac). Runs on the main thread.
 pub(crate) fn switch_to(app: &AppHandle, target: Option<String>) {
     let app2 = app.clone();
@@ -209,6 +235,28 @@ fn switch_now(app: &AppHandle, target: Option<String>) {
             save_last_location(app, None);
         }
         Some(location) => {
+            // Before the keychain prompt the hosted page will cause, say what
+            // to answer; then open the location.
+            if keychain_note_needed(app) {
+                let app2 = app.clone();
+                let id = location.id.clone();
+                app.dialog()
+                    .message(KEYCHAIN_NOTE)
+                    .title("Choose \"Always Allow\"")
+                    .kind(MessageDialogKind::Info)
+                    .buttons(MessageDialogButtons::OkCustom("Got it".to_string()))
+                    .show(move |_| {
+                        let app3 = app2.clone();
+                        let _ = app2.run_on_main_thread(move || {
+                            switch_now(&app3, Some(id));
+                            if let Some(w) = location_window(&app3) {
+                                let _ = w.show();
+                                let _ = w.set_focus();
+                            }
+                        });
+                    });
+                return;
+            }
             let same = st.current.lock().unwrap().as_deref() == Some(location.id.as_str());
             if same {
                 if let Some(w) = location_window(app) {
