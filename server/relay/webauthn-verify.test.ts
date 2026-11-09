@@ -49,6 +49,16 @@ describe('verifyPasskeyAssertion', () => {
     expect(verifyPasskeyAssertion(passkey.assert(challenge), { ...expected, cosePublicKey: 'oQE' })).toBe('bad_key')
   })
 
+  it('refuses client data that is valid JSON but not an object, without throwing', () => {
+    const passkey = softPasskey()
+    const challenge = randomBytes(32)
+    const expected = { challenge, origin: ORIGIN, rpId: RP, cosePublicKey: passkey.cosePublicKey }
+    for (const json of ['null', '[]', '5', '"webauthn.get"']) {
+      const clientDataJSON = Buffer.from(json).toString('base64url')
+      expect(verifyPasskeyAssertion({ ...passkey.assert(challenge), clientDataJSON }, expected)).toBe('malformed')
+    }
+  })
+
   it('refuses weak RSA keys and ambiguous CBOR', () => {
     const cose = (entries: Array<[number, number | Buffer]>) => {
       // Tiny CBOR map encoder for these cases.

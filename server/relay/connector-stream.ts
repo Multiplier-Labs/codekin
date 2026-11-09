@@ -11,6 +11,7 @@
 
 import WebSocket from 'ws'
 import { STREAM_CLOSE } from './relay-protocol.js'
+import { safeCloseCode, safeCloseReason } from './connector-frames.js'
 import type { LocalServerTarget } from './connector-proxy.js'
 import { adaptServerFrame, checkClientFrame, checkServerFrame, hasPermission, newChannelState, observeServerFrame, stampReviewIdentity } from './connector-policy.js'
 import type { ChannelPolicy, ChannelState } from './connector-policy.js'
@@ -258,8 +259,8 @@ export class StreamChannel {
       clearTimeout(this.handshakeTimer)
       this.handshakeTimer = null
     }
-    // Local close codes must be valid on the wire; 4xxx and 1000 are.
-    this.ws?.close(code, reason.slice(0, 120))
+    // Local close codes and reasons must be valid on the wire, or `ws` throws.
+    this.ws?.close(safeCloseCode(code), safeCloseReason(reason, 'closed'))
     this.ws = null
   }
 
