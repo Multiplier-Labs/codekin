@@ -9,8 +9,9 @@
 
 import {
   CHANNEL_OPEN_ACTION, channelOpenPayload, channelSessionAfter, frameAction, frameNeedsStepUp, framePayload, frameSession, isExemptFrame,
-  requestAction, requestNeedsStepUp, requestPayload, requestSession,
+  requestAction, requestNeedsStepUp, requestPayload, requestSession, requestStepUpReason, frameStepUpReason,
 } from '../../../server/relay/intent-actions'
+import type { StepUpReason } from '../../../server/relay/intent-actions'
 
 export const RELAY_PROTOCOL_VERSION = 1
 
@@ -79,6 +80,7 @@ interface IntentInput {
   nonce?: string
   ts?: number
   stepUp?: boolean
+  stepUpReason?: StepUpReason
 }
 
 /** One channel's signing state: the token its signed open fixed, the next seq, and its session. */
@@ -368,6 +370,7 @@ export class RelayConnection {
     const started = performance.now()
     const bytes = base64Bytes(body)
     const stepUp = requestNeedsStepUp(method, path, bytes)
+    const stepUpReason = stepUp ? requestStepUpReason(method, path, bytes) : null
     const signAndSend = async () => {
       const intent = await this.signSafely({
         action: requestAction(method, path),
@@ -376,6 +379,7 @@ export class RelayConnection {
         ...(nonce ? { nonce } : {}),
         ...(signedAt !== undefined ? { ts: signedAt } : {}),
         ...(stepUp ? { stepUp } : {}),
+        ...(stepUpReason ? { stepUpReason } : {}),
       })
       nonce ??= intent ? intentNonce(intent) : undefined
       if (signedAt === undefined && intent) {
@@ -500,13 +504,14 @@ export class RelayConnection {
     // Session and position are fixed now, in send order, the same way the
     // machine tracks them (intent-actions.ts), even though signing finishes later.
     const exempt = isExemptFrame(data)
+    const stepUpReason = exempt ? null : frameStepUpReason(data)
     const seq = exempt ? undefined : ++state.seq
     const before = state.session
     state.session = channelSessionAfter(data, before, seq)
     this.inOrder(channelId, async () => {
       const intent = exempt ? null : await this.signSafely({
         action: frameAction(data), sessionId: frameSession(data, before), payload: framePayload(data), channel: state.token, seq,
-        ...(frameNeedsStepUp(data) ? { stepUp: true } : {}),
+        ...(frameNeedsStepUp(data) ? { stepUp: true, ...(stepUpReason ? { stepUpReason } : {}) } : {}),
       })
       this.sendOrQueue({ kind: 'stream_data', channelId, payload: intent ? { data, intent } : { data } })
     })

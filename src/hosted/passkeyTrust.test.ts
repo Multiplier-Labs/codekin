@@ -36,7 +36,8 @@ import { MachineEnrolment, approveEnrolment } from '../../server/relay/enrolment
 import { IntentVerifier } from '../../server/relay/intent-verify'
 import { ensureMachineIdentity } from '../../server/relay/machine-identity'
 import { emptyTrustStore, readTrustStore, writeTrustStore } from '../../server/relay/trust-store'
-import { frameAction, framePayload } from '../../server/relay/intent-actions'
+import { channelSessionAfter, frameAction, framePayload, frameSession, frameStepUpReason } from '../../server/relay/intent-actions'
+import { PASSKEY_STEP_UP_EVENT, type PasskeyStepUpDetail } from './intentSigner'
 import { keyIdForCoseKey } from '../../server/relay/webauthn-verify'
 import type { RelayPrincipal } from '../../server/relay/relay-protocol'
 
@@ -123,6 +124,61 @@ describe('passkeys from the browser to the machine', () => {
     // Without step-up the browser key alone is refused, naming the passkey.
     const plain = await signer.sign({ action: frameAction(always), sessionId: null, payload: framePayload(always), channel: token, seq: 2 })
     expect(verifier.checkFrame(OWNER, always, plain, opened.channel).stepUpPasskeys).toHaveLength(1)
+  })
+
+  it('asks for the passkey once for bypass sessions, then not again on this browser for a while (§6.6b)', async () => {
+    const events: PasskeyStepUpDetail[] = []
+    vi.stubGlobal('window', { addEventListener: () => {}, dispatchEvent: (e: CustomEvent<PasskeyStepUpDetail>) => { if (e.type === PASSKEY_STEP_UP_EVENT) events.push(e.detail); return true } })
+    vi.stubGlobal('CustomEvent', class<T> { constructor(readonly type: string, init: { detail: T }) { this.detail = init.detail } detail: T })
+    const storage = memoryStorage()
+    await enrolWithCodes(storage)
+    const signer = createIntentSigner('m1', storage)
+    const token = 'B'.repeat(22)
+    const opened = verifier.checkChannelOpen(OWNER, await signer.sign({ action: 'channel:open', sessionId: null, payload: new Uint8Array(), channel: token }))
+    let session: string | null = null
+    let seq = 0
+    const send = async (frame: string, extra: { stepUp?: boolean } = { stepUp: true }) => {
+      seq += 1
+      const reason = frameStepUpReason(frame)
+      const intent = await signer.sign({
+        action: frameAction(frame), sessionId: frameSession(frame, session), payload: framePayload(frame), channel: token, seq,
+        ...extra, ...(extra.stepUp && reason ? { stepUpReason: reason } : {}),
+      })
+      const decision = verifier.checkFrame(OWNER, frame, intent, opened.channel)
+      if (decision.forward) session = channelSessionAfter(frame, session, seq)
+      return { intent, decision }
+    }
+    const bypass = '{"type":"create_session","name":"n","workingDir":"/w","permissionMode":"bypassPermissions"}'
+
+    const before = fake.asserted
+    const first = await send(bypass)
+    expect(fake.asserted).toBe(before + 1)
+    expect(first.decision).toMatchObject({ forward: true, verdict: 'accepted' })
+    // The app was told why, around the prompt.
+    expect(events).toEqual([{ active: true, reason: 'bypass' }, { active: false, reason: 'bypass' }])
+    expect(storage.pins.get('u-owner:m1')?.passkeyStepUpAt).toBeTypeOf('number')
+
+    // The next bypass session: no prompt, the browser key, and the machine agrees.
+    const second = await send(bypass)
+    expect(fake.asserted).toBe(before + 1)
+    expect(second.intent).toHaveProperty('sig')
+    expect(second.decision).toMatchObject({ forward: true, verdict: 'accepted' })
+
+    // A refusal (the machine's window ended first) clears ours: the passkey again next time.
+    await signer.learnPasskeys([{ credentialId: passkey.credentialId, keyId: keyIdForCoseKey(passkey.cosePublicKey) }])
+    expect(storage.pins.get('u-owner:m1')?.passkeyStepUpAt).toBeUndefined()
+    await send(bypass)
+    expect(fake.asserted).toBe(before + 2)
+  })
+
+  it('always asks for the passkey for actions without a session reason (grants, device changes)', async () => {
+    const storage = memoryStorage()
+    await enrolWithCodes(storage)
+    await storage.putPin({ ...storage.pins.get('u-owner:m1')!, passkeyStepUpAt: Date.now() })
+    const signer = createIntentSigner('m1', storage)
+    const before = fake.asserted
+    await signer.sign({ action: 'grant', sessionId: 's1', payload: new Uint8Array(), stepUp: true })
+    expect(fake.asserted).toBe(before + 1)
   })
 
   it('lets the codes replace a machine key taken on first use, which never vouches for the clock', async () => {

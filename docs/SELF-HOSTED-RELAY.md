@@ -218,9 +218,10 @@ Set it up in three steps:
   with a secret the relay never sees.
 - The connector lets a forwarded delivery reach the local webhook route and nothing else. It
   forwards only the `X-GitHub-Event`, `X-GitHub-Delivery` and `X-Hub-Signature-256` headers.
-- It **can't** replay a delivery. The connector accepts each delivery id once, remembered for
-  7 days in `~/.config/codekin/relay-webhook-deliveries.json`, and refuses events whose own
-  timestamp is older than that.
+- It **can't** replay a delivery. The connector accepts each delivery body once, remembered for
+  7 days in `~/.config/codekin/relay-webhook-deliveries.sqlite` (shared by every connector on the
+  machine), and refuses events whose own timestamp is older than that. If that history can't be
+  read or written, it refuses deliveries; if it's lost, events dated before it restarted are refused.
 - It **can** read the payloads it forwards (repository, branch, commit message, run status). GitHub
   doesn't encrypt webhook bodies, so they're outside end-to-end encryption.
 
