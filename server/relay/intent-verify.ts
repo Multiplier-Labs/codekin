@@ -125,6 +125,10 @@ function parseBody(text: string): IntentBody | null {
 const MAX_GRANT_CHARS = 8192
 
 /** A grant's JSON, read strictly: every field present, keys well formed. Null otherwise. */
+/**
+ * A grant's shape, without importing its keys (the costly part, which
+ * grantKeysValid does once the owner's signature has checked out).
+ */
 function parseGrant(text: string): GrantBody | null {
   let parsed: unknown
   try { parsed = JSON.parse(text) } catch { return null }
@@ -134,12 +138,26 @@ function parseGrant(text: string): GrantBody | null {
   if (typeof v.granteeUserId !== 'string' || !v.granteeUserId || typeof v.expiresAt !== 'number' || !Number.isFinite(v.expiresAt)) return null
   if (!Array.isArray(v.permissions) || !v.permissions.every(p => typeof p === 'string')) return null
   if (!Array.isArray(v.granteeKeys) || v.granteeKeys.length > 20) return null
-  for (const k of v.granteeKeys) {
-    const spki = parseP256Spki((k as { spki?: unknown } | null)?.spki)
-    if (!spki || (k as { keyId?: unknown }).keyId !== keyIdForSpki(spki)) return null
-  }
   return v as GrantBody
 }
+
+/** Every key a grant names is a P-256 key under its own id. */
+function grantKeysValid(grant: GrantBody): boolean {
+  return grant.granteeKeys.every(k => {
+    const spki = parseP256Spki((k as { spki?: unknown } | null)?.spki)
+    return !!spki && (k as { keyId?: unknown }).keyId === keyIdForSpki(spki)
+  })
+}
+
+/**
+ * Signed grants looked at per request. The relay presents them, so it could
+ * send any number: past this they are ignored rather than verified. Far more
+ * sessions than one member is likely to have shared on one machine.
+ */
+export const MAX_SIGNED_GRANTS = 64
+
+/** Grants looked at per session (renewals and a narrowing can overlap briefly). */
+const MAX_GRANTS_PER_SESSION = 4
 
 function asSignedIntent(value: unknown): SignedIntent | null {
   if (!value || typeof value !== 'object') return null
@@ -152,6 +170,13 @@ function asSignedIntent(value: unknown): SignedIntent | null {
       || typeof w.clientDataJSON !== 'string' || typeof w.signature !== 'string') return null
   }
   return v as SignedIntent
+}
+
+/** The session a presented grant names, read without verifying anything, or null. */
+function grantSessionOf(value: unknown): string | null {
+  const signed = value as Partial<SignedGrant> | null
+  if (!signed || typeof signed.grant !== 'string' || signed.grant.length > MAX_GRANT_CHARS) return null
+  return parseGrant(signed.grant)?.sessionId ?? null
 }
 
 export class IntentVerifier {
@@ -449,7 +474,19 @@ export class IntentVerifier {
     const best = new Map<string, { grant: GrantBody; signedAt: number }>()
     const store = this.currentStore()
     if (!store || principal?.role !== 'grantee' || !Array.isArray(principal.signedGrants)) return new Map()
-    for (const signed of principal.signedGrants.slice(0, 200)) {
+    // Cheap checks first, so a relay can't make the machine verify signatures
+    // at will: only grants for sessions the relay itself says are shared
+    // count (the machine uses the intersection anyway), a few per session.
+    const perSession = new Map<string, number>()
+    let looked = 0
+    for (const signed of principal.signedGrants) {
+      if (looked >= MAX_SIGNED_GRANTS) break
+      const sessionId = grantSessionOf(signed)
+      if (sessionId === null || !Object.hasOwn(principal.grants, sessionId)) continue
+      const n = perSession.get(sessionId) ?? 0
+      if (n >= MAX_GRANTS_PER_SESSION) continue
+      perSession.set(sessionId, n + 1)
+      looked += 1
       const verified = this.verifyGrant(store, principal.userId, signed)
       if (!verified) continue
       // One grant per session: the most recently issued one (renewal keeps
@@ -495,6 +532,7 @@ export class IntentVerifier {
     const credential = this.signerOf(store, body, intent)
     if (!credential || store.ownerUserId === null || credential.userId !== store.ownerUserId) return null
     if (this.checkSignature(store, credential, intent)) return null
+    if (!grantKeysValid(grant)) return null
     if (grantNeedsStepUp(grant.permissions) && this.stepUpRefusal(store, credential)) return null
     if (body.ts > now + INTENT_MAX_SKEW_MS) return null
     // The id's issue time orders a share's grants and decides supersedes, so
