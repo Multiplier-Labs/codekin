@@ -192,6 +192,11 @@ export interface MachinePin {
   via?: 'code' | 'passkey'
   /** This user's passkeys the machine trusts, for step-up (§6.6). A hint. */
   passkeys?: Array<{ credentialId: string; keyId: string }>
+  /**
+   * When this browser last confirmed a privileged session action with a
+   * passkey here (ms). Within STEP_UP_WINDOW_MS the browser key does (§6.6b).
+   */
+  passkeyStepUpAt?: number
   /** Keep the pin until the machine proves removal; another attempt can retry. */
   removalPending?: boolean
 }

@@ -23,6 +23,7 @@ import { useHostedAuth } from './useHostedAuth'
 import { INVITE_ERROR_MESSAGES, consumeJoinedWorkspace, pickWorkspace } from './workspace'
 import { InvitePage } from './InvitePage'
 import { MfaChallengePage, MfaEnrollPage, StepUpHost } from './TwoFactor'
+import { PasskeyStepUpNotice } from './PasskeyStepUpNotice'
 import { CreateWorkspaceForm } from './WorkspaceSection'
 import { SettingsView } from '../components/settings/SettingsView'
 import { useRouter } from '../hooks/useRouter'
@@ -299,7 +300,7 @@ export default function HostedApp() {
     <Notice tone="error" onDismiss={() => { setNoticeDismissed(true) }}>{INVITE_ERROR_MESSAGES[authError]}</Notice>
   ) : null
   // StepUpHost answers "confirm it's you" for sensitive actions on any screen.
-  const withNotice = (screen: React.ReactNode) => <>{notice}<StepUpHost />{screen}</>
+  const withNotice = (screen: React.ReactNode) => <>{notice}<StepUpHost /><PasskeyStepUpNotice />{screen}</>
 
   // GitHub sign-in done, second factor (or 2FA enrollment) outstanding.
   if (account.authLevel === 'mfa_pending') {
