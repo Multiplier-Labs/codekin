@@ -4,7 +4,7 @@
  * useWsConnection depends on standard WebSocket semantics.
  */
 import { describe, it, expect, vi } from 'vitest'
-import { RelayWebSocket } from './relay-socket'
+import { RelayWebSocket, refusalMessage } from './relay-socket'
 import type { ChannelHandlers, RelayConnection } from './relay-client'
 
 /** A RelayConnection stand-in that hands the test the channel handlers. */
@@ -136,5 +136,25 @@ describe('close', () => {
     fake.handlers.onError({ code: 'machine_offline', message: 'gone' })
 
     expect(onerror).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('refusals', () => {
+  it('delivers a refusal on an open channel as an error frame the chat shows', () => {
+    const fake = fakeConnection()
+    const ws = new RelayWebSocket(fake.connection, 'ch-1')
+    const frames: string[] = []
+    ws.onmessage = e => { frames.push(e.data) }
+    fake.handlers.onReady()
+    fake.handlers.onError({ code: 'not_permitted', message: 'This action needs your passkey (Face ID, Touch ID or your security key)', detail: 'intent_step_up_required' })
+    expect(frames).toHaveLength(1)
+    expect(JSON.parse(frames[0])).toMatchObject({ type: 'error', message: expect.stringContaining('needs your passkey') })
+  })
+
+  it('says what works instead in the desktop app, which has no passkeys', () => {
+    const error = { code: 'not_permitted', message: 'This action needs your passkey', detail: 'intent_step_up_required' }
+    expect(refusalMessage(error, true)).toMatch(/Mac app can't use passkeys.*Auto approve/)
+    expect(refusalMessage(error, false)).toBe('This action needs your passkey')
+    expect(refusalMessage({ code: 'machine_offline', message: 'gone' }, true)).toBe('gone')
   })
 })
