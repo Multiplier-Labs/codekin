@@ -61,7 +61,8 @@ export function RelayDevicesBlock({ token, onError }: Props) {
   const [busy, setBusy] = useState(false)
   const [code, setCode] = useState('')
   const [codeError, setCodeError] = useState<string | null>(null)
-  const [added, setAdded] = useState<{ label: string; confirmCode: string; policyRaised?: boolean } | null>(null)
+  const [added, setAdded] = useState<{ label: string; confirmCode: string | null; policyRaised?: boolean } | null>(null)
+  const [tokenWaiting, setTokenWaiting] = useState(false)
 
   const refresh = useCallback(async () => {
     setData(await getRelayDevices(token))
@@ -79,10 +80,12 @@ export function RelayDevicesBlock({ token, onError }: Props) {
     setBusy(true)
     setCodeError(null)
     setAdded(null)
+    setTokenWaiting(false)
     try {
       const device = await approveRelayDevice(token, code.trim())
       setCode('')
-      setAdded({ label: device.label, confirmCode: device.confirmCode, policyRaised: device.policyRaised === true })
+      if (device.waiting) setTokenWaiting(true)
+      else setAdded({ label: device.label, confirmCode: device.confirmCode, policyRaised: device.policyRaised === true })
       await refresh()
     } catch (err) {
       setCodeError(err instanceof Error ? err.message : "Couldn't confirm the browser")
@@ -161,8 +164,8 @@ export function RelayDevicesBlock({ token, onError }: Props) {
           label="Confirm a browser"
           htmlFor="relay-device-code"
           description={pending.length > 0
-            ? `${pending.length === 1 ? 'A browser is' : `${pending.length} browsers are`} waiting. Type the code shown in the browser you want to allow.`
-            : 'In the browser, choose "Confirm this browser" for this computer, then type the code it shows here.'}
+            ? `${pending.length === 1 ? 'A browser is' : `${pending.length} browsers are`} waiting. Paste the command it shows, or type its code.`
+            : 'In the browser, choose "Confirm this browser" for this computer, then paste the command it shows here (or type its code).'}
           control={
             <form
               className="flex gap-2"
@@ -172,24 +175,33 @@ export function RelayDevicesBlock({ token, onError }: Props) {
                 id="relay-device-code"
                 value={code}
                 onChange={e => { setCode(e.target.value.toUpperCase()); setCodeError(null) }}
-                placeholder="XXXX-XXXX"
+                placeholder="Command or XXXX-XXXX"
                 autoComplete="off"
                 spellCheck={false}
-                maxLength={12}
-                className={`${input} w-32 font-mono tracking-widest`}
+                maxLength={200}
+                className={`${input} w-56 font-mono`}
               />
               <button type="submit" disabled={busy || code.trim().length < 8} className={primaryButton}>Confirm</button>
             </form>
           }
         >
           {codeError && <p className="mt-2 text-meta text-warning-5">{codeError}</p>}
+          {tokenWaiting && (
+            <p className="mt-2 text-meta text-ink-muted">Ready. The browser that showed this command is confirmed as soon as it asks (within 30 minutes).</p>
+          )}
           {added && (
             <div className="mt-3 rounded-control border border-edge bg-surface-raised px-3 py-2">
               <p className="flex items-center gap-1.5 text-meta text-success-5">
                 <IconCircleCheckFilled size={14} /> {added.label} can now control this computer.
               </p>
-              <p className="mt-1 text-meta text-ink-muted">To finish, type this code in that browser:</p>
-              <p className="mt-1 font-mono text-title tracking-widest text-ink" aria-label="Code for the browser">{added.confirmCode}</p>
+              {added.confirmCode ? (
+                <>
+                  <p className="mt-1 text-meta text-ink-muted">To finish, type this code in that browser:</p>
+                  <p className="mt-1 font-mono text-title tracking-widest text-ink" aria-label="Code for the browser">{added.confirmCode}</p>
+                </>
+              ) : (
+                <p className="mt-1 text-meta text-ink-muted">That browser finishes by itself.</p>
+              )}
               {added.policyRaised && (
                 <p className="mt-2 text-meta text-ink-muted">
                   It was your first device here, so this computer now takes control through the relay only from confirmed devices. Your other browsers need confirming too, and existing shares need Allow again in the share dialog. You can change this below.

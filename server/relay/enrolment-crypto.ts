@@ -21,13 +21,26 @@
  * browser pin kM. A relay that answered the browser with its own key never
  * gets the machine to approve, so it never has a CC shown to type.
  *
+ * A trust token replaces both codes with one paste (spec §5.2b). The browser
+ * makes a secret S that never crosses the relay and shows it inside a
+ * command; the owner pastes that on the machine. Then:
+ *
+ *   id    = base64url(SHA-256(T("ck-trust-id-v1", S)))[0:16]
+ *   macB  = HMAC_S(T("ck-trust-reveal-v1", enrolId, SPKI(kM), SPKI(kB), P, label, nonceB, nonceM))
+ *   macM  = HMAC_S(T("ck-trust-result-v1", enrolId, SPKI(kM), SPKI(kB), P))
+ *
+ * macB, sent with the reveal, ties the browser key to S and to the machine
+ * key the browser saw, so a relay that swapped either is caught. macM, sent
+ * with the approval, tells the browser that something holding S (the
+ * machine) approved this key under this machine key: it pins kM on that.
+ *
  * P is the passkey list, encoded as UTF-8 JSON of [credentialId,
  * cosePublicKey, rpId] triples. Passkeys join the ceremony in slice 5; until
  * then it is always "[]". Signatures are ECDSA P-256 / SHA-256 in IEEE P1363
  * form (r‖s, 64 bytes), which is what WebCrypto produces.
  */
 
-import { createHash, createPublicKey, sign, timingSafeEqual, verify } from 'crypto'
+import { createHash, createHmac, createPublicKey, sign, timingSafeEqual, verify } from 'crypto'
 import type { KeyObject } from 'crypto'
 
 export const COMMIT_LABEL = 'ck-enrol-commit-v1'
@@ -36,6 +49,14 @@ export const POP_LABEL = 'ck-enrol-pop-v1'
 export const SAS_LABEL = 'ck-sas-v1'
 export const RESULT_LABEL = 'ck-enrol-result-v1'
 export const CONFIRM_LABEL = 'ck-enrol-confirm-v1'
+export const TRUST_ID_LABEL = 'ck-trust-id-v1'
+export const TRUST_REVEAL_LABEL = 'ck-trust-reveal-v1'
+export const TRUST_RESULT_LABEL = 'ck-trust-result-v1'
+
+/** Bytes in a trust token's secret (128 bits). */
+export const TRUST_SECRET_BYTES = 16
+/** Characters in a trust token's id. */
+export const TRUST_ID_CHARS = 16
 
 /** Bytes in each side's nonce. */
 export const NONCE_BYTES = 32
@@ -175,4 +196,35 @@ export function checkLabel(value: unknown): string | null {
   // eslint-disable-next-line no-control-regex -- refusing control characters is the point
   if (/[\u0000-\u001f\u007f-\u009f\u2028\u2029\u202a-\u202e\u2066-\u2069]/.test(value)) return null
   return value.trim() === value ? value : null
+}
+
+/** A pasted trust token: 22 base64url characters (16 bytes). Null otherwise. */
+export function parseTrustToken(input: string): Buffer | null {
+  return fromB64url(input.trim(), TRUST_SECRET_BYTES)
+}
+
+/** The token's public handle: requests carry this, never the secret. */
+export function trustTokenId(secret: Uint8Array): string {
+  return sha256(transcript(TRUST_ID_LABEL, secret)).toString('base64url').slice(0, TRUST_ID_CHARS)
+}
+
+function hmac(secret: Uint8Array, data: Uint8Array): Buffer {
+  return createHmac('sha256', secret).update(data).digest()
+}
+
+/** macB: the browser's proof that it holds S, over the keys and nonces it saw. */
+export function trustRevealMac(
+  secret: Uint8Array, enrolId: string, spkiM: Uint8Array, spkiB: Uint8Array,
+  passkeys: readonly EnrolPasskey[], label: string, nonceB: Uint8Array, nonceM: Uint8Array,
+): Buffer {
+  return hmac(secret, transcript(TRUST_REVEAL_LABEL, enrolId, spkiM, spkiB, encodePasskeys(passkeys), label, nonceB, nonceM))
+}
+
+/** macM: the machine's proof, with the approval, that it holds S. */
+export function trustResultMac(secret: Uint8Array, enrolId: string, spkiM: Uint8Array, spkiB: Uint8Array, passkeys: readonly EnrolPasskey[]): Buffer {
+  return hmac(secret, transcript(TRUST_RESULT_LABEL, enrolId, spkiM, spkiB, encodePasskeys(passkeys)))
+}
+
+export function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
+  return a.length === b.length && timingSafeEqual(a, b)
 }

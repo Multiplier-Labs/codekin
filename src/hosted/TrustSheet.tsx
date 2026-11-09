@@ -12,7 +12,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { IconCircleCheckFilled, IconLoader2, IconAlertTriangle } from '@tabler/icons-react'
 import { RelayConnection, RelayRequestError } from '../lib/transport/relay-client'
 import {
-  EnrolmentFailure, certifyWithPasskey, currentUserId, deviceTrustSupported, startEnrolment, trustStorage, type Enrolment, type PasskeyKey,
+  EnrolmentFailure, certifyWithPasskey, currentUserId, deviceTrustSupported, newTrustSecret, startEnrolment, trustCommand, trustStorage, type Enrolment, type PasskeyKey,
 } from './deviceTrust'
 import { assertWithPasskey, fetchPasskeyKeys, isPasskeyCancel, passkeysSupported } from './passkeys'
 import { button, checkbox, quietButton } from '../components/settings/Block'
@@ -23,13 +23,19 @@ const POLL_MS = 2000
 const REQUEST_TTL_MS = 10 * 60_000 + 30_000
 /** How long to keep retrying while the machine comes online (just paired). */
 const ONLINE_WAIT_MS = 90_000
+/** How long to wait for a machine to approve a token the install pasted, before showing the command. */
+const PRE_PASTED_WAIT_MS = 8_000
 
 type Phase =
   /** The account has passkeys: use one, or show a code. */
   | { kind: 'choose' }
   | { kind: 'starting'; waitingForMachine: boolean }
-  /** `accepted`: the machine reported (signed) that the code was typed; the finishing code is next. */
-  | { kind: 'code'; enrolment: Enrolment; accepted: boolean }
+  /**
+   * Waiting on the machine. `accepted`: it reported (signed) that the code
+   * was typed; the finishing code is next. `showCodes`: the owner chose the
+   * two codes over the one pasted command.
+   */
+  | { kind: 'code'; enrolment: Enrolment; accepted: boolean; showCodes: boolean }
   | { kind: 'done'; outcome: 'approved' | 'rejected' | 'expired' }
   | { kind: 'failed'; message: string; keyChanged?: boolean; offerCode?: boolean }
 
@@ -41,6 +47,12 @@ interface TrustSheetProps {
   onTrusted?: () => void
   /** Go straight to the code (the person is at the computer, e.g. just paired it). */
   preferCode?: boolean
+  /**
+   * A trust token secret already pasted on the machine (the one-line install
+   * carried it): the machine approves this browser as soon as it asks, so
+   * the sheet only says it is confirming.
+   */
+  trustSecret?: Uint8Array
 }
 
 function describeError(err: unknown): string {
@@ -64,7 +76,7 @@ const normaliseCode = (code: string) => code.replace(/[\s-]/g, '').toUpperCase()
 
 const retryable = (err: unknown) => err instanceof RelayRequestError && ['machine_offline', 'timeout', 'disconnected'].includes(err.code)
 
-export function TrustSheet({ machineId, machineName, onClose, onTrusted, preferCode }: TrustSheetProps) {
+export function TrustSheet({ machineId, machineName, onClose, onTrusted, preferCode, trustSecret: pastedSecret }: TrustSheetProps) {
   const [phase, setPhase] = useState<Phase>({ kind: 'starting', waitingForMachine: false })
   const [attempt, setAttempt] = useState(0)
   /** How to confirm: a code typed on the computer, or an enrolled passkey (device_certify). Null until known. */
@@ -72,6 +84,15 @@ export function TrustSheet({ machineId, machineName, onClose, onTrusted, preferC
   const [passkeys, setPasskeys] = useState<PasskeyKey[]>([])
   const [addPasskey, setAddPasskey] = useState(true)
   const connection = useRef<RelayConnection | null>(null)
+  /** This attempt's trust token secret: one per attempt, never sent to the relay. */
+  const [secret, setSecret] = useState<Uint8Array>(() => pastedSecret ?? newTrustSecret())
+  /**
+   * Whether to assume the install already pasted the token. If the machine
+   * hasn't approved within a few seconds (an older installer, a failed
+   * step), show the command to paste instead: the same token still works.
+   */
+  const [assumePasted, setAssumePasted] = useState(pastedSecret !== undefined)
+  const prePasted = assumePasted && pastedSecret !== undefined && secret === pastedSecret
 
   // The account's passkeys decide whether there is a choice to make.
   useEffect(() => {
@@ -80,11 +101,11 @@ export function TrustSheet({ machineId, machineName, onClose, onTrusted, preferC
     void keys.then(found => {
       if (life.stopped) return
       setPasskeys(found)
-      if (found.length > 0 && !preferCode) setPhase({ kind: 'choose' })
+      if (found.length > 0 && !preferCode && !pastedSecret) setPhase({ kind: 'choose' })
       else setMethod('code')
     })
     return () => { life.stopped = true }
-  }, [preferCode])
+  }, [preferCode, pastedSecret])
 
   useEffect(() => {
     if (method === null) return
@@ -118,10 +139,10 @@ export function TrustSheet({ machineId, machineName, onClose, onTrusted, preferC
             return
           }
           const enrolment = await startEnrolment(send, {
-            userId, machineId,
+            userId, machineId, trustSecret: secret,
             ...(addPasskey && passkeys.length > 0 ? { passkeys: { candidates: passkeys, assert: assertWithPasskey } } : {}),
           })
-          if (!stopped()) setPhase({ kind: 'code', enrolment, accepted: false })
+          if (!stopped()) setPhase({ kind: 'code', enrolment, accepted: false, showCodes: !enrolment.trustOffered })
           return
         } catch (err) {
           if (stopped()) return
@@ -160,6 +181,8 @@ export function TrustSheet({ machineId, machineName, onClose, onTrusted, preferC
   useEffect(() => {
     if (phase.kind !== 'code' || phase.accepted) return
     const life = { stopped: false }
+    // A pre-pasted token is approved the moment the browser asks: check at once.
+    const firstPollMs = prePasted ? 300 : POLL_MS
     const giveUpAt = Date.now() + REQUEST_TTL_MS
     let timer: ReturnType<typeof setTimeout> | undefined
     const ask = () => {
@@ -171,9 +194,15 @@ export function TrustSheet({ machineId, machineName, onClose, onTrusted, preferC
         .then(outcome => {
           if (life.stopped) return
           if (!outcome) { timer = setTimeout(ask, POLL_MS); return }
+          // The pasted command did it, and the machine proved it: done.
+          if (outcome === 'confirmed') {
+            setPhase({ kind: 'done', outcome: 'approved' })
+            onTrusted?.()
+            return
+          }
           // An approval only moves the sheet on to the finishing code; it is
           // never proof on its own (a relay could forge it). Polling stops.
-          if (outcome === 'approved') setPhase({ ...phase, accepted: true })
+          if (outcome === 'approved') setPhase({ ...phase, accepted: true, showCodes: true })
           else setPhase({ kind: 'done', outcome })
         })
         .catch((err: unknown) => {
@@ -182,9 +211,16 @@ export function TrustSheet({ machineId, machineName, onClose, onTrusted, preferC
           else setPhase({ kind: 'failed', message: describeError(err) })
         })
     }
-    timer = setTimeout(ask, POLL_MS)
+    timer = setTimeout(ask, firstPollMs)
     return () => { life.stopped = true; clearTimeout(timer) }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- re-armed per phase; prePasted is fixed per attempt
   }, [phase])
+
+  useEffect(() => {
+    if (!prePasted || phase.kind !== 'code') return
+    const timer = setTimeout(() => { setAssumePasted(false) }, PRE_PASTED_WAIT_MS)
+    return () => { clearTimeout(timer) }
+  }, [prePasted, phase.kind])
 
   const [typed, setTyped] = useState('')
   /** 'own': the browser's own code was typed back, before typing it on the computer. */
@@ -206,6 +242,7 @@ export function TrustSheet({ machineId, machineName, onClose, onTrusted, preferC
   const forgetOldKey = useCallback(async () => {
     const userId = await currentUserId()
     if (userId) await trustStorage().deletePin(userId, machineId)
+    setSecret(newTrustSecret())
     setPhase({ kind: 'starting', waitingForMachine: false })
     setAttempt(a => a + 1)
   }, [machineId])
@@ -213,6 +250,7 @@ export function TrustSheet({ machineId, machineName, onClose, onTrusted, preferC
   const restart = () => {
     setTyped('')
     setTypedWrong(false)
+    setSecret(newTrustSecret())
     setPhase({ kind: 'starting', waitingForMachine: false })
     setAttempt(a => a + 1)
   }
@@ -242,11 +280,40 @@ export function TrustSheet({ machineId, machineName, onClose, onTrusted, preferC
         {phase.kind === 'starting' && (
           <p className="flex items-center gap-2 text-body text-ink-muted">
             <IconLoader2 size={16} className="animate-spin" />
-            {phase.waitingForMachine ? `Waiting for ${machineName} to come online…` : 'Preparing a code…'}
+            {phase.waitingForMachine ? `Waiting for ${machineName} to come online…` : pastedSecret ? `Confirming this browser on ${machineName}…` : 'Getting ready…'}
           </p>
         )}
 
-        {phase.kind === 'code' && (
+        {phase.kind === 'code' && !phase.showCodes && prePasted && (
+          <div className="space-y-3">
+            <p className="flex items-center gap-2 text-body text-ink-muted">
+              <IconLoader2 size={16} className="animate-spin" /> Confirming this browser on {machineName}…
+            </p>
+            <button type="button" onClick={() => { setPhase({ ...phase, showCodes: true }) }} className={`${quietButton} px-0`}>
+              Taking a while? Confirm with codes instead
+            </button>
+          </div>
+        )}
+
+        {phase.kind === 'code' && !phase.showCodes && !prePasted && (
+          <div className="space-y-4">
+            <p className="text-body text-ink-muted">Run this once in a terminal on {machineName}. This browser finishes by itself.</p>
+            <CopyBlock label="Command" command={trustCommand(secret)} />
+            <ul className="list-disc space-y-1 pl-5 text-meta text-ink-muted">
+              <li>No screen on {machineName}? Run it over SSH, or ask a Codekin session running on {machineName} to run it.</li>
+              <li>Or paste it into Settings → Remote access → Confirm a browser, in Codekin opened on {machineName} itself.</li>
+              <li>Only paste it on {machineName}: whoever runs it lets this browser in.</li>
+            </ul>
+            <p className="flex items-center gap-2 text-meta text-ink-faint">
+              <IconLoader2 size={14} className="animate-spin" /> Waiting for {machineName}… It expires in 10 minutes.
+            </p>
+            <button type="button" onClick={() => { setPhase({ ...phase, showCodes: true }) }} className={`${quietButton} px-0`}>
+              Can't paste there? Use codes instead
+            </button>
+          </div>
+        )}
+
+        {phase.kind === 'code' && phase.showCodes && (
           <div className="space-y-4">
             <p className="text-body text-ink-muted"><span className="font-semibold text-ink">1.</span> Approve this code on {machineName} itself, not here:</p>
             <p className="text-center font-mono text-head tracking-widest text-ink" aria-label="Confirmation code">{phase.enrolment.code}</p>

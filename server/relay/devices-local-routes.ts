@@ -29,7 +29,8 @@ import {
   describeTrustStore, readTrustStore, revokeCredential, setIntentPolicy, setLocalConfirmationOnly, TrustStoreError,
 } from './trust-store.js'
 import type { IntentPolicy, TrustStoreView } from './trust-store.js'
-import { approveEnrolment, rejectEnrolment } from './enrolment.js'
+import { approveEnrolment, approveTrustToken, rejectEnrolment } from './enrolment.js'
+import { parseTrustToken } from './enrolment-crypto.js'
 import { intentLogPath, readRecentIntents, verifyIntentLog } from './intent-log.js'
 
 type VerifyFn = (token: string | undefined) => boolean
@@ -144,6 +145,20 @@ export function createRelayDevicesRouter(
     if (!machineId) return
     const code = (req.body as { code?: unknown } | undefined)?.code
     try {
+      // The browser's trust command, pasted whole or just its token (spec §5.2b).
+      const token = typeof code === 'string' ? code.trim().split(/\s+/).pop() ?? '' : ''
+      if (parseTrustToken(token)) {
+        const relayOrigin = readRelayCredentialIdentity(credentialFile)?.url ?? ''
+        const outcome = approveTrustToken(token, { devicesFile, identityFile }, { machineId, relayOrigin })
+        if (outcome.kind === 'refused') {
+          res.status(409).json({ error: 'refused', message: "The browser that asked with this command couldn't prove it holds it. Start again in the browser." })
+          return
+        }
+        res.json(outcome.kind === 'waiting'
+          ? { waiting: { expiresAt: outcome.expiresAt } }
+          : { added: { keyId: outcome.added.keyId, label: outcome.added.label, confirmCode: null, policyRaised: outcome.added.policyRaised === true } })
+        return
+      }
       const added = approveEnrolment(typeof code === 'string' ? code : '', devicesFile, machineId)
       // The owner types confirmCode in the browser, which pins this machine's key only then.
       res.json({ added: { keyId: added.keyId, label: added.label, confirmCode: added.confirmCode, policyRaised: added.policyRaised === true } })

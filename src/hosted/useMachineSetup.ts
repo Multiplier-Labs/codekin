@@ -23,6 +23,7 @@ import {
   type Machine,
   type Pairing,
 } from './machines'
+import { deviceTrustSupported, newTrustSecret } from './deviceTrust'
 
 /** How often the list is re-read while something is expected to change. */
 export const SETUP_POLL_MS = 2500
@@ -143,7 +144,8 @@ export function useMachineSetup({ pollWhileEmpty = false }: {
         next = await precreatePairing()
       }
       if (!mounted.current) return
-      setPairing(next)
+      // The command also confirms this browser on the new machine (§5.2b).
+      setPairing(deviceTrustSupported() ? { ...next, trustSecret: newTrustSecret() } : next)
     } catch (err) {
       // An older command stays on screen (it may still be valid); the error
       // is shown next to it rather than replacing it.

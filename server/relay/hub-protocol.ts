@@ -67,11 +67,11 @@ const connector = z.discriminatedUnion('kind', [
   })),
   frame('event', z.object({ sessions: summary.optional(), status: version.optional() })),
   streamData, connectorStreamClose, frame('ping', empty), frame('pong', empty),
-  frame('enrol_challenge', z.object({ enrolId: id, machineKey: b64, nonceM: b64, signature: b64 })).extend({ id }),
+  frame('enrol_challenge', z.object({ enrolId: id, machineKey: b64, nonceM: b64, signature: b64, trustTokens: z.boolean().optional() })).extend({ id }),
   frame('enrol_result', z.object({
     enrolId: id, state: z.enum(['awaiting_code', 'approved', 'rejected', 'expired']), keyId: b64.optional(), signature: b64.optional(),
     machineKey: b64.optional(), passkeys: z.array(z.object({ credentialId: b64, keyId: b64 })).max(20).optional(),
-    machineTime: z.number().optional(),
+    machineTime: z.number().optional(), trustMac: b64.optional(),
   })).extend({ id }),
 ])
 
@@ -87,6 +87,8 @@ const browser = z.discriminatedUnion('kind', [
     enrolId: id, spki: b64, label: z.string().max(256), nonceB: b64, pop: b64,
     passkeys: z.array(z.object({ credentialId: b64, cosePublicKey: z.string().max(2048), rpId: z.string().max(253) })).max(3),
     passkeyProofs: z.array(passkeyProof).max(3).optional(),
+    // A trust token offer (spec §5.2b): its id and macB. Checked on the connector.
+    trust: z.object({ id: b64, mac: b64 }).optional(),
   })).extend({ id }),
   frame('enrol_status', z.object({ enrolId: id })).extend({ id }),
   frame('enrol_certify', z.object({ spki: b64, label: z.string().max(256), intent })).extend({ id }),

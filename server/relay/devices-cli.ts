@@ -5,6 +5,7 @@
  *
  *   codekin relay devices [list] [--json]
  *   codekin relay devices approve <code>     the code your browser shows
+ *   codekin relay devices trust <token>      the command your browser shows (no codes)
  *   codekin relay devices reject <requestId>
  *   codekin relay devices revoke <keyId>
  *   codekin relay devices policy <off|warn|required>
@@ -18,7 +19,7 @@ import {
   describeTrustStore, INTENT_POLICIES, readTrustStore, revokeCredential, setIntentPolicy, setLocalConfirmationOnly, TrustStoreError,
 } from './trust-store.js'
 import type { TrustStoreView } from './trust-store.js'
-import { approveEnrolment, rejectEnrolment } from './enrolment.js'
+import { approveEnrolment, approveTrustToken, rejectEnrolment } from './enrolment.js'
 import { intentLogPath, readRecentIntents, verifyIntentLog } from './intent-log.js'
 
 export interface DevicesCliIo {
@@ -27,8 +28,9 @@ export interface DevicesCliIo {
 }
 
 export const DEVICES_USAGE = [
-  'Usage: codekin relay devices <list|revoke|policy>',
+  'Usage: codekin relay devices <list|trust|approve|reject|revoke|policy|passkey-adds>',
   '  list   [--json]                   Show the devices that can control this computer',
+  '  trust <token>                     Confirm the browser that showed this command',
   '  approve <code>                    Confirm the browser showing this code',
   '  reject <requestId>                Turn down a browser waiting to be confirmed',
   '  revoke <keyId>                    Remove a device',
@@ -105,6 +107,30 @@ export function runDevicesCommand(
         const view = describeTrustStore(store)
         if (rest.includes('--json')) io.out(JSON.stringify({ ...view, identityKeyId: keyId }, null, 2))
         else printList(view, keyId, io)
+        return 0
+      }
+      case 'trust': {
+        // The install passes it in the environment, which (unlike argv) `ps` doesn't show.
+        const token = rest[0] ?? process.env.CODEKIN_TRUST_TOKEN
+        if (!token) {
+          io.err('Usage: codekin relay devices trust <token>')
+          return 1
+        }
+        const outcome = approveTrustToken(token, { devicesFile, identityFile }, { machineId: paired.machineId, relayOrigin: paired.url })
+        if (outcome.kind === 'refused') {
+          io.err("The browser that asked with this command couldn't prove it holds it. Start again in the browser.")
+          return 1
+        }
+        if (outcome.kind === 'waiting') {
+          io.out('Ready. The browser that showed this command is confirmed as soon as it asks (within 30 minutes).')
+          return 0
+        }
+        io.out(`Confirmed ${outcome.added.label}. It can now control this computer; the browser finishes by itself.`)
+        if (outcome.added.policyRaised) {
+          io.out('This computer now accepts control through the relay only from confirmed devices.')
+          io.out('Your other browsers need confirming too, and existing shares need Allow again in the share dialog.')
+          io.out('To undo: codekin relay devices policy off')
+        }
         return 0
       }
       case 'approve': {

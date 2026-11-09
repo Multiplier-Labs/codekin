@@ -24,8 +24,8 @@ import type { SessionUser } from './relay-auth-routes.js'
 import { listAuditEvents } from './audit.js'
 import { listDeviceKeys } from './device-keys.js'
 import { upsertShare } from './shares.js'
-import { MachineEnrolment, approveEnrolment } from './enrolment.js'
-import { POP_LABEL, commitment, shortAuthString, signP1363, transcript } from './enrolment-crypto.js'
+import { MachineEnrolment, approveEnrolment, approveTrustToken } from './enrolment.js'
+import { POP_LABEL, commitment, shortAuthString, signP1363, transcript, trustResultMac, trustRevealMac, trustTokenId } from './enrolment-crypto.js'
 import { ensureMachineIdentity } from './machine-identity.js'
 import { emptyTrustStore, readTrustStore, writeTrustStore } from './trust-store.js'
 
@@ -174,6 +174,28 @@ describe('enrolment over the relay', () => {
     const done = await browser.call('enrol_status', { enrolId })
     expect(done).toMatchObject({ kind: 'enrol_result', payload: { state: 'approved' } })
     expect(readTrustStore(devicesFile)?.credentials).toEqual([expect.objectContaining({ userId: owner.id, label: b.label })])
+    browser.close()
+  })
+
+  it('carries a trust token through the hubs: offer, pasted command, proof back (§5.2b)', async () => {
+    await startConnector()
+    const browser = new TestBrowser(browserUrl)
+    await browser.hello(machineId)
+    const b = browserKey()
+    const secret = randomBytes(16)
+    const challenge = await browser.call('enrol_commit', { commit: b.commit.toString('base64url') })
+    const { enrolId, nonceM, machineKey } = challenge.payload as { enrolId: string; nonceM: string; machineKey: string }
+    expect(challenge.payload.trustTokens).toBe(true)
+    const spkiM = Buffer.from(machineKey, 'base64url')
+    const nM = Buffer.from(nonceM, 'base64url')
+    await browser.call('enrol_reveal', {
+      enrolId, spki: b.spki.toString('base64url'), passkeys: [], label: b.label, nonceB: b.nonceB.toString('base64url'),
+      pop: signP1363(b.privateKey, transcript(POP_LABEL, enrolId, nM, '[]')).toString('base64url'),
+      trust: { id: trustTokenId(secret), mac: trustRevealMac(secret, enrolId, spkiM, b.spki, [], b.label, b.nonceB, nM).toString('base64url') },
+    })
+    expect(approveTrustToken(secret.toString('base64url'), { devicesFile, identityFile }, { machineId, relayOrigin: 'https://relay.test' }).kind).toBe('approved')
+    const done = await browser.call('enrol_status', { enrolId })
+    expect(done.payload).toMatchObject({ state: 'approved', trustMac: trustResultMac(secret, enrolId, spkiM, b.spki, []).toString('base64url') })
     browser.close()
   })
 

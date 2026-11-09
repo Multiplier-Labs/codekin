@@ -178,11 +178,29 @@ async function promptForBrowserCode() {
         console.log(later)
         break
       }
-      if (runDevicesCommand(['approve', answer], RELAY_CREDENTIAL_FILE) === 0) break
+      // The browser's one-line command (or just its token) works here too.
+      const token = answer.split(/\s+/).pop()
+      const args = /^[A-Za-z0-9_-]{22}$/.test(token) ? ['trust', token] : ['approve', answer]
+      if (runDevicesCommand(args, RELAY_CREDENTIAL_FILE) === 0) break
     }
   } finally {
     rl.close()
   }
+}
+
+/**
+ * The hosted install command carries a trust token for the browser that
+ * generated it (CODEKIN_TRUST_TOKEN, spec §5.2b): keep it here so that
+ * browser is confirmed the moment it asks, with no code typed. Without one,
+ * ask for the browser's code as before.
+ */
+async function confirmBrowserAfterPairing() {
+  if (!process.env.CODEKIN_TRUST_TOKEN) {
+    await promptForBrowserCode()
+    return
+  }
+  const { runDevicesCommand } = await loadDevicesCli()
+  runDevicesCommand(['trust'], RELAY_CREDENTIAL_FILE)
 }
 
 function printPairedNextSteps(managed) {
@@ -221,7 +239,7 @@ async function cmdRelayLogin(args) {
       const result = await claimPairingToken(relayUrl, pairingToken, managed)
       console.log(`Paired${as(result.ownerLogin)}. Machine id: ${result.machineId}`)
       printPairedNextSteps(managed)
-      if (managed) await promptForBrowserCode()
+      if (managed) await confirmBrowserAfterPairing()
       return
     } catch (err) {
       if (err instanceof PairingError && err.message === 'expired') {
@@ -250,7 +268,7 @@ async function cmdRelayLogin(args) {
   if (result.state === 'complete') {
     console.log(`\nPaired${as(result.ownerLogin)}. Machine id: ${result.machineId}`)
     printPairedNextSteps(managed)
-    if (managed) await promptForBrowserCode()
+    if (managed) await confirmBrowserAfterPairing()
     return
   }
   if (result.state === 'denied') console.error('\nPairing was denied in the hosted UI.')
@@ -796,7 +814,7 @@ if (cmd === 'start') {
     console.error('  login   [--url <relay-url>] [--code <pairing-token>] [--unmanaged]')
     console.error('          (the pairing token may also be passed as CODEKIN_PAIR_TOKEN)')
     console.error('  connect [--foreground]')
-    console.error('  devices [list [--json] | approve <code> | reject <requestId> | revoke <keyId> | policy <off|warn|required>]')
+    console.error('  devices [list [--json] | trust <token> | approve <code> | reject <requestId> | revoke <keyId> | policy <off|warn|required>]')
     console.error('  audit   [list [--limit N] [--json] | verify [file]]')
     process.exit(1)
   }

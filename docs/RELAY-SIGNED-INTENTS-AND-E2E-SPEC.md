@@ -238,6 +238,28 @@ Browser B (owner, signed in)                Relay              Connector M
 - **Registry.** When a machine accepts a reveal, the relay records the key in `device_keys` (`GET`/`DELETE /api/device-keys`).
 - **Not built yet:** the desktop notification and tray item for a waiting request (§5.5), and the Account → Devices page (§6.9).
 
+### 5.2b One pasted command instead of two codes (trust token)
+
+Typing a code on the machine and another back in the browser is the slowest part of the ceremony, and on a headless machine it means a terminal anyway. A trust token turns it into one paste that goes browser → machine, with nothing to type back.
+
+1. The browser makes a 16-byte secret `S` and shows `codekin relay devices trust <base64url(S)>`. `S` never crosses the relay: the only copy outside the browser is the one the owner pastes on the machine.
+2. The §5.2 ceremony runs as before. If the machine's `enrol_challenge` says `trustTokens: true`, the reveal also carries `trust { id, mac }`:
+   - `id = base64url(SHA-256(T("ck-trust-id-v1", S)))[0:16]`
+   - `mac = HMAC_S(T("ck-trust-reveal-v1", enrolId, SPKI(kM), SPKI(kB), P, label, nonceB, nonceM))`
+3. The owner pastes the command on the machine: in a terminal, into the code field of local Settings, or at the `codekin relay login` prompt. The machine finds the request by `id`, checks `mac` with `S` and its own key, and adds `kB` (and `P`) exactly as a typed code would.
+4. `enrol_result` for that approval carries `trustMac = HMAC_S(T("ck-trust-result-v1", enrolId, SPKI(kM), SPKI(kB), P))`. The browser checks it and pins `kM` with nothing typed.
+
+**Why it holds.**
+- The relay never sees `S`, so it can't produce `mac` for a key of its own.
+- `mac` covers the machine key the browser was shown, so a relay that swapped `kM` towards the browser fails the check on the real machine.
+- `trustMac` can only come from something that holds `S`, so it pins `kM` as safely as the finishing code does.
+- 128 bits of `S` leave nothing to grind. A request whose `mac` fails is spent, like a failed reveal.
+- The usual limits still apply: owner only, 3 waiting requests, 20 per 10 minutes.
+
+**Pasted before the browser asks.** The hosted install command carries `CODEKIN_TRUST_TOKEN=<S>` next to the pairing token, so the install pastes the token before the machine is even online. The machine then keeps `{ id, S }` in `relay-devices.json` → `trustTokens` (0600) for 30 minutes, at most 3 at a time. The first request offering that `id` with a valid `mac` is approved at once and the token is spent. When the machine comes online, the browser that generated the command runs the ceremony with `S` and is confirmed without a prompt (§5.3).
+
+**Compatibility.** An older connector doesn't say `trustTokens`, and an older relay strips the field. Either way the browser shows the two codes instead. Approvals record `addedBy: 'local'`, since the command was pasted on the machine.
+
 ### 5.3 At pairing
 
 Pairing already has the user at the machine and in the browser at the same moment.
@@ -246,6 +268,8 @@ Pairing already has the user at the machine and in the browser at the same momen
 3. New pairings set `policy: "required"` once the first credential is enrolled.
 
 The two steps finish together: the user types one code on the machine, and the machine is paired and trusts that browser.
+
+**As built (one-line install).** The command generated in the hosted app carries a trust token (§5.2b) as well as the pairing token. The installer, or `codekin relay login`, keeps it on the machine, and the browser tab that generated the command confirms itself once the machine is online. Nothing is typed. Without a token, `codekin relay login` asks for the browser's code, or accepts its pasted command.
 
 ### 5.4 Adding a browser later
 
@@ -267,7 +291,7 @@ The two steps finish together: the user types one code on the machine, and the m
 | --- | --- | --- |
 | Local web UI: Settings → Remote access → "Devices that can control this computer" (pending requests, code entry, list, revoke) | `GET/POST/DELETE /api/relay/devices*` on the local server, local auth token | `/api/relay` is in neither proxy allowlist (`connector-proxy.ts:28-83`). A test pins this |
 | Desktop app | Same local UI. A notification and the tray item open it while a request is pending | Local |
-| CLI | `codekin relay devices list \| approve <code> \| revoke <keyId> \| policy <off\|warn\|required>` | Edits the trust store file directly |
+| CLI | `codekin relay devices list \| trust <token> \| approve <code> \| revoke <keyId> \| policy <off\|warn\|required>` | Edits the trust store file directly |
 
 Headless servers use the CLI over SSH, or a local UI that is already exposed behind its own authentication. That is the local trust boundary, not the relay's.
 

@@ -99,6 +99,46 @@ export async function confirmationCode(spkiM: Uint8Array, spkiB: Uint8Array, non
   return base32(await sha256(transcript('ck-enrol-confirm-v1', spkiM, spkiB, encodePasskeys(passkeys), nonceB, nonceM))).slice(0, 6)
 }
 
+// --- Trust tokens (spec §5.2b): one pasted command instead of two codes -----
+
+/** A fresh trust token secret S. It never crosses the relay: only the command shown here carries it. */
+export function newTrustSecret(): Uint8Array {
+  return crypto.getRandomValues(new Uint8Array(16))
+}
+
+/** The command the owner pastes on the machine. */
+export function trustCommand(secret: Uint8Array): string {
+  return `codekin relay devices trust ${toB64url(secret)}`
+}
+
+/** The token's public handle, sent with the reveal. */
+export async function trustTokenId(secret: Uint8Array): Promise<string> {
+  return toB64url(await sha256(transcript('ck-trust-id-v1', secret))).slice(0, 16)
+}
+
+async function hmac(secret: Uint8Array, data: Uint8Array): Promise<Uint8Array> {
+  const key = await crypto.subtle.importKey('raw', secret as BufferSource, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign'])
+  return new Uint8Array(await crypto.subtle.sign('HMAC', key, data as BufferSource))
+}
+
+export function trustRevealMac(
+  secret: Uint8Array, enrolId: string, spkiM: Uint8Array, spkiB: Uint8Array,
+  passkeys: readonly PasskeyKey[], label: string, nonceB: Uint8Array, nonceM: Uint8Array,
+): Promise<Uint8Array> {
+  return hmac(secret, transcript('ck-trust-reveal-v1', enrolId, spkiM, spkiB, encodePasskeys(passkeys), label, nonceB, nonceM))
+}
+
+export function trustResultMac(secret: Uint8Array, enrolId: string, spkiM: Uint8Array, spkiB: Uint8Array, passkeys: readonly PasskeyKey[]): Promise<Uint8Array> {
+  return hmac(secret, transcript('ck-trust-result-v1', enrolId, spkiM, spkiB, encodePasskeys(passkeys)))
+}
+
+function sameBytes(a: Uint8Array, b: Uint8Array): boolean {
+  if (a.length !== b.length) return false
+  let diff = 0
+  for (let i = 0; i < a.length; i++) diff |= a[i] ^ b[i]
+  return diff === 0
+}
+
 /** "K7QM2XPA" → "K7QM-2XPA"; "ABC234" → "ABC-234". */
 export function formatCode(code: string): string {
   const half = code.length / 2
@@ -422,11 +462,18 @@ export interface Enrolment {
   /** The machine identity key id, to show next to the code. */
   machineKeyId: string
   /**
+   * The machine takes the trust command (spec §5.2b): pasting it there
+   * finishes everything, and `check` comes back 'confirmed'.
+   */
+  trustOffered: boolean
+  /**
    * Ask the machine once whether the code was typed. Null while it is still
    * waiting. 'approved' is news, not proof: a relay could forge it on a first
-   * enrolment, so it never pins anything. `confirm` does.
+   * enrolment, so it never pins anything. `confirm` does. 'confirmed' means
+   * the trust command was pasted there and the machine proved it: the
+   * machine key is pinned, nothing left to type.
    */
-  check: () => Promise<EnrolOutcome | null>
+  check: () => Promise<EnrolOutcome | 'confirmed' | null>
   /**
    * The owner typed the code the machine showed after approving. Pins the
    * machine key when it matches; false when it doesn't.
@@ -448,6 +495,7 @@ interface Result {
   signature?: string
   machineKey?: string
   passkeys?: Array<{ credentialId: string; keyId: string }>
+  trustMac?: string
 }
 
 function isChallenge(v: unknown): v is Challenge {
@@ -469,6 +517,8 @@ export async function startEnrolment(
     storage?: TrustStorage
     /** Also enrol one of these passkeys: the user picks it, and it proves itself (§5.2 as built). */
     passkeys?: { candidates: PasskeyKey[]; assert: AssertPasskey }
+    /** Offer this trust token secret (newTrustSecret), so the trust command can stand in for the codes. */
+    trustSecret?: Uint8Array
   },
 ): Promise<Enrolment> {
   const storage = opts.storage ?? trustStorage()
@@ -516,13 +566,29 @@ export async function startEnrolment(
   // The proof of possession also covers the passkey proofs, so they can't be swapped on the way.
   const pop = new Uint8Array(await crypto.subtle.sign(SIGN, key.keyPair.privateKey,
     transcript('ck-enrol-pop-v1', challenge.enrolId, nonceM, encodePasskeyProofs(passkeyProofs)) as BufferSource))
+  // The token's MAC covers the machine key we were shown, so a relay that
+  // swapped it is caught on the machine.
+  const trustSecret = opts.trustSecret && (challenge as { trustTokens?: unknown }).trustTokens === true ? opts.trustSecret : null
+  const trust = trustSecret
+    ? { id: await trustTokenId(trustSecret), mac: toB64url(await trustRevealMac(trustSecret, challenge.enrolId, spkiM, spkiB, passkeys, label, nonceB, nonceM)) }
+    : null
   await send('enrol_reveal', {
     enrolId: challenge.enrolId, spki: key.spki, passkeys, passkeyProofs, label, nonceB: toB64url(nonceB), pop: toB64url(pop),
+    ...(trust ? { trust } : {}),
   })
   const sas = await shortAuthString(spkiM, spkiB, nonceB, nonceM, passkeys)
   let passkeyHint: Result['passkeys']
 
-  const check = async (): Promise<EnrolOutcome | null> => {
+  const pin = async () => {
+    await storage.putPin({
+      userId: opts.userId, machineId: opts.machineId, machineKey: challenge.machineKey, keyId: key.keyId, pinnedAt: new Date().toISOString(),
+      via: 'code',
+      // The passkey enrolled just now, or whatever the machine said it trusts.
+      passkeys: passkeyHint ?? await Promise.all(passkeys.map(async p => ({ credentialId: p.credentialId, keyId: await keyIdForCose(p.cosePublicKey) }))),
+    })
+  }
+
+  const check = async (): Promise<EnrolOutcome | 'confirmed' | null> => {
     const result = await send('enrol_status', { enrolId: challenge.enrolId }) as Result
     if (result.state === 'awaiting_code') return null
     if (result.state === 'expired') return 'expired'
@@ -531,6 +597,15 @@ export async function startEnrolment(
       spkiM, transcript('ck-enrol-result-v1', challenge.enrolId, spkiB, result.state), fromB64url(result.signature))
     if (!signed) throw new EnrolmentFailure('bad_machine_signature', "The computer's answer was not signed by its key")
     if (Array.isArray(result.passkeys)) passkeyHint = result.passkeys
+    // Only something holding S, which never crossed the relay, can produce
+    // macM over this machine key: the pasted command did, so pin it.
+    if (result.state === 'approved' && trustSecret && typeof result.trustMac === 'string') {
+      const expectedMac = await trustResultMac(trustSecret, challenge.enrolId, spkiM, spkiB, passkeys)
+      if (sameBytes(expectedMac, fromB64url(result.trustMac))) {
+        await pin()
+        return 'confirmed'
+      }
+    }
     return result.state
   }
 
@@ -544,16 +619,11 @@ export async function startEnrolment(
     let diff = 0
     for (let i = 0; i < code.length; i++) diff |= code.charCodeAt(i) ^ expected.charCodeAt(i)
     if (diff !== 0) return false
-    await storage.putPin({
-      userId: opts.userId, machineId: opts.machineId, machineKey: challenge.machineKey, keyId: key.keyId, pinnedAt: new Date().toISOString(),
-      via: 'code',
-      // The passkey enrolled just now, or whatever the machine said it trusts.
-      passkeys: passkeyHint ?? await Promise.all(passkeys.map(async p => ({ credentialId: p.credentialId, keyId: await keyIdForCose(p.cosePublicKey) }))),
-    })
+    await pin()
     return true
   }
 
-  return { enrolId: challenge.enrolId, code: formatCode(sas), machineKeyId: await keyIdForSpki(spkiM), check, confirm }
+  return { enrolId: challenge.enrolId, code: formatCode(sas), machineKeyId: await keyIdForSpki(spkiM), trustOffered: trust !== null, check, confirm }
 }
 
 /**

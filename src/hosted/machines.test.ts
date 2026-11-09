@@ -97,6 +97,12 @@ describe('installCommands', () => {
     expect(login).not.toContain('--code')
   })
 
+  it('carries the trust token in the environment too', () => {
+    const { install, login } = installCommands('tok', 'https://app.codekin.ai', 'Ab_-0123456789abcdefgh')
+    expect(install).toBe('curl -fsSL https://codekin.ai/install.sh | CODEKIN_PAIR_TOKEN=tok CODEKIN_TRUST_TOKEN=Ab_-0123456789abcdefgh bash')
+    expect(login).toBe('CODEKIN_PAIR_TOKEN=tok CODEKIN_TRUST_TOKEN=Ab_-0123456789abcdefgh codekin relay login')
+  })
+
   it('names a non-default relay explicitly', () => {
     const { install, login } = installCommands('tok', 'https://relay.example.com')
     expect(install).toBe('curl -fsSL https://codekin.ai/install.sh | CODEKIN_PAIR_TOKEN=tok bash -s -- --relay https://relay.example.com')
