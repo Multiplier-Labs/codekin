@@ -365,8 +365,12 @@ export class RelayConnector {
       target: this.localTarget,
       fetchImpl: this.opts.fetchImpl,
     })
-    if (deliveryId && 'response' in outcome && outcome.response.status >= 200 && outcome.response.status < 300) {
-      this.webhookGuard.record(deliveryId)
+    if (deliveryId) {
+      // Accepted: remember it. Refused, or never reached the server: let a
+      // genuine (re)delivery through. A timeout may have been processed, so
+      // its claim stays.
+      if ('response' in outcome && outcome.response.status >= 200 && outcome.response.status < 300) this.webhookGuard.record(deliveryId)
+      else if ('response' in outcome || outcome.error.detail !== 'timeout') this.webhookGuard.release(deliveryId)
     }
     if (ws.readyState !== WebSocket.OPEN) return
 
