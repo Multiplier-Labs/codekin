@@ -244,7 +244,7 @@ describe('codekin relay devices', () => {
   function run(args: string[]) {
     const out: string[] = []
     const err: string[] = []
-    const code = runDevicesCommand(args, credentialFile, { out: l => { out.push(l) }, err: l => { err.push(l) } })
+    const code = runDevicesCommand(args, credentialFile, { out: l => { out.push(l) }, err: l => { err.push(l) } }, {})
     return { code, out: out.join('\n'), err: err.join('\n') }
   }
 
