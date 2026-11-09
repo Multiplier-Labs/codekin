@@ -16,6 +16,7 @@ import {
 } from './deviceTrust'
 import { assertWithPasskey, fetchPasskeyKeys, isPasskeyCancel, passkeysSupported } from './passkeys'
 import { button, checkbox, quietButton } from '../components/settings/Block'
+import { CopyBlock } from './InstallCommand'
 
 const POLL_MS = 2000
 /** The machine drops an undecided request after 10 minutes. */
@@ -50,6 +51,16 @@ function describeError(err: unknown): string {
   }
   return err instanceof Error ? err.message : 'Something went wrong'
 }
+
+/**
+ * A passkey the computer has never seen. It is only added there while a
+ * browser is confirmed with a code, so the first confirmation on a computer
+ * is always a code. Older computers send the bare reason code.
+ */
+const passkeyUnknown = (err: unknown) => err instanceof Error && err.message.includes('intent_unknown_key')
+
+/** Codes compare without case, spaces or dashes. */
+const normaliseCode = (code: string) => code.replace(/[\s-]/g, '').toUpperCase()
 
 const retryable = (err: unknown) => err instanceof RelayRequestError && ['machine_offline', 'timeout', 'disconnected'].includes(err.code)
 
@@ -122,7 +133,10 @@ export function TrustSheet({ machineId, machineName, onClose, onTrusted, preferC
           }
           setPhase({
             kind: 'failed',
-            message: method === 'passkey' && isPasskeyCancel(err) ? 'The passkey prompt was closed.' : describeError(err),
+            message: method === 'passkey' && isPasskeyCancel(err) ? 'The passkey prompt was closed.'
+              : method === 'passkey' && passkeyUnknown(err)
+                ? `Your passkey isn't confirmed on ${machineName} yet. Confirm this browser with a code once, keeping "Also confirm my passkey" ticked. After that your passkey can add your other browsers.`
+                : describeError(err),
             keyChanged: err instanceof EnrolmentFailure && err.code === 'machine_key_changed',
             offerCode: method === 'passkey',
           })
@@ -173,14 +187,19 @@ export function TrustSheet({ machineId, machineName, onClose, onTrusted, preferC
   }, [phase])
 
   const [typed, setTyped] = useState('')
-  const [typedWrong, setTypedWrong] = useState(false)
+  /** 'own': the browser's own code was typed back, before typing it on the computer. */
+  const [typedWrong, setTypedWrong] = useState<false | 'own' | 'wrong'>(false)
   const finish = async () => {
     if (phase.kind !== 'code') return
+    if (normaliseCode(typed) === normaliseCode(phase.enrolment.code)) {
+      setTypedWrong('own')
+      return
+    }
     if (await phase.enrolment.confirm(typed)) {
       setPhase({ kind: 'done', outcome: 'approved' })
       onTrusted?.()
     } else {
-      setTypedWrong(true)
+      setTypedWrong('wrong')
     }
   }
 
@@ -229,11 +248,15 @@ export function TrustSheet({ machineId, machineName, onClose, onTrusted, preferC
 
         {phase.kind === 'code' && (
           <div className="space-y-4">
-            <p className="text-body text-ink-muted">Type this code on {machineName} to let this browser control it:</p>
+            <p className="text-body text-ink-muted"><span className="font-semibold text-ink">1.</span> Approve this code on {machineName} itself, not here:</p>
             <p className="text-center font-mono text-head tracking-widest text-ink" aria-label="Confirmation code">{phase.enrolment.code}</p>
+            <CopyBlock
+              label={`In a terminal on ${machineName}, run:`}
+              command={`codekin relay devices approve ${phase.enrolment.code}`}
+            />
             <ul className="list-disc space-y-1 pl-5 text-meta text-ink-muted">
-              <li>In Codekin on that computer: Settings → Remote access → Confirm a browser.</li>
-              <li>Or in a terminal there: <code className="font-mono text-ink">codekin relay devices approve {phase.enrolment.code}</code></li>
+              <li>No screen on {machineName}? Run it over SSH, or ask a Codekin session running on {machineName} to run it.</li>
+              <li>Or, in Codekin opened on {machineName} itself (not through this site): Settings → Remote access → Confirm a browser, and type the code there.</li>
               <li>If you just ran <code className="font-mono">codekin relay login</code>, it is asking for this code.</li>
             </ul>
             <form
@@ -241,9 +264,10 @@ export function TrustSheet({ machineId, machineName, onClose, onTrusted, preferC
               onSubmit={e => { e.preventDefault(); void finish() }}
             >
               <label htmlFor="trust-sheet-finish" className="block text-body text-ink">
+                <span className="font-semibold">2.</span>{' '}
                 {phase.accepted
                   ? `${machineName} accepted the code. Type the code it shows now to finish:`
-                  : `${machineName} then shows a 6-character code. Type it here to finish:`}
+                  : `${machineName} then shows a different, 6-character code. Type that one here to finish:`}
               </label>
               <div className="flex gap-2">
                 <input
@@ -258,7 +282,10 @@ export function TrustSheet({ machineId, machineName, onClose, onTrusted, preferC
                 />
                 <button type="submit" disabled={typed.replace(/[\s-]/g, '').length < 6} className={button}>Finish</button>
               </div>
-              {typedWrong && <p className="text-meta text-warning-5">That isn't the code {machineName} showed. Check it and try again.</p>}
+              {typedWrong === 'own' && (
+                <p className="text-meta text-warning-5">That is this browser's code. Type it on {machineName} first (step 1), then enter the 6-character code {machineName} shows.</p>
+              )}
+              {typedWrong === 'wrong' && <p className="text-meta text-warning-5">That isn't the code {machineName} showed. Check it and try again.</p>}
             </form>
             {!phase.accepted && (
               <p className="flex items-center gap-2 text-meta text-ink-faint">

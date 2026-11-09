@@ -312,7 +312,11 @@ export class MachineEnrolment {
     if (!this.opts.intents) throw new EnrolmentError('enrol_unavailable', 'This computer cannot check passkeys')
     const userId = this.checkPrincipal(principal, store)
     const { decision, signer } = this.opts.intents.checkDeviceIntent(principal, p.intent, DEVICE_CERTIFY_ACTION, certifyPayload(spki, label))
-    if (!signer) throw refuse(`The passkey could not be checked (${decision.reason ?? 'not accepted'})`)
+    if (!signer) {
+      throw refuse(decision.reason === 'intent_unknown_key'
+        ? "This passkey isn't confirmed on this computer yet. Confirm this browser with a code first (intent_unknown_key)"
+        : `The passkey could not be checked (${decision.reason ?? 'not accepted'})`)
+    }
     // Only a passkey certifies; a browser key added by passkey can't add more.
     if (signer.kind !== 'passkey' || signer.userId !== userId) throw refuse('Only a passkey confirmed on this computer can add a browser')
     const keyId = keyIdForSpki(spki)
