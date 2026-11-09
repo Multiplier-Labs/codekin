@@ -62,6 +62,14 @@ describe('JoeChatMessage', () => {
     expect(link?.getAttribute('rel')).toBe('noopener noreferrer')
   })
 
+  it('shows an image that resolves to another host as a link', async () => {
+    await act(async () => {
+      root.render(<JoeChatMessage msg={{ type: 'joe', role: 'joe', text: 'see ![chart](https:/evil.test/x)' }} fontSize={14} ctx={{ token: 'tok', agentName: 'Joe', tasks: {} }} />)
+    })
+    expect(container.querySelector('img')).toBeNull()
+    expect(container.querySelector('a[href="https://evil.test/x"]')?.textContent).toBe('External image: chart (evil.test)')
+  })
+
   it('attributes the user\'s request to Joe', async () => {
     await act(async () => {
       root.render(<JoeChatMessage msg={{ type: 'joe', role: 'to_joe', text: 'supervise this' }} fontSize={14} ctx={{ token: 'tok', agentName: 'Joe', tasks: {} }} />)
