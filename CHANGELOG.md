@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.3] - 2026-11-09
+
+### Fixed
+- Opening a machine from a browser it hasn't confirmed no longer dead-ends on "Could not reach this machine". The screen says the browser isn't confirmed there and offers **Confirm this browser**, then connects by itself. A connection that doesn't answer within 12 seconds (for example a browser that can't open its saved device key) offers the same way out (#847).
+
 ## [0.11.2] - 2026-11-09
 
 Update machines and the relay together. The new protections are enforced on each machine, so they only take effect on machines running 0.11.2. (0.11.1 was never published.)
