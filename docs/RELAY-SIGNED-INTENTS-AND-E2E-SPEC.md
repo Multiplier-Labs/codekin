@@ -484,7 +484,7 @@ Verification sits at the relay message boundary in `connector.ts`: `request`, `s
 
 ### 6.6 Step-up with a passkey
 
-**Privileged actions** are listed in §6.2: saving standing approval rules, bypass permission mode, shell-approving grants, and device and policy changes. If the owner has a passkey enrolled on the machine, these need a passkey assertion. The OS prompt ("Use Face ID to approve: Share session 'api-fix' with Dana, shell approvals") is the one thing a compromised page can't fake. The prompt text comes from the intent, so the connector sees the same action the user approved.
+**Privileged actions** are listed in §6.2: saving standing approval rules, bypass permission mode, shell-approving grants, and device and policy changes. Standing authority set over REST is privileged whatever its body: trusting the orchestrator (`POST /api/orchestrator/trust/pin|approve`) and creating or changing scheduled or webhook-triggered automations (`/api/workflows/schedules`, `/api/workflows/config/repos`). If the owner has a passkey enrolled on the machine, these need a passkey assertion. The OS prompt ("Use Face ID to approve: Share session 'api-fix' with Dana, shell approvals") is the one thing a compromised page can't fake. The prompt text comes from the intent, so the connector sees the same action the user approved.
 
 If the owner has no enrolled passkey, the browser key is accepted (D2 in §13). A passkey can't be required everywhere, because the desktop app's web view can't use passkeys (§4.2). Instead:
 - The pairing flow offers passkey enrolment while the user is at the machine (§5.3).
@@ -552,7 +552,7 @@ Asking for the passkey on every privileged session action got in the way. Owners
 - **"Privileged actions need a passkey"** is a workspace setting (`workspaces.require_passkey_step_up`, migration 14).
   - It reaches connectors in `hello_ack`, and as a hub `event` when it changes.
   - Turning it off needs a recent sign-in.
-  - Only the relay reports it. A lying relay can only leave the machine-side rule in force (a passkey enrolled here is always required).
+  - Only the relay reports it, but the machine keeps it: once a connector hears it on, it records `requirePasskeyStepUp` in `relay-devices.json`, and only a local surface turns it off (`codekin relay devices passkey-required off`). A relay that later says "off" changes nothing.
 - **One relay hostname.** The origin and RP ID a machine checks come from the relay URL it paired with. The browser uses the hostname it was loaded from. A relay reached under another name (an alias, or a `PUBLIC_URL` that differs from the pairing URL) makes every passkey intent fail. Since an enrolled passkey rules out browser-key step-up, privileged actions then need the machine itself.
 - **Not built:** telling the owner's other enrolled browsers when a browser is added by passkey (§5.4); Account → Devices, "remove from all my computers". The remote policy intent came with slice 7 (§6.8a).
 

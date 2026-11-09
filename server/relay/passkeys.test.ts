@@ -20,7 +20,7 @@ import type { IntentBody, SignedIntent } from './intent-actions.js'
 import { IntentVerifier } from './intent-verify.js'
 import { IntentLog, readRecentIntents } from './intent-log.js'
 import { ensureMachineIdentity, keyIdForSpki } from './machine-identity.js'
-import { emptyTrustStore, readTrustStore, setLocalConfirmationOnly, setPasskeyWindow, writeTrustStore } from './trust-store.js'
+import { emptyTrustStore, readTrustStore, revokeCredential, setLocalConfirmationOnly, setPasskeyWindow, setRequirePasskeyStepUp, writeTrustStore } from './trust-store.js'
 import { keyIdForCoseKey } from './webauthn-verify.js'
 import { softPasskey } from './__fixtures__/authenticator.js'
 import type { SoftPasskey } from './__fixtures__/authenticator.js'
@@ -211,6 +211,25 @@ describe('passkeys on the machine', () => {
       expect(requestNeedsStepUp('POST', '/api/orchestrator/children', json({ repo: 'r', task: 't' }))).toBe(false)
     })
 
+    it('treats standing trust and automation routes as privileged, whatever their body', () => {
+      const body = new TextEncoder().encode('{}')
+      for (const [method, path] of [
+        ['POST', '/api/orchestrator/trust/pin'], ['POST', '/api/orchestrator/trust/approve'], ['post', '/API/Orchestrator/Trust/Pin/'],
+        ['POST', '/api/workflows/schedules'], ['PATCH', '/api/workflows/schedules/abc'],
+        ['POST', '/api/workflows/config/repos'], ['PATCH', '/api/workflows/config/repos/r1'],
+      ]) {
+        expect(requestNeedsStepUp(method, path, body)).toBe(true)
+        expect(requestNeedsStepUp(method, path, null)).toBe(true)
+      }
+      expect(requestStepUpReason('POST', '/api/orchestrator/trust/pin', body)).toBe('standing-approval')
+      expect(requestStepUpReason('POST', '/api/workflows/schedules', null)).toBe('automation')
+      // Taking authority away, or reading, isn't.
+      for (const [method, path] of [
+        ['POST', '/api/orchestrator/trust/reject'], ['POST', '/api/orchestrator/trust/reset'], ['DELETE', '/api/workflows/schedules/abc'],
+        ['GET', '/api/workflows/schedules'], ['POST', '/api/workflows/schedules/abc/trigger'], ['DELETE', '/api/workflows/config/repos/r1'],
+      ]) expect(requestNeedsStepUp(method, path, body)).toBe(false)
+    })
+
     it('knows which actions are privileged', () => {
       expect(frameNeedsStepUp(always)).toBe(true)
       expect(frameNeedsStepUp('{"type":"prompt_response","value":["approve_pattern"]}')).toBe(true)
@@ -340,6 +359,49 @@ describe('passkeys on the machine', () => {
       verifier.setRequirePasskey(true)
       const again = browserIntent(b, { action: frameAction(always), payload: framePayload(always), channel: ch.token, seq: 2 })
       expect(verifier.checkFrame(OWNER, always, again, opened.channel).reason).toBe('intent_step_up_required')
+    })
+
+    it('keeps the workspace passkey requirement on the machine: the relay can raise it, never drop it', () => {
+      const b = browserKey()
+      writeTrustStore(devicesFile, {
+        ...emptyTrustStore('m1', 'https://relay.test', 'u-owner'), policy: 'required',
+        credentials: [{ keyId: b.keyId, kind: 'browser', userId: 'u-owner', spki: b.spkiB64, label: 'x', addedAt: 'x', addedBy: 'local' }],
+      })
+      const ch = channel()
+      const opened = verifier.checkChannelOpen(OWNER, browserIntent(b, { action: 'channel:open', payload: new Uint8Array(), channel: ch.token }))
+      verifier.setRequirePasskey(true)
+      expect(readTrustStore(devicesFile)?.requirePasskeyStepUp).toBe(true)
+      // A relay that then says "not required" changes nothing.
+      verifier.setRequirePasskey(false)
+      const intent = browserIntent(b, { action: frameAction(always), payload: framePayload(always), channel: ch.token, seq: 1 })
+      expect(verifier.checkFrame(OWNER, always, intent, opened.channel).reason).toBe('intent_step_up_required')
+      // A fresh verifier (connector restart) reads it from the machine.
+      const restarted = new IntentVerifier({ machineId: 'm1', devicesFile })
+      const ch2 = channel()
+      const opened2 = restarted.checkChannelOpen(OWNER, browserIntent(b, { action: 'channel:open', payload: new Uint8Array(), channel: ch2.token }))
+      const again = browserIntent(b, { action: frameAction(always), payload: framePayload(always), channel: ch2.token, seq: 1 })
+      expect(restarted.checkFrame(OWNER, always, again, opened2.channel).reason).toBe('intent_step_up_required')
+      // Only a local surface turns it off.
+      setRequirePasskeyStepUp(false, devicesFile, 'm1')
+      const third = browserIntent(b, { action: frameAction(always), payload: framePayload(always), channel: ch2.token, seq: 2 })
+      expect(restarted.checkFrame(OWNER, always, third, opened2.channel).verdict).toBe('accepted')
+    })
+
+    it('ends an open owner channel once the device that opened it is removed', () => {
+      const b = browserKey()
+      writeTrustStore(devicesFile, {
+        ...emptyTrustStore('m1', 'https://relay.test', 'u-owner'), policy: 'required',
+        credentials: [{ keyId: b.keyId, kind: 'browser', userId: 'u-owner', spki: b.spkiB64, label: 'x', addedAt: 'x', addedBy: 'local' }],
+      })
+      const ch = channel()
+      const opened = verifier.checkChannelOpen(OWNER, browserIntent(b, { action: 'channel:open', payload: new Uint8Array(), channel: ch.token }))
+      expect(opened.channel.signerKeyId).toBe(b.keyId)
+      expect(verifier.ownerChannelEnded(opened.channel)).toBeNull()
+      revokeCredential(b.keyId, devicesFile, 'm1')
+      expect(verifier.ownerChannelEnded(opened.channel)).toMatch(/removed/)
+      // An unsigned channel (policy off when it opened) ends once the policy requires confirmed devices.
+      const unsigned = { token: null, lastSeq: 0, session: null, signerKeyId: null }
+      expect(verifier.ownerChannelEnded(unsigned)).toMatch(/only confirmed devices/)
     })
   })
 })

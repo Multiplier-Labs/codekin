@@ -17,7 +17,7 @@ import { readRelayCredentialIdentity, relayCredentialPath } from './relay-creden
 import { readMachineIdentity } from './machine-identity.js'
 import { trustPathsFor } from './machine-trust.js'
 import {
-  describeTrustStore, INTENT_POLICIES, MAX_PASSKEY_WINDOW_MINUTES, readTrustStore, revokeCredential, setIntentPolicy, setLocalConfirmationOnly, setPasskeyWindow, TrustStoreError,
+  describeTrustStore, INTENT_POLICIES, MAX_PASSKEY_WINDOW_MINUTES, readTrustStore, revokeCredential, setIntentPolicy, setLocalConfirmationOnly, setPasskeyWindow, setRequirePasskeyStepUp, TrustStoreError,
 } from './trust-store.js'
 import type { TrustStoreView } from './trust-store.js'
 import { approveEnrolment, approveTrustToken, rejectEnrolment } from './enrolment.js'
@@ -29,7 +29,7 @@ export interface DevicesCliIo {
 }
 
 export const DEVICES_USAGE = [
-  'Usage: codekin relay devices <list|trust|approve|reject|revoke|policy|passkey-adds>',
+  'Usage: codekin relay devices <list|trust|approve|reject|revoke|policy|passkey-adds|passkey-required|passkey-window>',
   '  list   [--json]                   Show the devices that can control this computer',
   '  trust <token>                     Confirm the browser that showed this command',
   '  approve <code>                    Confirm the browser showing this code',
@@ -37,6 +37,7 @@ export const DEVICES_USAGE = [
   '  revoke <keyId>                    Remove a device',
   `  policy <${INTENT_POLICIES.join('|')}>         Set whether devices must sign what they send`,
   '  passkey-adds <on|off>             Whether your passkey may add a browser without a code typed here',
+  '  passkey-required <on|off>         Whether privileged actions always need a passkey (the workspace can turn it on)',
   `  passkey-window <0-${MAX_PASSKEY_WINDOW_MINUTES}>          Minutes a passkey confirmation covers its browser (0: ask every time)`,
 ]
 
@@ -60,7 +61,12 @@ function printList(view: TrustStoreView, identityKeyId: string | null, io: Devic
   io.out(`Bypass/always-allow: ${view.passkeyWindowMinutes === 0
     ? 'passkey asked every time'
     : `passkey asked, then not again on that browser for ${view.passkeyWindowMinutes} min`}`)
-  io.out('Not enforced yet: this Codekin version keeps the list but does not check signatures.')
+  io.out(`Privileged:   ${view.requirePasskeyStepUp ? 'always need a passkey' : 'need a passkey from people with one enrolled here'}`)
+  if (view.policy !== 'required') {
+    io.out(view.policy === 'warn'
+      ? 'Unsigned or badly signed actions are logged, not refused. To refuse them: codekin relay devices policy required'
+      : 'Signatures are not required. To require them: codekin relay devices policy required')
+  }
   io.out('')
   if (view.pending.length > 0) {
     io.out('Waiting to be confirmed (type the code the browser shows: codekin relay devices approve <code>):')
@@ -200,6 +206,17 @@ export function runDevicesCommand(
         io.out(rest[0] === 'on'
           ? 'Your enrolled passkey may add a browser to this computer.'
           : 'Only devices confirmed on this computer can be added now.')
+        return 0
+      }
+      case 'passkey-required': {
+        if (rest[0] !== 'on' && rest[0] !== 'off') {
+          io.err('Usage: codekin relay devices passkey-required <on|off>')
+          return 1
+        }
+        setRequirePasskeyStepUp(rest[0] === 'on', devicesFile, paired.machineId)
+        io.out(rest[0] === 'on'
+          ? 'Privileged actions on this computer need a passkey.'
+          : 'Privileged actions need a passkey only from people with one enrolled here. The workspace setting can turn this on again.')
         return 0
       }
       case 'passkey-window': {

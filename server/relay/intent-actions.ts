@@ -307,7 +307,7 @@ function parsed(text: string): Record<string, unknown> | null {
 export const STEP_UP_WINDOW_MS = 15 * 60_000
 
 /** Why an action needs a passkey, so the browser can say so before the prompt. */
-export type StepUpReason = 'bypass' | 'allowed-tools' | 'standing-approval'
+export type StepUpReason = 'bypass' | 'allowed-tools' | 'standing-approval' | 'automation'
 
 /** The step-up reason for a stream frame, or null when it isn't privileged. */
 export function frameStepUpReason(frame: string): StepUpReason | null {
@@ -321,8 +321,28 @@ export function frameStepUpReason(frame: string): StepUpReason | null {
   return null
 }
 
+/**
+ * Routes that set up standing authority whatever their body says: trust the
+ * orchestrator to act without asking, or schedule and configure automations
+ * that run agent sessions with nobody watching. Always privileged (§6.2).
+ */
+const STANDING_ROUTES: ReadonlyArray<{ method: string; route: RegExp; reason: StepUpReason }> = [
+  { method: 'POST', route: /^\/api\/orchestrator\/trust\/(pin|approve)$/, reason: 'standing-approval' },
+  { method: 'POST', route: /^\/api\/workflows\/(schedules|config\/repos)$/, reason: 'automation' },
+  { method: 'PATCH', route: /^\/api\/workflows\/(schedules|config\/repos)\/[^/]+$/, reason: 'automation' },
+  { method: 'PUT', route: /^\/api\/workflows\/(schedules|config\/repos)(\/[^/]+)?$/, reason: 'automation' },
+]
+
+function standingRouteReason(method: string, path: string): StepUpReason | null {
+  const m = method.toUpperCase()
+  const route = routeOf(path)
+  return STANDING_ROUTES.find(r => r.method === m && r.route.test(route))?.reason ?? null
+}
+
 /** The step-up reason for a REST request; null when not privileged, or not readable. */
 export function requestStepUpReason(method: string, path: string, body: Uint8Array | null): StepUpReason | null {
+  const standing = standingRouteReason(method, path)
+  if (standing) return standing
   if (!requestNeedsStepUp(method, path, body) || !body) return null
   let msg: Record<string, unknown> | null
   try {
@@ -364,6 +384,7 @@ export function frameNeedsStepUp(frame: string): boolean {
  * (another charset) where this can't.
  */
 export function requestNeedsStepUp(method: string, path: string, body: Uint8Array | null): boolean {
+  if (standingRouteReason(method, path)) return true
   if (method.toUpperCase() !== 'POST') return false
   const route = routeOf(path)
   // Creating a session, or an orchestrator child session, in an auto-approve

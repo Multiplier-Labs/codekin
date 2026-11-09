@@ -132,6 +132,12 @@ export interface TrustStore {
    * 15; 0 asks for the passkey every time. Local surfaces only.
    */
   passkeyWindowMinutes?: number
+  /**
+   * "Privileged actions need a passkey" (§6.6), held on the machine. The
+   * workspace setting can turn it on from the relay; once on, only a local
+   * surface turns it off, so a relay can't drop the requirement.
+   */
+  requirePasskeyStepUp?: boolean
   credentials: TrustedCredential[]
   /** Enrolment requests, until they expire. */
   pending: PendingEnrolment[]
@@ -258,6 +264,7 @@ export function parseTrustStore(text: string): TrustStore {
     policy: v.policy,
     ...(v.localConfirmationOnly === true ? { localConfirmationOnly: true } : {}),
     ...(isPasskeyWindow(v.passkeyWindowMinutes) ? { passkeyWindowMinutes: v.passkeyWindowMinutes } : {}),
+    ...(v.requirePasskeyStepUp === true ? { requirePasskeyStepUp: true } : {}),
     credentials,
     // An unreadable request is only a request: dropping it is harmless.
     pending: Array.isArray(v.pending) ? v.pending.map(parsePending).filter((e): e is PendingEnrolment => e !== null) : [],
@@ -579,6 +586,15 @@ export function setPasskeyWindow(minutes: unknown, file = relayDevicesPath(), ma
   })
 }
 
+/** Require a passkey for privileged actions (true), or stop requiring it (false). Local surfaces only. */
+export function setRequirePasskeyStepUp(value: boolean, file = relayDevicesPath(), machineId?: string): TrustStore {
+  return mutateTrustStore(file, machineId, store => {
+    if (value) store.requirePasskeyStepUp = true
+    else delete store.requirePasskeyStepUp
+    return store
+  })
+}
+
 /** Turn passkey-added browsers off (true) or on (false) for this machine. Local surfaces only. */
 export function setLocalConfirmationOnly(value: boolean, file = relayDevicesPath(), machineId?: string): TrustStore {
   return mutateTrustStore(file, machineId, store => {
@@ -603,6 +619,8 @@ export interface TrustStoreView {
   localConfirmationOnly: boolean
   /** §6.6b: minutes a passkey step-up covers its browser; 0 asks every time. */
   passkeyWindowMinutes: number
+  /** §6.6: privileged actions need a passkey, whether or not one is enrolled for the signer. */
+  requirePasskeyStepUp: boolean
   credentials: Array<Pick<TrustedCredential, 'keyId' | 'kind' | 'userId' | 'label' | 'addedAt' | 'addedBy' | 'lastUsedAt'>>
   /**
    * Requests waiting for their code, newest first. The code itself is never
@@ -633,6 +651,7 @@ export function describeTrustStore(store: TrustStore, now = Date.now()): TrustSt
     policy: store.policy,
     localConfirmationOnly: store.localConfirmationOnly === true,
     passkeyWindowMinutes: passkeyWindowMinutes(store),
+    requirePasskeyStepUp: store.requirePasskeyStepUp === true,
     credentials: store.credentials.map(c => ({
       keyId: c.keyId,
       kind: c.kind,

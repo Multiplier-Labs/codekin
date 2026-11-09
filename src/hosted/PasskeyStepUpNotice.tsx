@@ -14,6 +14,7 @@ const WHY: Record<StepUpReason, string> = {
   bypass: 'This session uses bypass permissions, so it runs commands without asking you first.',
   'allowed-tools': 'This session pre-approves tools, so they run without asking you first.',
   'standing-approval': 'You are saving an "always allow" rule, so matching commands will run without asking you first.',
+  automation: 'You are setting up an automation, which starts agent sessions on this computer without you watching.',
 }
 
 function stepUpMessage(reason: StepUpReason | null): string {
