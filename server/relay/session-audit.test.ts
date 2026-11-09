@@ -2,7 +2,7 @@
 import { describe, it, expect } from 'vitest'
 import { openControlPlaneDb, BOOTSTRAP_WORKSPACE_ID } from './control-plane-db.js'
 import { listAuditEvents, recordAuditEvent } from './audit.js'
-import { classifyBrowserFrame, classifyRestRequest, decisionClass, sessionFromMachineFrame, SessionAuditState } from './session-audit.js'
+import { AuditBudget, classifyBrowserFrame, classifyRestRequest, decisionClass, sessionFromMachineFrame, SessionAuditState } from './session-audit.js'
 
 describe('classifyBrowserFrame', () => {
   it('audits prompts, approvals, stops and permission changes, and binds joins', () => {
@@ -92,5 +92,54 @@ describe('audit filters', () => {
     expect(listAuditEvents(db, { kinds: ['prompt_sent'] }).map(e => e.localSessionId)).toEqual(['s2', 's1'])
     expect(listAuditEvents(db, { localSessionId: 's1' }).map(e => e.kind)).toEqual(['session_stopped', 'prompt_sent'])
     db.close()
+  })
+})
+
+describe('AuditBudget', () => {
+  const event = (n: number) => ({ localSessionId: 's1', metadata: { role: 'owner', n } })
+
+  it('itemizes a burst, then counts, and carries the count on the next row', () => {
+    let now = 0
+    const budget = new AuditBudget(3, 60, () => now)
+    const admitted = Array.from({ length: 10 }, (_, i) => budget.admit('u1', 'm1', 'prompt_sent', event(i)))
+    expect(admitted.filter(a => a !== null)).toHaveLength(3)
+    now += 1000 // one more row earned
+    expect(budget.admit('u1', 'm1', 'prompt_sent', event(10))).toEqual({ coalesced: 7 })
+  })
+
+  it('keeps budgets per user, machine and kind', () => {
+    const budget = new AuditBudget(1, 1, () => 0)
+    expect(budget.admit('u1', 'm1', 'prompt_sent', event(0))).toEqual({})
+    expect(budget.admit('u1', 'm1', 'prompt_sent', event(1))).toBeNull()
+    expect(budget.admit('u2', 'm1', 'prompt_sent', event(0))).toEqual({})
+    expect(budget.admit('u1', 'm2', 'prompt_sent', event(0))).toEqual({})
+    expect(budget.admit('u1', 'm1', 'session_viewed', event(0))).toEqual({})
+  })
+
+  it('sums up a burst that ended in one row, and forgets idle budgets', () => {
+    let now = 0
+    const budget = new AuditBudget(1, 1, () => now)
+    budget.admit('u1', 'm1', 'approval_answered', event(0))
+    for (let i = 1; i <= 5; i++) budget.admit('u1', 'm1', 'approval_answered', event(i))
+    expect(budget.sweep()).toEqual([])
+    now += 61_000
+    expect(budget.sweep()).toEqual([{
+      actorUserId: 'u1', machineId: 'm1', kind: 'approval_answered', localSessionId: 's1', metadata: { role: 'owner', n: 5, coalesced: 5 },
+    }])
+    expect(budget.sweep()).toEqual([])
+    // A fresh budget afterwards.
+    expect(budget.admit('u1', 'm1', 'approval_answered', event(6))).toEqual({})
+  })
+
+  it('bounds the rows a flood can write', () => {
+    let now = 0
+    const budget = new AuditBudget(30, 30, () => now)
+    let rows = 0
+    // 40 frames a second for ten minutes.
+    for (let i = 0; i < 40 * 600; i++) {
+      now = i * 25
+      if (budget.admit('u1', 'm1', 'prompt_sent', event(i))) rows++
+    }
+    expect(rows).toBeLessThanOrEqual(30 + 30 * 10 + 1)
   })
 })

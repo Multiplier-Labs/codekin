@@ -8,6 +8,7 @@
  */
 
 import express from 'express'
+import { clientErrorStatus } from './client-errors.js'
 import session from 'express-session'
 import { createServer, ServerResponse } from 'http'
 import { WebSocketServer } from 'ws'
@@ -230,6 +231,14 @@ app.use((_req, res) => {
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars -- Express identifies error handlers by arity
 app.use((err: Error, req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  // A client's own mistake (malformed JSON, a body over the limit): answer it,
+  // and neither log nor report it. Body-parser errors carry the raw body,
+  // which must not reach the logs, and anyone could send them at any rate.
+  const status = clientErrorStatus(err)
+  if (status !== null) {
+    if (!res.headersSent) res.status(status).json({ error: status === 413 ? 'Request body too large' : 'Malformed request body' })
+    return
+  }
   console.error('[relay] Unhandled error:', err)
   // The route pattern, never the path: paths carry ids and tokens.
   const routePath = (req.route as { path?: unknown } | undefined)?.path

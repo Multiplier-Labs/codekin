@@ -38,12 +38,13 @@ import { getUserById } from './control-plane-db.js'
 import { resolveMachineAccess, signedGrantsFor } from './shares.js'
 import type { MachineAccess } from './shares.js'
 import { recordAuditEvent } from './audit.js'
+import type { AuditEventKind } from './audit.js'
 import { upsertDeviceKey } from './device-keys.js'
 import { checkRestPolicy, isServerFrameVisible } from './connector-policy.js'
 import { BROWSER_FRAME_LIMIT, RateLimiter, isBackedUp } from './rate-limit.js'
 import { checkQuota, UNLIMITED } from './quotas.js'
 import { isMeterPaused, meterFrame } from './usage-meter.js'
-import { classifyBrowserFrame, classifyRestRequest, payloadHash, SessionAuditState } from './session-audit.js'
+import { AuditBudget, classifyBrowserFrame, classifyRestRequest, payloadHash, SessionAuditState } from './session-audit.js'
 import type { SessionAuditEvent } from './session-audit.js'
 import type { UsageMeter } from './usage-meter.js'
 import type { EntitlementsProvider } from './quotas.js'
@@ -147,6 +148,8 @@ export class BrowserHub {
   /** Per-user frame budget: one browser cannot flood a machine (spec §11.5). */
   private frameLimiter = new RateLimiter(BROWSER_FRAME_LIMIT)
   private reauthorizeTimer: ReturnType<typeof setInterval>
+  /** Bounds the session audit rows each user causes (session-audit.ts). */
+  private readonly auditBudget = new AuditBudget()
   private heartbeatTimer: ReturnType<typeof setInterval>
 
   constructor(
@@ -154,7 +157,7 @@ export class BrowserHub {
     private connectors: ConnectorHub,
     private options: BrowserHubOptions = {},
   ) {
-    this.reauthorizeTimer = setInterval(() => { this.reauthorize(); }, REAUTHORIZE_INTERVAL_MS)
+    this.reauthorizeTimer = setInterval(() => { this.reauthorize(); this.flushCoalescedAudit() }, REAUTHORIZE_INTERVAL_MS)
     this.reauthorizeTimer.unref()
     this.heartbeatTimer = setInterval(() => { this.heartbeat(); }, options.heartbeatIntervalMs ?? HEARTBEAT_INTERVAL_MS)
     this.heartbeatTimer.unref()
@@ -524,12 +527,7 @@ export class BrowserHub {
     client.channels.set(localId, remoteId)
     client.channelSessions.set(localId, new SessionAuditState())
 
-    recordAuditEvent(this.db, {
-      kind: 'session_viewed',
-      actorUserId: client.user.id,
-      machineId: client.machineId,
-      metadata: { role: client.access.kind },
-    })
+    this.recordBudgeted(client, 'session_viewed', null, { role: client.access.kind })
 
     const error = this.connectors.openChannel(client.machineId, remoteId, (kind, payload) => {
       if (client.socket.readyState !== client.socket.OPEN) return
@@ -601,13 +599,28 @@ export class BrowserHub {
   }
 
   private recordSessionEvent(client: BrowserClient, event: SessionAuditEvent, sessionId: string | null): void {
-    recordAuditEvent(this.db, {
-      kind: event.kind,
-      actorUserId: client.user.id,
-      machineId: client.machineId,
-      localSessionId: event.sessionId ?? sessionId,
-      metadata: { role: client.access.kind, outcome: 'forwarded', ...event.metadata },
-    })
+    this.recordBudgeted(client, event.kind, event.sessionId ?? sessionId, { role: client.access.kind, outcome: 'forwarded', ...event.metadata })
+  }
+
+  /** Write a session audit row within the user's budget (AuditBudget), or count it. */
+  private recordBudgeted(
+    client: BrowserClient, kind: AuditEventKind, localSessionId: string | null,
+    metadata: Record<string, string | number | boolean | null>,
+  ): void {
+    const admitted = this.auditBudget.admit(client.user.id, client.machineId, kind, { localSessionId, metadata })
+    if (!admitted) return
+    recordAuditEvent(this.db, { kind, actorUserId: client.user.id, machineId: client.machineId, localSessionId, metadata: { ...metadata, ...admitted } })
+  }
+
+  /** Sum up bursts that were counted rather than itemized, once they end. */
+  private flushCoalescedAudit(): void {
+    for (const row of this.auditBudget.sweep()) {
+      try {
+        recordAuditEvent(this.db, row)
+      } catch (err) {
+        console.warn('[relay] could not record a coalesced audit row:', err instanceof Error ? err.message : err)
+      }
+    }
   }
 
   /** Audit a forwarded REST call that uploads a file or creates a session (no content). */
