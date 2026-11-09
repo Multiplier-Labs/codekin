@@ -163,12 +163,15 @@ export function verifyPasskeyAssertion(assertion: PasskeyAssertion, expected: Ex
   const signature = strictB64url(assertion.signature)
   if (!authData || !clientDataBytes || !signature || authData.length < 37) return 'malformed'
 
-  let clientData: { type?: unknown; challenge?: unknown; origin?: unknown; crossOrigin?: unknown }
+  let clientJson: unknown
   try {
-    clientData = JSON.parse(clientDataBytes.toString('utf-8')) as typeof clientData
+    clientJson = JSON.parse(clientDataBytes.toString('utf-8'))
   } catch {
     return 'malformed'
   }
+  // Valid JSON need not be an object: `null`, a number or an array is malformed too.
+  if (typeof clientJson !== 'object' || clientJson === null || Array.isArray(clientJson)) return 'malformed'
+  const clientData = clientJson as { type?: unknown; challenge?: unknown; origin?: unknown; crossOrigin?: unknown }
   if (clientData.type !== 'webauthn.get') return 'wrong_type'
   if (clientData.challenge !== b64url(expected.challenge)) return 'wrong_challenge'
   if (clientData.origin !== expected.origin || clientData.crossOrigin === true) return 'wrong_origin'

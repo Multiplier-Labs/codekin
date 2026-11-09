@@ -6,6 +6,7 @@
  */
 
 import WebSocket from 'ws'
+import { asProxyRequest, asStreamClose, asStreamData, asStreamOpen, isRecord } from './connector-frames.js'
 import { ENROLMENT_FEATURE, envelope, INTENTS_FEATURE, isEnrolRequestKind, parseEnvelope, RELAY_ERROR, STREAM_CLOSE } from './relay-protocol.js'
 import type {
   ConnectorHello,
@@ -14,8 +15,6 @@ import type {
   ConnectorHelloAck,
   ProxyRequest,
   RelayError,
-  StreamClose,
-  StreamData,
   StreamOpen,
   LocalSessionSummary,
 } from './relay-protocol.js'
@@ -207,102 +206,127 @@ export class RelayConnector {
     })
 
     ws.on('message', (data: Buffer | string) => {
-      const msg = parseEnvelope(typeof data === 'string' ? data : data.toString('utf-8'))
-      if (!msg) return
-      if (msg.kind === 'hello_ack') {
-        this.backoffMs = BACKOFF_MIN_MS
-        const ack = msg.payload as ConnectorHelloAck
-        this.updateRequired = !!ack.updateRequired
-        this.displayName = ack.displayName
-        // The workspace's "Privileged actions need a passkey" (spec §6.6).
-        this.opts.intents?.setRequirePasskey?.(ack.requirePasskeyStepUp === true)
-        if (typeof ack.ownerUserId === 'string' && ack.ownerUserId && this.opts.onOwner) {
-          try { this.opts.onOwner(ack.ownerUserId) } catch { /* the trust store must not break the connection */ }
-        }
-        if (ack.updateRequired) {
-          // Stay connected (so the hosted UI shows "update required" rather
-          // than offline) and keep the heartbeat; the relay refuses traffic.
-          this.opts.onStatus?.('update_required', `needs ${ack.updateRequired.minimum} or later: ${ack.updateRequired.reason}`)
-        } else if (ack.unconfirmed) {
-          this.opts.onStatus?.('devices_unconfirmed', 'the workspace requires confirmed devices: confirm a browser on this computer')
-        } else {
-          this.opts.onStatus?.('connected', ack.displayName)
-        }
-        this.heartbeat = setInterval(() => {
-          if (ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify(envelope('ping', {})))
-          }
-        }, HEARTBEAT_INTERVAL_MS)
-        this.heartbeat.unref()
-        // Report policy changes (§6.8), so the relay can show them and apply
-        // the workspace's "Require confirmed devices". Only to a relay that
-        // says it understands the frame: an older one closes the socket on
-        // an unknown kind (it still gets the policy in each hello).
-        if (ack.policyReports === true) this.policyWatch = setInterval(() => {
-          const policy = this.currentPolicy()
-          if (!policy || policy === this.reportedPolicy || ws.readyState !== WebSocket.OPEN) return
-          this.reportedPolicy = policy
-          ws.send(JSON.stringify(envelope('intent_policy', { policy })))
-        }, this.opts.policyWatchMs ?? POLICY_WATCH_MS)
-        this.policyWatch?.unref()
-        void this.advertiseSessions(ws)
-      } else if (msg.kind === 'request') {
-        void this.handleProxyRequest(ws, msg.id, msg.payload as ProxyRequest)
-      } else if (isEnrolRequestKind(msg.kind)) {
-        this.handleEnrolment(ws, msg.kind, msg.id, msg.payload as EnrolRequest)
-      } else if (msg.kind === 'stream_open') {
-        this.openChannel(ws, msg.channelId, msg.payload as StreamOpen)
-      } else if (msg.kind === 'stream_data') {
-        if (msg.channelId) {
-          const payload = msg.payload as StreamData
-          this.channels.get(msg.channelId)?.send(payload.data, payload.intent)
-        }
-      } else if (msg.kind === 'stream_close') {
-        this.closeChannel(msg.channelId, msg.payload as StreamClose)
-      } else if (msg.kind === 'event' && !msg.channelId) {
-        // A workspace policy change while connected (connector-hub announceWorkspacePolicy).
-        const policy = msg.payload as { requirePasskeyStepUp?: unknown; unconfirmed?: unknown }
-        if (typeof policy.requirePasskeyStepUp === 'boolean') this.opts.intents?.setRequirePasskey?.(policy.requirePasskeyStepUp)
-        // The workspace refuses this machine until it requires confirmed
-        // devices (§6.8), or no longer does. An update requirement outranks both.
-        if (!this.updateRequired && policy.unconfirmed === true) {
-          this.opts.onStatus?.('devices_unconfirmed', 'the workspace requires confirmed devices: confirm a browser on this computer')
-        } else if (!this.updateRequired && policy.unconfirmed === false) {
-          this.opts.onStatus?.('connected', this.displayName ?? undefined)
-        }
-      } else if (msg.kind === 'error') {
-        const err = msg.payload as RelayError
-        this.opts.onStatus?.('disconnected', `${err.code}: ${err.message}`)
+      // The relay may send anything (signed-intents spec §2): one bad frame
+      // is logged and dropped, never allowed to take the connector down.
+      try {
+        this.handleMessage(ws, data)
+      } catch (err) {
+        console.warn(`[connector] dropped a relay frame: ${err instanceof Error ? err.message : String(err)}`)
       }
     })
 
     ws.on('close', (code: number, reason: Buffer) => {
-      this.clearTimers()
-      this.ws = null
-      // Local sockets outlive nothing: without the relay there is no browser
-      // on the other end, and a stale session would keep the CLI busy.
-      this.closeAllChannels('relay disconnected')
-      if (code === CLOSE_AUTH_FAILED) {
-        // Credential rejected — retrying would loop forever on a revoked machine
-        this.opts.onStatus?.('auth_failed', reason.toString() || 'credential rejected')
-        this.stopped = true
-        return
-      }
-      if (code === CLOSE_REPLACED) {
-        // Another connector took this machine. Reconnecting would take it
-        // back, and the two would trade the slot forever — so stand down.
-        this.opts.onStatus?.('replaced', reason.toString() || 'another connector took over')
-        this.stopped = true
-        return
-      }
-      if (this.stopped) return
-      this.opts.onStatus?.('disconnected', `code ${code}`)
-      this.scheduleReconnect()
+      this.onSocketClose(code, reason)
     })
 
     ws.on('error', () => {
       // close follows; reconnect is handled there
     })
+  }
+
+  private handleMessage(ws: WebSocket, data: Buffer | string): void {
+    const msg = parseEnvelope(typeof data === 'string' ? data : data.toString('utf-8'))
+    if (!msg) return
+    if (msg.kind === 'hello_ack') {
+      this.backoffMs = BACKOFF_MIN_MS
+      const ack = (isRecord(msg.payload) ? msg.payload : {}) as Partial<ConnectorHelloAck>
+      this.updateRequired = !!ack.updateRequired
+      this.displayName = typeof ack.displayName === 'string' ? ack.displayName : null
+      // The workspace's "Privileged actions need a passkey" (spec §6.6).
+      this.opts.intents?.setRequirePasskey?.(ack.requirePasskeyStepUp === true)
+      if (typeof ack.ownerUserId === 'string' && ack.ownerUserId && this.opts.onOwner) {
+        try { this.opts.onOwner(ack.ownerUserId) } catch { /* the trust store must not break the connection */ }
+      }
+      if (isRecord(ack.updateRequired)) {
+        // Stay connected (so the hosted UI shows "update required" rather
+        // than offline) and keep the heartbeat; the relay refuses traffic.
+        this.opts.onStatus?.('update_required', `needs ${ack.updateRequired.minimum} or later: ${ack.updateRequired.reason}`)
+      } else if (ack.unconfirmed) {
+        this.opts.onStatus?.('devices_unconfirmed', 'the workspace requires confirmed devices: confirm a browser on this computer')
+      } else {
+        this.opts.onStatus?.('connected', ack.displayName)
+      }
+      this.heartbeat = setInterval(() => {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify(envelope('ping', {})))
+        }
+      }, HEARTBEAT_INTERVAL_MS)
+      this.heartbeat.unref()
+      // Report policy changes (§6.8), so the relay can show them and apply
+      // the workspace's "Require confirmed devices". Only to a relay that
+      // says it understands the frame: an older one closes the socket on
+      // an unknown kind (it still gets the policy in each hello).
+      if (ack.policyReports === true) this.policyWatch = setInterval(() => {
+        const policy = this.currentPolicy()
+        if (!policy || policy === this.reportedPolicy || ws.readyState !== WebSocket.OPEN) return
+        this.reportedPolicy = policy
+        ws.send(JSON.stringify(envelope('intent_policy', { policy })))
+      }, this.opts.policyWatchMs ?? POLICY_WATCH_MS)
+      this.policyWatch?.unref()
+      void this.advertiseSessions(ws)
+    } else if (msg.kind === 'request') {
+      const id = typeof msg.id === 'string' ? msg.id : undefined
+      const request = asProxyRequest(msg.payload)
+      if (!request) {
+        if (id) ws.send(JSON.stringify(envelope('error', { code: RELAY_ERROR.badRequest, message: 'Malformed request' }, { id })))
+        return
+      }
+      this.handleProxyRequest(ws, id, request).catch((err: unknown) => {
+        console.warn(`[connector] request failed: ${err instanceof Error ? err.message : String(err)}`)
+        if (id && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify(envelope('error', { code: RELAY_ERROR.badRequest, message: 'Request failed on this computer' }, { id })))
+        }
+      })
+    } else if (isEnrolRequestKind(msg.kind)) {
+      this.handleEnrolment(ws, msg.kind, msg.id, isRecord(msg.payload) ? msg.payload as unknown as EnrolRequest : undefined)
+    } else if (msg.kind === 'stream_open') {
+      this.openChannel(ws, typeof msg.channelId === 'string' ? msg.channelId : undefined, asStreamOpen(msg.payload))
+    } else if (msg.kind === 'stream_data') {
+      const payload = asStreamData(msg.payload)
+      if (typeof msg.channelId === 'string' && payload) {
+        this.channels.get(msg.channelId)?.send(payload.data, payload.intent)
+      }
+    } else if (msg.kind === 'stream_close') {
+      this.closeChannel(typeof msg.channelId === 'string' ? msg.channelId : undefined, msg.payload)
+    } else if (msg.kind === 'event' && !msg.channelId) {
+      // A workspace policy change while connected (connector-hub announceWorkspacePolicy).
+      const policy = (isRecord(msg.payload) ? msg.payload : {}) as { requirePasskeyStepUp?: unknown; unconfirmed?: unknown }
+      if (typeof policy.requirePasskeyStepUp === 'boolean') this.opts.intents?.setRequirePasskey?.(policy.requirePasskeyStepUp)
+      // The workspace refuses this machine until it requires confirmed
+      // devices (§6.8), or no longer does. An update requirement outranks both.
+      if (!this.updateRequired && policy.unconfirmed === true) {
+        this.opts.onStatus?.('devices_unconfirmed', 'the workspace requires confirmed devices: confirm a browser on this computer')
+      } else if (!this.updateRequired && policy.unconfirmed === false) {
+        this.opts.onStatus?.('connected', this.displayName ?? undefined)
+      }
+    } else if (msg.kind === 'error') {
+      const err = (isRecord(msg.payload) ? msg.payload : {}) as Partial<RelayError>
+      this.opts.onStatus?.('disconnected', `${String(err.code)}: ${String(err.message)}`)
+    }
+  }
+
+  private onSocketClose(code: number, reason: Buffer): void {
+    this.clearTimers()
+    this.ws = null
+    // Local sockets outlive nothing: without the relay there is no browser
+    // on the other end, and a stale session would keep the CLI busy.
+    this.closeAllChannels('relay disconnected')
+    if (code === CLOSE_AUTH_FAILED) {
+      // Credential rejected — retrying would loop forever on a revoked machine
+      this.opts.onStatus?.('auth_failed', reason.toString() || 'credential rejected')
+      this.stopped = true
+      return
+    }
+    if (code === CLOSE_REPLACED) {
+      // Another connector took this machine. Reconnecting would take it
+      // back, and the two would trade the slot forever — so stand down.
+      this.opts.onStatus?.('replaced', reason.toString() || 'another connector took over')
+      this.stopped = true
+      return
+    }
+    if (this.stopped) return
+    this.opts.onStatus?.('disconnected', `code ${code}`)
+    this.scheduleReconnect()
   }
 
   /**
@@ -470,14 +494,14 @@ export class RelayConnector {
     channel.open()
   }
 
-  private closeChannel(channelId: string | undefined, payload?: StreamClose): void {
+  private closeChannel(channelId: string | undefined, payload: unknown): void {
     if (!channelId) return
     const channel = this.channels.get(channelId)
     if (!channel) return
     this.channels.delete(channelId)
-    const reason = payload?.reason ?? 'browser closed the channel'
+    const { code, reason } = asStreamClose(payload, 'browser closed the channel')
     this.opts.onStream?.('close', channelId, `relay: ${reason}`)
-    channel.close(payload?.code ?? STREAM_CLOSE.normal, reason)
+    channel.close(code, reason)
   }
 
   /** Drop every local session socket (relay disconnect / shutdown). */

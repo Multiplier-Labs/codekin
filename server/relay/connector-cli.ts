@@ -114,6 +114,11 @@ function main(): void {
   }
   process.on('SIGINT', stop)
   process.on('SIGTERM', stop)
+  // The connector contains its own failures; this only keeps an asynchronous
+  // one that slips through from taking the machine off the relay.
+  process.on('unhandledRejection', (reason: unknown) => {
+    console.warn(`[connector] unhandled failure: ${reason instanceof Error ? reason.message : String(reason)}`)
+  })
 }
 
 main()
