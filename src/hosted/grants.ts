@@ -17,7 +17,10 @@
  *   browser issued are kept here (IndexedDB); a grant names that session and
  *   member, and renewal and revocation work from that record;
  * - renewal re-signs only a share's current grant, changing nothing but the
- *   expiry (never past its signed `notAfter`);
+ *   expiry (never past its signed `notAfter`), and never one broader than
+ *   the owner's current choice;
+ * - narrowing a share retires its broader grant on the machine at once, and
+ *   a signed share the relay stops listing is revoked there;
  * - every new signature supersedes, on the machine, every grant issued for
  *   the share before it, from this browser or any other of the owner's; and
  *   revoking a share revokes its id, which covers all its grants for good;
@@ -162,14 +165,40 @@ export interface SharedChoice {
 }
 
 /**
+ * A supersede retiring `grantId` and every grant issued for the share up to
+ * it, while leaving any grant signed later standing. It keeps an id one
+ * millisecond after `grantId` that no grant carries (equal issue times would
+ * conflict on the machine with the supersede that kept `grantId`).
+ */
+function retireUpTo(shareId: string, grantId: string): PendingRevocation | null {
+  const issued = grantIssuedAt(grantId, shareId)
+  return issued === null ? null : { grantId: shareId, keep: `${shareId}:${(issued + 1).toString(36)}00000000` }
+}
+
+/** Whether a signed grant allows anything `role` does not. */
+function widerThan(grant: GrantBody, role: ShareRole): boolean {
+  const allowed = new Set<string>(ROLE_PERMISSIONS[role])
+  return grant.permissions.some(p => !allowed.has(p))
+}
+
+/**
  * Remember what the owner chose when sharing: session, member, role and end.
  * Allow later signs exactly this, whatever the relay lists by then. Sharing
  * again (which keeps the share's id) replaces the choice, so narrowing a
  * share signs the narrower role.
+ *
+ * Narrowing also retires the broader grant on the machine at once, rather
+ * than when the narrower one is signed: the revocation is queued here
+ * (flushRevocations sends it). Returns whether one was queued.
  */
-export async function recordShare(machineId: string, choice: SharedChoice, storage: TrustStorage = trustStorage()): Promise<void> {
+export async function recordShare(machineId: string, choice: SharedChoice, storage: TrustStorage = trustStorage()): Promise<boolean> {
   const ledger = await loadLedger(machineId, storage)
-  if (!ledger) return
+  if (!ledger) return false
+  const existing = entryFor(ledger, choice.shareId)
+  const current = parseGrantText(existing?.current?.grant)
+  const retire = existing && !existing.revoked && existing.current && current && widerThan(current, choice.role)
+    ? retireUpTo(choice.shareId, existing.current.grantId)
+    : null
   await ledger.update(entries => {
     const entry = entries.find(e => e.shareId === choice.shareId)
     if (entry) {
@@ -177,10 +206,13 @@ export async function recordShare(machineId: string, choice: SharedChoice, stora
       entry.granteeUserId = choice.granteeUserId
       entry.role = choice.role
       entry.notAfter = choice.notAfter
+      // The broader grant is retired: never renew it back into use.
+      if (retire && entry.current?.grantId === existing?.current?.grantId) entry.current = null
     } else {
       entries.push({ ...choice, current: null, issuedIds: [], revoked: false })
     }
-  })
+  }, retire ? [retire] : [])
+  return retire !== null
 }
 
 function parseGrantText(text: string | undefined): GrantBody | null {
@@ -347,7 +379,7 @@ export async function signGrant(
   proposal: GrantProposal,
   storage: TrustStorage = trustStorage(),
   opts: { now?: number } = {},
-): Promise<void> {
+): Promise<PendingRevocation[]> {
   // Dated by the machine's clock: a fresh id and expiry (neither shown for
   // review in more detail than "30 days"), and the intent's time.
   const now = opts.now ?? await machineNow(transport, proposal.share.machineId, storage)
@@ -373,8 +405,11 @@ export async function signGrant(
       entry.role = proposal.role
     }, [{ grantId: proposal.share.id, keep: grant.grantId }])
   }
-  if (ledger) await flushRevocations(transport, proposal.share.machineId, storage)
-  else await queueRevocations(transport, proposal.share.machineId, [{ grantId: proposal.share.id, keep: grant.grantId }], storage)
+  // What the machine hasn't confirmed yet: until it does, an earlier grant
+  // (perhaps a broader one) may still count there.
+  return ledger
+    ? flushRevocations(transport, proposal.share.machineId, storage)
+    : queueRevocations(transport, proposal.share.machineId, [{ grantId: proposal.share.id, keep: grant.grantId }], storage)
 }
 
 export type GrantStatus =
@@ -415,6 +450,9 @@ export async function renewGrants(transport: GrantTransport, machineId: string, 
     if (entry.revoked || !entry.current) continue
     let grant: GrantBody
     try { grant = JSON.parse(entry.current.grant) as GrantBody } catch { continue }
+    // A grant broader than the owner's current choice (the share was
+    // narrowed) is left to expire, never extended.
+    if (widerThan(grant, entry.role)) continue
     const now = clock()
     if (grant.expiresAt - now > RENEW_WITHIN_MS) continue
     const expiresAt = grantExpiry(entry.notAfter, now)
@@ -556,6 +594,35 @@ export async function revokeShareGrants(transport: GrantTransport, share: Pick<S
   }
   return ledger ? flushRevocations(transport, share.machineId, storage)
     : queueRevocations(transport, share.machineId, [{ grantId: share.id }], storage)
+}
+
+/**
+ * Revoke on the machine every share this browser made there that the relay
+ * no longer lists (a member removed from the workspace, or a share deleted
+ * from another browser): the relay can drop a share, but only the owner can
+ * retire its grants on the machine. `listedShareIds` is the relay's
+ * listing of the owner's shares of `sessionId` on this machine. A relay that
+ * leaves a share out can only get it revoked, the safe direction. Returns the
+ * revocations still waiting for the machine, or null when nothing needed
+ * revoking.
+ */
+export async function revokeUnlistedShares(
+  transport: GrantTransport,
+  machineId: string,
+  sessionId: string,
+  listedShareIds: ReadonlySet<string>,
+  storage: TrustStorage = trustStorage(),
+): Promise<PendingRevocation[] | null> {
+  const ledger = await loadLedger(machineId, storage)
+  if (!ledger) return null
+  // Only shares with a grant signed: one recorded since the listing was
+  // fetched has none yet, and must not be revoked for missing from it.
+  const gone = ledger.entries.filter(e => e.sessionId === sessionId && !e.revoked && e.issuedIds.length > 0 && !listedShareIds.has(e.shareId)).map(e => e.shareId)
+  if (gone.length === 0) return null
+  await ledger.update(entries => {
+    for (const entry of entries) if (gone.includes(entry.shareId)) entry.revoked = true
+  }, gone.map(grantId => ({ grantId })))
+  return flushRevocations(transport, machineId, storage)
 }
 
 /**
