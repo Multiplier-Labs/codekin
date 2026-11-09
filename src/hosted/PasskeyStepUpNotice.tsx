@@ -41,7 +41,7 @@ export function PasskeyStepUpNotice() {
         <p className="mt-1 text-meta text-ink-muted">{stepUpMessage(detail.reason)}</p>
         {detail.reason && (
           <p className="mt-1 text-meta text-ink-faint">
-            This browser won't ask again for {Math.round(STEP_UP_WINDOW_MS / 60_000)} minutes.
+            This browser won't ask again for up to {Math.round(STEP_UP_WINDOW_MS / 60_000)} minutes (the computer can set less).
           </p>
         )}
       </div>

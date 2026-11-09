@@ -500,13 +500,18 @@ Asking for the passkey on every privileged session action got in the way. Owners
 - **Not covered:**
   - device changes (`device_certify`, `device_revoke`);
   - shell-approving share grants;
-  - any request whose body the browser can't classify.
+  - standing authority: trusting the orchestrator and scheduled or webhook-triggered automations (§6.6), which outlast the window;
+  - any request whose body the machine can't classify.
 
-  These still need the passkey every time.
+  These still need the passkey every time. The machine decides what a window covers from its own classification of the action, not from anything the browser says.
 - **Length.** The window lasts 15 minutes (`STEP_UP_WINDOW_MS`). The machine can shorten it, down to 0, with `relay-devices.json` → `passkeyWindowMinutes`, set locally with `codekin relay devices passkey-window <0-15>`.
+  - It runs from when the passkey signed (the intent's `ts`, if earlier than its arrival), so a relay that holds the intent back can't push the end later.
+  - It is checked against the current setting, so lowering it ends windows already open. A machine clock that steps back ends them too.
+  - It ends when the passkey that opened it is removed from the device list.
+- **Required passkeys.** A window opened by a passkey counts as a passkey step-up, so it also meets the workspace's (or machine's) "Privileged actions need a passkey". To be asked every time, set the window to 0.
 - **Where it lives.** The machine keeps windows in memory, so a connector restart just asks again.
 - **The browser's side.** The browser stores when it last stepped up (on its pin), and stops using its window a minute before the machine's would end. A step-up refusal clears its record, so a machine with a shorter window costs one refused action, then a prompt.
-- **Telling the user why.** The OS prompt can't carry our text, so while the passkey prompt is up the app shows a notice saying what made the action privileged (for example "This session uses bypass permissions, so it runs commands without asking you first") and that this browser won't be asked again for 15 minutes.
+- **Telling the user why.** The OS prompt can't carry our text, so while the passkey prompt is up the app shows a notice saying what made the action privileged (for example "This session uses bypass permissions, so it runs commands without asking you first") and that this browser won't be asked again for up to 15 minutes (the machine may set less).
 
 ### 6.6a As built (slice 5)
 
