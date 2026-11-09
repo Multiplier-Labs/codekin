@@ -56,6 +56,12 @@ export interface IntentBody {
   channel?: string
   /** Stream frames: 1, 2, 3… per channel. The machine refuses any that go backwards. */
   seq?: number
+  /**
+   * Passkey step-ups only: the browser key of the browser that asked. The
+   * passkey signs it, and the machine lets that browser confirm the same
+   * kind of action with its own key for a while (§6.6b).
+   */
+  browserKeyId?: string
 }
 
 export interface SignedIntent {
@@ -291,6 +297,43 @@ function parsed(text: string): Record<string, unknown> | null {
   } catch {
     return null
   }
+}
+
+/**
+ * After a passkey step-up, how long the browser that asked may confirm
+ * privileged session actions with its own key (§6.6b). The machine can set
+ * a shorter window (relay-devices.json → passkeyWindowMinutes), down to 0.
+ */
+export const STEP_UP_WINDOW_MS = 15 * 60_000
+
+/** Why an action needs a passkey, so the browser can say so before the prompt. */
+export type StepUpReason = 'bypass' | 'allowed-tools' | 'standing-approval'
+
+/** The step-up reason for a stream frame, or null when it isn't privileged. */
+export function frameStepUpReason(frame: string): StepUpReason | null {
+  const msg = parsed(frame)
+  if (!msg) return null
+  if (msg.type === 'prompt_response') return answersStanding(msg.value) ? 'standing-approval' : null
+  if (msg.type === 'create_session' || msg.type === 'set_permission_mode') {
+    if (typeof msg.permissionMode === 'string' && AUTO_APPROVE_MODES.has(msg.permissionMode)) return 'bypass'
+    if (msg.type === 'create_session' && preApprovesTools(msg.allowedTools)) return 'allowed-tools'
+  }
+  return null
+}
+
+/** The step-up reason for a REST request; null when not privileged, or not readable. */
+export function requestStepUpReason(method: string, path: string, body: Uint8Array | null): StepUpReason | null {
+  if (!requestNeedsStepUp(method, path, body) || !body) return null
+  let msg: Record<string, unknown> | null
+  try {
+    msg = parsed(new TextDecoder('utf-8', { fatal: true }).decode(body))
+  } catch {
+    return null
+  }
+  if (!msg) return null
+  if (typeof msg.permissionMode === 'string' && AUTO_APPROVE_MODES.has(msg.permissionMode)) return 'bypass'
+  if (preApprovesTools(msg.allowedTools)) return 'allowed-tools'
+  return answersStanding(msg.value) ? 'standing-approval' : null
 }
 
 /**

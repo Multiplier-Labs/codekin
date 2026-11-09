@@ -10,13 +10,14 @@
  *   codekin relay devices revoke <keyId>
  *   codekin relay devices policy <off|warn|required>
  *   codekin relay devices passkey-adds <on|off>  whether an enrolled passkey may add a browser
+ *   codekin relay devices passkey-window <minutes>  how long a passkey confirmation covers its browser
  */
 
 import { readRelayCredentialIdentity, relayCredentialPath } from './relay-credential.js'
 import { readMachineIdentity } from './machine-identity.js'
 import { trustPathsFor } from './machine-trust.js'
 import {
-  describeTrustStore, INTENT_POLICIES, readTrustStore, revokeCredential, setIntentPolicy, setLocalConfirmationOnly, TrustStoreError,
+  describeTrustStore, INTENT_POLICIES, MAX_PASSKEY_WINDOW_MINUTES, readTrustStore, revokeCredential, setIntentPolicy, setLocalConfirmationOnly, setPasskeyWindow, TrustStoreError,
 } from './trust-store.js'
 import type { TrustStoreView } from './trust-store.js'
 import { approveEnrolment, approveTrustToken, rejectEnrolment } from './enrolment.js'
@@ -36,6 +37,7 @@ export const DEVICES_USAGE = [
   '  revoke <keyId>                    Remove a device',
   `  policy <${INTENT_POLICIES.join('|')}>         Set whether devices must sign what they send`,
   '  passkey-adds <on|off>             Whether your passkey may add a browser without a code typed here',
+  `  passkey-window <0-${MAX_PASSKEY_WINDOW_MINUTES}>          Minutes a passkey confirmation covers its browser (0: ask every time)`,
 ]
 
 const POLICY_TEXT: Record<TrustStoreView['policy'], string> = {
@@ -55,6 +57,9 @@ function printList(view: TrustStoreView, identityKeyId: string | null, io: Devic
   io.out(`Identity key: ${identityKeyId ?? 'not created yet (made when the connector starts)'}`)
   io.out(`Policy:       ${POLICY_TEXT[view.policy]}`)
   io.out(`Passkeys:     ${view.localConfirmationOnly ? 'may not add browsers (only devices confirmed here)' : 'may add browsers'}`)
+  io.out(`Bypass/always-allow: ${view.passkeyWindowMinutes === 0
+    ? 'passkey asked every time'
+    : `passkey asked, then not again on that browser for ${view.passkeyWindowMinutes} min`}`)
   io.out('Not enforced yet: this Codekin version keeps the list but does not check signatures.')
   io.out('')
   if (view.pending.length > 0) {
@@ -177,6 +182,15 @@ export function runDevicesCommand(
         io.out(rest[0] === 'on'
           ? 'Your enrolled passkey may add a browser to this computer.'
           : 'Only devices confirmed on this computer can be added now.')
+        return 0
+      }
+      case 'passkey-window': {
+        const minutes = rest[0] !== undefined && /^\d+$/.test(rest[0]) ? Number(rest[0]) : NaN
+        const store = setPasskeyWindow(minutes, devicesFile, paired.machineId)
+        const set = store.passkeyWindowMinutes ?? 15
+        io.out(set === 0
+          ? 'Your passkey is asked for every bypass session and "always allow" rule.'
+          : `After you use your passkey, that browser isn't asked again for ${set} minutes.`)
         return 0
       }
       case 'policy': {
