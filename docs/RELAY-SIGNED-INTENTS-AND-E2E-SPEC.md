@@ -255,6 +255,7 @@ Typing a code on the machine and another back in the browser is the slowest part
 - `trustMac` can only come from something that holds `S`, so it pins `kM` as safely as the finishing code does.
 - 128 bits of `S` leave nothing to grind. A request whose `mac` fails is spent, like a failed reveal.
 - The usual limits still apply: owner only, 3 waiting requests, 20 per 10 minutes.
+- It holds only while `S` stays off the relay's data plane. A Codekin session's input and output can cross the relay, so `S` (like the codes) must never be given to one: anyone who reads `S` can have their own key approved. The sheet points to a terminal or SSH only, and `codekin relay devices trust|approve` refuse to run inside a Codekin session (`CODEKIN_SESSION_ID` set). That refusal is a guard against the easy path, not a boundary: a process can clear its environment.
 
 **Pasted before the browser asks.** The hosted install command carries `CODEKIN_TRUST_TOKEN=<S>` next to the pairing token, so the install pastes the token before the machine is even online. The machine then keeps `{ id, S }` in `relay-devices.json` → `trustTokens` (0600) for 30 minutes, at most 3 at a time. The first request offering that `id` with a valid `mac` is approved at once and the token is spent. When the machine comes online, the browser that generated the command runs the ceremony with `S` and is confirmed without a prompt (§5.3).
 
