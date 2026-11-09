@@ -15,7 +15,7 @@
  */
 
 import { useCallback, useEffect, useState } from 'react'
-import { IconCheck, IconPlus, IconShieldCheck, IconTrash } from '@tabler/icons-react'
+import { IconCheck, IconPlus, IconShield, IconShieldCheck, IconTrash } from '@tabler/icons-react'
 import { TrustSheet } from './TrustSheet'
 import { currentUserId, deviceTrustSupported, machinePin, removeFromMachine, requireConfirmedDevices } from './deviceTrust'
 import { createIntentSigner } from './intentSigner'
@@ -106,18 +106,22 @@ async function raisePolicy(machineId: string): Promise<boolean> {
 }
 
 /**
- * Whether the relay alone can control this computer (signed-intents spec
- * §6.8), and the way to stop it. Owners only.
+ * What the relay alone may do with this computer (signed-intents spec §6.8),
+ * and the way to stop it. Owners of an online machine only; null otherwise.
  */
-function PolicyLine({ machine, trusted, onChanged }: { machine: Machine; trusted: boolean; onChanged: () => void }) {
+function PolicyNote({ machine, trusted, onChanged }: { machine: Machine; trusted: boolean; onChanged: () => void }) {
   const [state, setState] = useState<'idle' | 'busy' | 'done' | 'asked'>('idle')
   const [error, setError] = useState<string | null>(null)
   if (machine.access !== 'owner' || machine.status !== 'online') return null
   if (machine.intentPolicy === 'required' || state === 'done') {
-    return <p className="pl-8 text-meta text-ink-faint">Only devices confirmed on it can control it through the relay.</p>
+    return <p className="text-meta text-ink-faint">Only devices confirmed on it can control it through the relay.</p>
   }
   if (machine.intentPolicy === null || machine.intentPolicy === undefined) {
-    return <p className="pl-8 text-meta text-warning-5">The relay can control this computer. Update Codekin on it to protect it.</p>
+    return <p className="text-meta text-warning-5">The relay can control this computer. Update Codekin on it to protect it.</p>
+  }
+  const unsigned = machine.intentPolicy === 'warn' ? ' (unsigned requests are only logged)' : ''
+  if (!trusted) {
+    return <p className="text-meta text-ink-muted">Until a browser is confirmed, the relay can control this computer{unsigned}.</p>
   }
   const raise = async () => {
     setState('busy')
@@ -132,26 +136,26 @@ function PolicyLine({ machine, trusted, onChanged }: { machine: Machine; trusted
     }
   }
   return (
-    <div className="flex flex-wrap items-center gap-2 pl-8 text-meta">
-      <span className="text-warning-5">The relay can control this computer{machine.intentPolicy === 'warn' ? ' (unsigned requests are only logged)' : ''}.</span>
-      {trusted ? (
-        state === 'asked' ? (
-          <span className="text-ink-muted">Asked it; this updates once the computer reports its new setting.</span>
-        ) : (
-          <button type="button" disabled={state === 'busy'} onClick={() => { void raise() }} className="text-primary-5 hover:underline">
-            {state === 'busy' ? 'Asking it…' : 'Require confirmed devices'}
-          </button>
-        )
+    <div className="flex flex-wrap items-center justify-between gap-2">
+      <p className="text-meta text-warning-5">The relay can control this computer{unsigned}.</p>
+      {state === 'asked' ? (
+        <span className="text-meta text-ink-muted">Asked it; this updates once the computer reports its new setting.</span>
       ) : (
-        <span className="text-ink-muted">Confirm this browser to protect it.</span>
+        <button type="button" disabled={state === 'busy'} onClick={() => { void raise() }} className={button}>
+          {state === 'busy' ? 'Asking it…' : 'Require confirmed devices'}
+        </button>
       )}
-      {error && <span className="text-warning-5">{error}</span>}
+      {error && <p className="w-full text-meta text-warning-5">{error}</p>}
     </div>
   )
 }
 
-/** "Confirmed on this browser", or the way to get there (signed-intents spec §6.9). */
-function TrustLine({ machine, trusted, onTrusted }: { machine: Machine; trusted: boolean; onTrusted: () => void }) {
+/**
+ * Whether this browser is confirmed on the machine (signed-intents spec
+ * §6.9), as one panel under its row: the state, the one action that changes
+ * it, and what the relay may do meanwhile.
+ */
+function TrustPanel({ machine, trusted, onTrusted }: { machine: Machine; trusted: boolean; onTrusted: () => void }) {
   const [open, setOpen] = useState(false)
   const [removing, setRemoving] = useState<'confirm' | 'busy' | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -167,29 +171,46 @@ function TrustLine({ machine, trusted, onTrusted }: { machine: Machine; trusted:
       setRemoving(null)
     }
   }
+  const offline = machine.status === 'offline'
   return (
-    <div className="flex flex-wrap items-center gap-2 pl-8 pt-0.5 text-meta">
-      {trusted ? (
-        <>
-          <span className="flex items-center gap-1 text-ink-muted"><IconShieldCheck size={14} /> Confirmed on this browser</span>
-          {removing === 'confirm' ? (
-            <>
-              <button type="button" onClick={() => { void remove() }} className="text-error-4 hover:underline">Remove it from {machine.displayName}</button>
-              <button type="button" onClick={() => { setRemoving(null) }} className="text-ink-muted hover:underline">Keep</button>
-            </>
-          ) : (
-            <button type="button" disabled={removing === 'busy'} onClick={() => { setRemoving('confirm') }} className="text-ink-faint hover:text-ink hover:underline">
-              {removing === 'busy' ? 'Removing…' : 'Remove this browser'}
+    <div className="ml-8 mt-1.5 space-y-1.5 rounded-control border border-edge bg-page px-3 py-2">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        {trusted ? (
+          <>
+            <span className="flex items-center gap-1.5 text-meta text-success-5">
+              <IconShieldCheck size={16} /> This browser is confirmed on {machine.displayName}
+            </span>
+            {removing === 'confirm' ? (
+              <span className="flex items-center gap-2">
+                <button type="button" onClick={() => { void remove() }} className={dangerButton}>Remove it from {machine.displayName}</button>
+                <button type="button" onClick={() => { setRemoving(null) }} className={quietButton}>Keep</button>
+              </span>
+            ) : (
+              <button type="button" disabled={removing === 'busy'} onClick={() => { setRemoving('confirm') }} className={quietButton}>
+                {removing === 'busy' ? 'Removing…' : 'Remove this browser'}
+              </button>
+            )}
+          </>
+        ) : (
+          <>
+            <span className="flex items-center gap-1.5 text-meta text-ink-muted">
+              <IconShield size={16} /> This browser isn't confirmed on {machine.displayName}
+            </span>
+            <button
+              type="button"
+              disabled={offline}
+              title={offline ? `${machine.displayName} is offline. Turn it on to confirm this browser.` : undefined}
+              onClick={() => { setOpen(true) }}
+              className={button}
+            >
+              Confirm this browser
             </button>
-          )}
-          {error && <span className="text-warning-5">{error}</span>}
-        </>
-      ) : (
-        <>
-          <span className="text-ink-faint">Not confirmed on this browser</span>
-          <button type="button" onClick={() => { setOpen(true) }} className="text-primary-5 hover:underline">Confirm this browser</button>
-        </>
-      )}
+          </>
+        )}
+      </div>
+      {!trusted && offline && <p className="text-meta text-ink-faint">{machine.displayName} is offline. Confirm this browser once it is back.</p>}
+      <PolicyNote machine={machine} trusted={trusted} onChanged={onTrusted} />
+      {error && <p className="text-meta text-warning-5">{error}</p>}
       {open && (
         <TrustSheet
           machineId={machine.id}
@@ -287,8 +308,7 @@ function MachineRow({ machine: m, isCurrent, onSwitch, setup, gutter, trusted, o
           </button>
         ) : gutter && <span aria-hidden className="w-8 flex-shrink-0" />}
       </div>
-      {trusted !== null && <TrustLine machine={m} trusted={trusted} onTrusted={onTrusted} />}
-      {trusted !== null && <PolicyLine machine={m} trusted={trusted} onChanged={onTrusted} />}
+      {trusted !== null && <TrustPanel machine={m} trusted={trusted} onTrusted={onTrusted} />}
       {canRemove && confirmingRemove && (
         <ConfirmRemove machine={m} setup={setup} onClose={() => { setConfirmingRemove(false) }} />
       )}

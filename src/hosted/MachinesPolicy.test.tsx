@@ -80,8 +80,17 @@ describe('MachinesSection policy', () => {
 
   it('points an unconfirmed browser at confirming itself', async () => {
     const el = await render([machine({ intentPolicy: 'off' })])
-    expect(el.textContent).toContain('Confirm this browser to protect it')
+    expect(el.textContent).toContain("This browser isn't confirmed on hatchery")
+    expect(el.textContent).toContain('Until a browser is confirmed, the relay can control this computer')
+    expect([...el.querySelectorAll('button')].some(b => b.textContent === 'Confirm this browser')).toBe(true)
     expect([...el.querySelectorAll('button')].some(b => b.textContent === 'Require confirmed devices')).toBe(false)
+  })
+
+  it("can't start confirming a browser while the computer is offline", async () => {
+    const el = await render([machine({ status: 'offline', intentPolicy: 'off' })])
+    const confirm = [...el.querySelectorAll('button')].find(b => b.textContent === 'Confirm this browser')!
+    expect(confirm.disabled).toBe(true)
+    expect(el.textContent).toContain('hatchery is offline. Confirm this browser once it is back.')
   })
 
   it('asks for an update where the connector reports no policy, and is quiet once required', async () => {
