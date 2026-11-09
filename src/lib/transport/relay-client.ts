@@ -24,6 +24,8 @@ export interface RelayProxyResponse {
 export interface RelayErrorPayload {
   code: string
   message: string
+  /** For intent refusals: which check failed (an `intent_*` reason). */
+  detail?: string
 }
 
 /** Thrown by `request()` when the relay or the machine refuses the call. */
@@ -624,7 +626,11 @@ export class RelayConnection {
     }
     if (kind === 'error') {
       const err = payload as Partial<RelayErrorPayload> & { detail?: unknown; machineTime?: unknown; machineTimeSig?: unknown; intentNonce?: unknown }
-      const error = { code: err.code ?? 'relay_error', message: err.message ?? 'Relay error' }
+      const error: RelayErrorPayload = {
+        code: err.code ?? 'relay_error',
+        message: err.message ?? 'Relay error',
+        ...(typeof err.detail === 'string' ? { detail: err.detail } : {}),
+      }
       // A step-up refusal names the passkey to use next time.
       if (err.detail === 'intent_step_up_required' && Array.isArray((err as { stepUpPasskeys?: unknown }).stepUpPasskeys)) {
         void this.opts.signer?.learnPasskeys?.((err as { stepUpPasskeys: Array<{ credentialId: string; keyId: string }> }).stepUpPasskeys)
