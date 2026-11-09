@@ -55,6 +55,15 @@ const POLICY_DESCRIPTION: Record<'off' | 'warn' | 'required', string> = {
   off: "Signatures aren't checked. The relay can control this computer.",
 }
 
+
+/**
+ * Codes are shown upper-case as they're typed. A pasted trust command or
+ * token is kept exactly: it is case-sensitive base64url.
+ */
+function asTyped(value: string): string {
+  return value.length <= 9 && /^[A-Za-z0-9\s-]*$/.test(value) ? value.toUpperCase() : value
+}
+
 export function RelayDevicesBlock({ token, onError }: Props) {
   const [data, setData] = useState<RelayDevices | null>(null)
   const [confirming, setConfirming] = useState<string | null>(null)
@@ -174,7 +183,7 @@ export function RelayDevicesBlock({ token, onError }: Props) {
               <input
                 id="relay-device-code"
                 value={code}
-                onChange={e => { setCode(e.target.value.toUpperCase()); setCodeError(null) }}
+                onChange={e => { setCode(asTyped(e.target.value)); setCodeError(null) }}
                 placeholder="Command or XXXX-XXXX"
                 autoComplete="off"
                 spellCheck={false}

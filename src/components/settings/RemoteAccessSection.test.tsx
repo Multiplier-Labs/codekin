@@ -223,6 +223,21 @@ describe('RemoteAccessSection', () => {
     expect(api.rejectRelayEnrolment).toHaveBeenCalledWith('t', 'e1')
   })
 
+  it('keeps a pasted trust command exactly as pasted (its token is case-sensitive)', async () => {
+    api.getRelayDevices.mockResolvedValue(NO_DEVICES)
+    api.approveRelayDevice.mockResolvedValue({ waiting: true })
+    await render()
+    const input = el!.querySelector<HTMLInputElement>('#relay-device-code')!
+    const command = 'codekin relay devices trust aB3_-xYz9QwErTyUiOpAsD'
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, command)
+      input.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+    expect(input.value).toBe(command)
+    await act(async () => { button('Confirm')!.click() })
+    expect(api.approveRelayDevice).toHaveBeenLastCalledWith('t', command)
+  })
+
   it('shows the activity log, filtered to refusals, and checks its chain', async () => {
     api.getRelayStatus.mockResolvedValue(PAIRED)
     api.getRelayPairing.mockResolvedValue({ state: 'idle' })

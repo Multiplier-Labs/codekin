@@ -85,13 +85,31 @@ function printList(view: TrustStoreView, identityKeyId: string | null, io: Devic
   }
 }
 
+/**
+ * Confirming a browser must happen on this computer, by its owner (spec
+ * §5.2, §5.2b). A Codekin session's input and output may cross the relay,
+ * so the trust token or code must never pass through one: a session that
+ * runs this command (or is asked to by a prompt the relay could have
+ * written) is refused. It is a guard against the easy path, not a boundary:
+ * a process can clear its environment.
+ */
+export function insideCodekinSession(env: NodeJS.ProcessEnv): boolean {
+  return typeof env.CODEKIN_SESSION_ID === 'string' && env.CODEKIN_SESSION_ID.length > 0
+}
+
 /** Run the command; returns the process exit code. */
 export function runDevicesCommand(
   args: string[],
   credentialFile = relayCredentialPath(),
   io: DevicesCliIo = { out: line => { console.log(line) }, err: line => { console.error(line) } },
+  env: NodeJS.ProcessEnv = process.env,
 ): number {
   const [action = 'list', ...rest] = args
+  if ((action === 'trust' || action === 'approve') && insideCodekinSession(env)) {
+    io.err('Refused: this is running inside a Codekin session, whose input and output can pass through the relay.')
+    io.err('Run it yourself in a terminal on this computer (or over SSH), or use Settings → Remote access in Codekin opened here.')
+    return 1
+  }
   const paired = readRelayCredentialIdentity(credentialFile)
   if (!paired) {
     io.err('Not paired. Run `codekin relay login` first.')
