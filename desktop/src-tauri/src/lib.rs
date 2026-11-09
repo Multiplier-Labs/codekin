@@ -322,7 +322,9 @@ fn build_window(app: &AppHandle, shared: Arc<Shared>) -> tauri::Result<WebviewWi
     .title("Codekin")
     // The desktop token tells the page it runs in the app (links to other
     // sites then go through on_navigation to the default browser).
-    .user_agent(&locations::user_agent(&app.package_info().version.to_string()))
+    .user_agent(&locations::user_agent(
+        &app.package_info().version.to_string(),
+    ))
     .inner_size(1400.0, 900.0)
     .min_inner_size(640.0, 480.0)
     // Shown by hosted::restore, unless the last-used location is a hosted one.
