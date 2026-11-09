@@ -11,6 +11,17 @@
 import { useState, useEffect } from 'react'
 import type { HostedRelayTransport } from '../lib/transport'
 import type { Machine } from './machines'
+import { TrustSheet } from './TrustSheet'
+
+/**
+ * Refusals that mean "this browser isn't confirmed on that machine": it sent
+ * nothing signed (no device key, or none it could read), or signed with a key
+ * the machine no longer lists.
+ */
+const UNCONFIRMED_DETAILS = new Set(['intent_required', 'intent_unknown_key', 'intent_wrong_signer'])
+
+/** After this long on "Connecting…", say what may be wrong and offer the way out. */
+export const SLOW_CONNECT_MS = 12_000
 
 interface MachineConnectProps {
   machine: Machine
@@ -26,7 +37,11 @@ export function MachineConnect({ machine, transport, onBack, onConnected }: Mach
   const [error, setError] = useState<string | null>(null)
   /** Relay error code behind a failure, when there is one. */
   const [relayCode, setRelayCode] = useState<string | null>(null)
+  /** The signed-intent check that failed, when the machine refused. */
+  const [detail, setDetail] = useState<string | null>(null)
   const [attempt, setAttempt] = useState(0)
+  const [slow, setSlow] = useState(false)
+  const [confirming, setConfirming] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -35,17 +50,19 @@ export function MachineConnect({ machine, transport, onBack, onConnected }: Mach
       setState('connecting')
       setError(null)
       setRelayCode(null)
+      setDetail(null)
       try {
         // One cheap round trip proves the whole path: relay socket up, the
         // machine's connector online, and its local token accepted.
         const res = await transport.fetch('/api/sessions/list')
         if (cancelled) return
         if (!res.ok) {
-          const detail = (await res.json().catch(() => null)) as
-            | { error?: string; relayCode?: string }
+          const body = (await res.json().catch(() => null)) as
+            | { error?: string; relayCode?: string; detail?: string }
             | null
-          setRelayCode(detail?.relayCode ?? null)
-          throw new Error(detail?.error ?? `Machine returned ${res.status}`)
+          setRelayCode(body?.relayCode ?? null)
+          setDetail(typeof body?.detail === 'string' ? body.detail : null)
+          throw new Error(body?.error ?? `Machine returned ${res.status}`)
         }
         onConnected()
       } catch (err) {
@@ -56,9 +73,31 @@ export function MachineConnect({ machine, transport, onBack, onConnected }: Mach
     }
 
     void probe()
-    return () => { cancelled = true }
+    // A probe that never answers (for example a browser that can't read its
+    // stored device key) mustn't leave the user on a spinner.
+    setSlow(false)
+    const slowTimer = setTimeout(() => { if (!cancelled) setSlow(true) }, SLOW_CONNECT_MS)
+    return () => { cancelled = true; clearTimeout(slowTimer) }
     // onConnected/transport are stable for a given machine; attempt re-runs it.
   }, [transport, attempt, onConnected])
+
+  const unconfirmed = relayCode === 'devices_unconfirmed' || (detail !== null && UNCONFIRMED_DETAILS.has(detail))
+  const confirmButton = (
+    <button
+      onClick={() => { setConfirming(true) }}
+      className="rounded-control bg-primary-6 px-4 py-2 text-meta text-ink-inverse transition hover:bg-primary-7"
+    >
+      Confirm this browser
+    </button>
+  )
+  const backButton = (
+    <button
+      onClick={onBack}
+      className="rounded-control border border-edge px-4 py-2 text-meta text-ink-muted transition hover:bg-surface-raised hover:text-ink"
+    >
+      ← Machines
+    </button>
+  )
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-page p-4">
@@ -74,19 +113,43 @@ export function MachineConnect({ machine, transport, onBack, onConnected }: Mach
             >
               <div className="h-full w-1/2 animate-pulse rounded-full bg-primary-6" />
             </div>
+            {slow && (
+              <div className="mt-6">
+                <p className="mb-4 text-meta text-ink-muted">
+                  This is taking longer than usual. If this browser was reset, or can&rsquo;t open its saved device
+                  key (in the Mac app, after a keychain prompt), confirm it on {machine.displayName} again.
+                </p>
+                <div className="flex justify-center gap-2">
+                  {backButton}
+                  {confirmButton}
+                </div>
+              </div>
+            )}
           </>
         )}
 
-        {state === 'error' && (
+        {state === 'error' && unconfirmed && (
+          <>
+            <p className="mb-2 text-body text-ink">This browser isn&rsquo;t confirmed on {machine.displayName}.</p>
+            <p className="mb-6 text-meta text-ink-muted">
+              {machine.displayName} only accepts browsers confirmed on it. Confirm this one: you&rsquo;ll run one
+              command in a terminal on {machine.displayName}, and this page continues by itself.
+            </p>
+            <div className="flex justify-center gap-2">
+              {backButton}
+              {confirmButton}
+            </div>
+          </>
+        )}
+
+        {state === 'error' && !unconfirmed && (
           <>
             <p className="mb-2 text-body text-ink">
               {relayCode === 'local_unauthorized'
                 ? 'This machine’s connector is not authorized to its local Codekin server.'
                 : relayCode === 'connector_update_required'
                   ? 'Codekin on this machine needs an update.'
-                  : relayCode === 'devices_unconfirmed'
-                    ? 'Your workspace requires confirmed devices.'
-                    : 'Could not reach this machine.'}
+                  : 'Could not reach this machine.'}
             </p>
             <p className="mb-4 text-meta text-ink-muted">{error}</p>
             <p className="mb-6 text-meta text-ink-faint">
@@ -95,11 +158,6 @@ export function MachineConnect({ machine, transport, onBack, onConnected }: Mach
                   The connector is running, but holding the wrong token. Restart it with{' '}
                   <code className="font-mono">AUTH_TOKEN_FILE</code> set to the token that machine’s
                   server uses.
-                </>
-              ) : relayCode === 'devices_unconfirmed' ? (
-                <>
-                  Confirm this browser on it: Settings → Machines → Confirm this browser, then type the code on
-                  that computer.
                 </>
               ) : relayCode === 'connector_update_required' ? (
                 <>
@@ -114,12 +172,7 @@ export function MachineConnect({ machine, transport, onBack, onConnected }: Mach
               )}
             </p>
             <div className="flex justify-center gap-2">
-              <button
-                onClick={onBack}
-                className="rounded-control border border-edge px-4 py-2 text-meta text-ink-muted transition hover:bg-surface-raised hover:text-ink"
-              >
-                ← Machines
-              </button>
+              {backButton}
               <button
                 onClick={() => { setAttempt(a => a + 1) }}
                 className="rounded-control bg-primary-6 px-4 py-2 text-meta text-ink-inverse transition hover:bg-primary-7"
@@ -130,6 +183,14 @@ export function MachineConnect({ machine, transport, onBack, onConnected }: Mach
           </>
         )}
       </div>
+      {confirming && (
+        <TrustSheet
+          machineId={machine.id}
+          machineName={machine.displayName}
+          onClose={() => { setConfirming(false) }}
+          onTrusted={() => { setConfirming(false); setAttempt(a => a + 1) }}
+        />
+      )}
     </div>
   )
 }
