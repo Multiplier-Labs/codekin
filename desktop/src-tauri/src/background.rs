@@ -26,6 +26,9 @@ pub struct Prefs {
     pub last_location: Option<String>,
     /// The first-run choice; `None` until the welcome screen has been answered.
     pub start_mode: Option<StartMode>,
+    /// The app version that last showed the keychain note (see
+    /// `hosted::keychain_note_needed`); `None` until it has been shown once.
+    pub keychain_note_version: Option<String>,
 }
 
 /// What the app is mainly for, chosen on the welcome screen.
