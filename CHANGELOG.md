@@ -7,13 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.11.1] - 2026-11-09
+## [0.11.2] - 2026-11-09
 
-Update machines and the relay together. The new protections are enforced on each machine, so they only take effect on machines running 0.11.1.
+Update machines and the relay together. The new protections are enforced on each machine, so they only take effect on machines running 0.11.2. (0.11.1 was never published.)
 
 ### Added
 - **Confirm a browser with one pasted command.** **Confirm this browser** now shows a `codekin relay devices trust …` command to run once on the computer, and the browser finishes by itself. The hosted install command carries it, so a newly installed machine confirms the browser that set it up. The two codes stay as a fallback (#829, #830).
-- **Fewer passkey prompts.** After a passkey confirmation, that browser can confirm bypass sessions, pre-approved tools and "always allow" answers for up to 15 minutes without asking again. Device changes, shell-approving shares and standing automation still ask every time. A machine can shorten the window or turn it off (`codekin relay devices passkey-window <0-15>`); lowering it ends windows already open. The prompt says why it is asking (#834, #843).
+- **Bypass sessions need only a confirmed device.** Starting a session in bypass permissions, or switching one to it, no longer asks for a passkey, so it works from the Mac app too. Pre-approved tools, "always allow" rules, automations, Joe trust, shell-approving shares and device changes still need the passkey. To keep asking for bypass as well, run `codekin relay devices passkey-for-bypass on` on the computer (#846).
+- **Fewer passkey prompts.** After a passkey confirmation, that browser can confirm pre-approved tools and "always allow" answers (and bypass, where the computer asks for it) for up to 15 minutes without asking again. Device changes, shell-approving shares and standing automation still ask every time. A machine can shorten the window or turn it off (`codekin relay devices passkey-window <0-15>`); lowering it ends windows already open. The prompt says why it is asking (#834, #843).
 - `codekin relay devices passkey-required <on|off>`. Once a workspace turns on "Privileged actions need a passkey", the machine keeps the requirement until it is turned off there (#841).
 
 ### Changed
