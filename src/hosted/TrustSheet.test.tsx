@@ -90,6 +90,12 @@ describe('TrustSheet', () => {
       })
     }
     const finish = () => [...el!.querySelectorAll('button')].find(b => b.textContent === 'Finish')!
+    // Typing this browser's own code back explains the order of steps.
+    await type('k7qm 2xpa')
+    await act(async () => { finish().click() })
+    expect(el!.textContent).toContain("That is this browser's code. Type it on Dev box first")
+    expect(confirm).not.toHaveBeenCalled()
+
     await type('aaa-aaa')
     await act(async () => { finish().click() })
     expect(el!.textContent).toContain("That isn't the code Dev box showed")
@@ -143,6 +149,22 @@ describe('TrustSheet', () => {
     await act(async () => { await Promise.resolve() })
     expect(el!.textContent).toContain('This browser is confirmed on Dev box.')
     expect(onTrusted).toHaveBeenCalled()
+  })
+
+  it('explains a passkey the computer does not know yet, and offers the code', async () => {
+    keys.list = [{ credentialId: 'c1', cosePublicKey: 'k', rpId: 'relay.test' }]
+    trust.certifyWithPasskey.mockRejectedValueOnce(new RelayRequestError('enrol_refused', 'The passkey could not be checked (intent_unknown_key)'))
+    trust.startEnrolment.mockResolvedValue({ enrolId: 'e1', code: 'K7QM-2XPA', machineKeyId: 'mk', check: vi.fn().mockResolvedValue(null), confirm: vi.fn() })
+    await render()
+    const pick = (text: string) => [...el!.querySelectorAll('button')].find(b => b.textContent?.includes(text))!
+    await act(async () => { pick('Use my passkey').click() })
+    await act(async () => { await Promise.resolve() })
+    expect(el!.textContent).toContain("Your passkey isn't confirmed on Dev box yet")
+    expect(el!.textContent).not.toContain('(intent_unknown_key)')
+    await act(async () => { pick('Use a code instead').click() })
+    await act(async () => { await Promise.resolve() })
+    expect(el!.textContent).toContain('K7QM-2XPA')
+    expect(trust.startEnrolment.mock.calls[0][1]).toMatchObject({ passkeys: { candidates: keys.list } })
   })
 
   it('adds the passkey to a code enrolment unless unticked', async () => {

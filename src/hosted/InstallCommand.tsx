@@ -16,7 +16,8 @@ import { useState, useEffect } from 'react'
 import { IconCopy, IconCheck, IconTerminal2, IconRefresh } from '@tabler/icons-react'
 import { formatTimeLeft, installCommands, type Pairing } from './machines'
 
-function CopyBlock({ label, command }: { label: string; command: string }) {
+/** A command with a copy button. Also used by the "Confirm this browser" sheet. */
+export function CopyBlock({ label, command }: { label: string; command: string }) {
   const [copied, setCopied] = useState(false)
   return (
     <div className="mt-2">
