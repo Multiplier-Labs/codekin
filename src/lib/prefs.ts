@@ -57,6 +57,10 @@ export interface Prefs {
   repoDrawerWidth: number
   /** Last repo drawer tab, keyed by repo dir. */
   repoDrawerTabs: Record<string, string>
+  /** Count sessions that need you in the title (and Dock), and notify (unset = on). */
+  notifyNeedsInput: boolean
+  /** Count finished turns as needing you too (unset = on). */
+  notifyTurnFinished: boolean
 }
 
 export type PrefKey = keyof Prefs

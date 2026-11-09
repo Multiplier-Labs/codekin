@@ -12,7 +12,8 @@ import {
   getQueueMessages, setQueueMessages as setQueueMessagesApi,
 } from '../../lib/ccApi'
 import { FolderPicker } from '../FolderPicker'
-import { Block, Row, Rows, checkbox, input } from './Block'
+import { Block, Row, Rows, button, checkbox, input } from './Block'
+import { setPref, usePref } from '../../lib/prefs'
 
 interface Props {
   token: string
@@ -83,6 +84,8 @@ export function SessionPreferences({ token, autoWorktree, onAutoWorktreeChange, 
         </Rows>
       </Block>
 
+      <NotificationPreferences />
+
       <Block title="Repositories & worktrees">
         <Rows>
           <Row
@@ -139,5 +142,73 @@ export function SessionPreferences({ token, autoWorktree, onAutoWorktreeChange, 
         </Rows>
       </Block>
     </div>
+  )
+}
+
+/** Whether this page can ask the browser for notifications (the desktop app notifies by itself). */
+function browserNotifications(): 'unsupported' | NotificationPermission {
+  if (typeof Notification === 'undefined' || navigator.userAgent.includes('CodekinDesktop/')) return 'unsupported'
+  return Notification.permission
+}
+
+/** The title count / Dock badge and quiet notifications for sessions that need you. */
+function NotificationPreferences() {
+  const needsInput = usePref('notifyNeedsInput') !== false
+  const turnFinished = usePref('notifyTurnFinished') !== false
+  const [permission, setPermission] = useState(browserNotifications)
+  const desktop = typeof navigator !== 'undefined' && navigator.userAgent.includes('CodekinDesktop/')
+  return (
+    <Block title="Notifications">
+      <Rows>
+        <Row
+          label="Tell me when a session needs me"
+          htmlFor="settings-notify-input"
+          description={desktop
+            ? 'The Dock icon shows how many sessions are waiting, and macOS shows a quiet notification when one starts waiting while you are elsewhere.'
+            : 'The tab title shows how many sessions are waiting, and, if you allow it, a quiet notification when one starts waiting while you are elsewhere.'}
+          control={
+            <input
+              id="settings-notify-input"
+              type="checkbox"
+              checked={needsInput}
+              onChange={e => { setPref('notifyNeedsInput', e.target.checked) }}
+              className={checkbox}
+            />
+          }
+        />
+        <Row
+          label="Include finished turns"
+          htmlFor="settings-notify-finished"
+          description="Also count a session that finished and is waiting for your next message, not only ones asking for approval or an answer."
+          control={
+            <input
+              id="settings-notify-finished"
+              type="checkbox"
+              checked={turnFinished}
+              disabled={!needsInput}
+              onChange={e => { setPref('notifyTurnFinished', e.target.checked) }}
+              className={checkbox}
+            />
+          }
+        />
+        {needsInput && permission !== 'unsupported' && permission !== 'granted' && (
+          <Row
+            label="Browser notifications"
+            description={permission === 'denied'
+              ? 'Blocked for this site. Allow notifications in your browser’s site settings to get them.'
+              : 'Off for now: only the tab title shows the count.'}
+            control={permission === 'default' ? (
+              <button
+                type="button"
+                className={button}
+                onClick={() => { void Notification.requestPermission().then(setPermission) }}
+              >
+                Allow notifications
+              </button>
+            ) : null}
+          />
+        )}
+      </Rows>
+    </Block>
   )
 }
