@@ -99,6 +99,8 @@ export class HostedRelayTransport implements CodekinTransport {
         JSON.stringify({
           error: relayError?.message ?? 'Relay request failed',
           relayCode: relayError?.code ?? 'relay_error',
+          // Which signed-intent check failed, so the UI can offer the fix.
+          ...(relayError?.detail ? { detail: relayError.detail } : {}),
         }),
         { status: 502, headers: { 'content-type': 'application/json' } },
       )
