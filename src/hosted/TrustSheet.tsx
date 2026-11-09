@@ -257,7 +257,7 @@ export function TrustSheet({ machineId, machineName, onClose, onTrusted, preferC
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-page/80 p-4" role="dialog" aria-modal="true" aria-labelledby="trust-sheet-title">
-      <div className="w-full max-w-md rounded-floating border border-edge-strong bg-surface-raised p-6 shadow-floating">
+      <div className="w-full max-w-lg rounded-floating border border-edge-strong bg-surface-raised p-6 shadow-floating">
         <h2 id="trust-sheet-title" className="mb-2 text-title font-semibold text-ink">Confirm this browser on {machineName}</h2>
 
         {phase.kind === 'choose' && (

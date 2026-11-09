@@ -6,13 +6,14 @@ import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 
-const grants = vi.hoisted(() => ({ signGrant: vi.fn(), revokeShareGrants: vi.fn(), flushRevocations: vi.fn(), keys: [] as unknown[] }))
+const grants = vi.hoisted(() => ({ signGrant: vi.fn(), revokeShareGrants: vi.fn(), flushRevocations: vi.fn(), revokeUnlistedShares: vi.fn(), keys: [] as unknown[] }))
 vi.mock('./grants', async importOriginal => ({
   ...(await importOriginal<typeof import('./grants')>()),
   fetchGranteeKeys: () => Promise.resolve(grants.keys),
   signGrant: grants.signGrant,
   revokeShareGrants: grants.revokeShareGrants,
   flushRevocations: grants.flushRevocations,
+  revokeUnlistedShares: grants.revokeUnlistedShares,
 }))
 vi.mock('./workspace', () => ({
   currentWorkspaceId: () => 'w1',
@@ -48,6 +49,7 @@ beforeEach(() => {
   grants.keys = [{ keyId: 'k1', spki: 's', label: 'Pixel Chrome', lastSeenAt: null }]
   grants.revokeShareGrants.mockResolvedValue([])
   grants.flushRevocations.mockResolvedValue([])
+  grants.revokeUnlistedShares.mockResolvedValue(null)
 })
 afterEach(() => {
   act(() => { root?.unmount() })
@@ -58,7 +60,7 @@ afterEach(() => {
 
 describe('ShareDialog grants', () => {
   it('shows exactly what will be signed, devices with fingerprints, before signing', async () => {
-    grants.signGrant.mockResolvedValue(SHARE)
+    grants.signGrant.mockResolvedValue([])
     grants.keys = [{ keyId: 'k1abcdefgh', spki: 'MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE', label: 'Pixel Chrome', lastSeenAt: null }]
     await render({ ...SHARE, signedGrant: null })
     expect(el!.textContent).toContain('dana · Editor')
@@ -86,7 +88,25 @@ describe('ShareDialog grants', () => {
     grants.revokeShareGrants.mockResolvedValue(['g1'])
     await render({ ...SHARE, signedGrant: null })
     await act(async () => { [...el!.querySelectorAll('button')].find(b => b.textContent === 'Revoke')!.click() })
-    expect(el!.textContent).toContain('Revocation not yet confirmed by the computer (1)')
+    expect(el!.textContent).toContain('Not yet confirmed by the computer (1)')
+  })
+
+  it('says at once when signing left an earlier grant unconfirmed on the computer', async () => {
+    grants.signGrant.mockResolvedValue([{ grantId: 'g1', keep: 'g1:x' }])
+    await render({ ...SHARE, signedGrant: null })
+    await act(async () => { [...el!.querySelectorAll('button')].find(b => b.textContent === 'Allow')!.click() })
+    await act(async () => { await Promise.resolve() })
+    await act(async () => { [...el!.querySelectorAll('button')].find(b => b.textContent === 'Sign')!.click() })
+    for (let i = 0; i < 3; i++) await act(async () => { await Promise.resolve() })
+    expect(el!.querySelector('[aria-label="Review grant"]')).toBeNull()
+    expect(el!.textContent).toContain('Not yet confirmed by the computer (1)')
+  })
+
+  it('revokes on the computer shares the relay no longer lists, and says if that is waiting', async () => {
+    grants.revokeUnlistedShares.mockResolvedValue([{ grantId: 'g0' }])
+    await render({ ...SHARE, signedGrant: null })
+    expect(grants.revokeUnlistedShares).toHaveBeenCalledWith(expect.anything(), 'm1', 's1', new Set(['g1']))
+    expect(el!.textContent).toContain('Not yet confirmed by the computer (1)')
   })
 
   it('flags a device the grant does not name', async () => {

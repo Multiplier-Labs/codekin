@@ -17,7 +17,7 @@ vi.mock('./deviceTrust', async importOriginal => ({
 vi.mock('./workspace', () => ({ workspaceHeaders: () => ({}) }))
 
 import {
-  flushRevocations, queueRevocations, machineClockOffset, proposeGrant, recordShare, renewGrants, revokeShareGrants, signGrant,
+  flushRevocations, queueRevocations, machineClockOffset, proposeGrant, recordShare, renewGrants, revokeShareGrants, revokeUnlistedShares, signGrant,
   type GranteeKey, type GrantTransport, type ShareWithGrant,
 } from './grants'
 import { getOrCreateBrowserKey, type BrowserKey, type IssuedGrant, type MachinePin, type PendingRevocation, type TrustStorage } from './deviceTrust'
@@ -296,6 +296,63 @@ describe('share grants from the browser to the machine', () => {
     const proposal = await proposeGrant({ ...share, permissions: ['view', 'view_diff'] }, devices, { storage: ownerStorage, now: Date.now() + 1000 })
     expect(proposal.role).toBe('viewer')
     expect(proposal.grant.permissions).toEqual(['view', 'view_diff'])
+  })
+
+  it('retires the broader grant on the machine as soon as the owner narrows, before the narrower one is signed', async () => {
+    await shareAs('editor')
+    const broad = stored()[0]
+    expect(await recordShare('m1', { shareId: share.id, sessionId: 's1', granteeUserId: 'u-dana', role: 'viewer', notAfter: null }, ownerStorage)).toBe(true)
+    expect(await flushRevocations(transport, 'm1', ownerStorage)).toEqual([])
+    expect(verifier.effectivePrincipal(danaPrincipal([broad]))?.grants).toEqual({})
+    // The narrower grant, signed afterwards, stands.
+    await signGrant(transport, await proposeGrant({ ...share, permissions: ['view', 'view_diff'] }, devices, { storage: ownerStorage }), ownerStorage, { now: Date.now() + 1000 })
+    expect(verifier.effectivePrincipal(danaPrincipal(stored(), { s1: ['view', 'view_diff'] }))?.grants).toEqual({ s1: ['view', 'view_diff'] })
+    expect(verifier.effectivePrincipal(danaPrincipal([broad]))?.grants).toEqual({})
+  })
+
+  it('never renews a broader grant after the owner narrows, even while the machine is offline', async () => {
+    await shareAs('editor')
+    const g = JSON.parse(stored()[0].grant) as GrantBody
+    machineDown = true
+    await recordShare('m1', { shareId: share.id, sessionId: 's1', granteeUserId: 'u-dana', role: 'viewer', notAfter: null }, ownerStorage)
+    const put = vi.mocked(fetch).mock.calls.length
+    expect(await renewGrants(transport, 'm1', { storage: ownerStorage, now: g.expiresAt - 2 * DAY })).toBe(0)
+    expect(vi.mocked(fetch).mock.calls.slice(put).some(([url]) => String(url).endsWith('/grant'))).toBe(false)
+    // The retirement waits here for the machine.
+    expect(ownerStorage.revocations.get('u-owner:m1')).toHaveLength(1)
+  })
+
+  it('renewal skips a current grant broader than the recorded role', async () => {
+    await shareAs('editor')
+    const g = JSON.parse(stored()[0].grant) as GrantBody
+    // A record left by an older version: role narrowed, broader grant still current.
+    ownerStorage.issued.set('u-owner:m1', ownerStorage.issued.get('u-owner:m1')!.map(e => ({ ...e, role: 'viewer' as const })))
+    expect(await renewGrants(transport, 'm1', { storage: ownerStorage, now: g.expiresAt - 2 * DAY })).toBe(0)
+  })
+
+  it('returns what the machine has not confirmed when signing', async () => {
+    await recordShare('m1', { shareId: share.id, sessionId: 's1', granteeUserId: 'u-dana', role: 'editor', notAfter: null }, ownerStorage)
+    const proposal = await proposeGrant(share, devices, { storage: ownerStorage })
+    expect(await signGrant(transport, proposal, ownerStorage)).toEqual([])
+    const again = await proposeGrant(share, devices, { storage: ownerStorage })
+    machineDown = true
+    const left = await signGrant(transport, again, ownerStorage, { now: Date.now() + 1000 })
+    expect(left).toEqual([{ grantId: share.id, keep: ownerStorage.issued.get('u-owner:m1')![0].current!.grantId }])
+  })
+
+  it('revokes on the machine a signed share the relay no longer lists, and only that', async () => {
+    await shareAs('editor')
+    // A share recorded after the listing was fetched has no grant yet: left alone.
+    await recordShare('m1', { shareId: 'g2', sessionId: 's1', granteeUserId: 'u-erin', role: 'viewer', notAfter: null }, ownerStorage)
+    expect(await revokeUnlistedShares(transport, 'm1', 's1', new Set(), ownerStorage)).toEqual([])
+    const entries = ownerStorage.issued.get('u-owner:m1')!
+    expect(entries.find(e => e.shareId === share.id)?.revoked).toBe(true)
+    expect(entries.find(e => e.shareId === 'g2')?.revoked).toBe(false)
+    expect(readTrustStore(devicesFile)?.revokedGrants).toContainEqual(expect.objectContaining({ grantId: share.id }))
+    expect(verifier.effectivePrincipal(danaPrincipal())?.grants).toEqual({})
+    // Listed, or another session's: nothing to do.
+    expect(await revokeUnlistedShares(transport, 'm1', 's1', new Set(['g2']), ownerStorage)).toBeNull()
+    expect(await revokeUnlistedShares(transport, 'm1', 's2', new Set(), ownerStorage)).toBeNull()
   })
 
   it('refuses a listing whose member or session differs from what the owner shared', async () => {
