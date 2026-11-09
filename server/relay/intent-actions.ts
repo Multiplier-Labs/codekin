@@ -361,16 +361,17 @@ export function requestStepUpReason(method: string, path: string, body: Uint8Arr
  * rule, or anything that turns on bypass permissions. Those need a passkey
  * when the signer has one on the machine.
  */
-export function frameNeedsStepUp(frame: string): boolean {
+export function frameNeedsStepUp(frame: string, bypassNeedsPasskey = true): boolean {
   const msg = parsed(frame)
   if (!msg) return false
+  const bypass = bypassNeedsPasskey && typeof msg.permissionMode === 'string' && AUTO_APPROVE_MODES.has(msg.permissionMode)
   switch (msg.type) {
     case 'prompt_response':
       return answersStanding(msg.value)
     case 'create_session':
-      return (typeof msg.permissionMode === 'string' && AUTO_APPROVE_MODES.has(msg.permissionMode)) || preApprovesTools(msg.allowedTools)
+      return bypass || preApprovesTools(msg.allowedTools)
     case 'set_permission_mode':
-      return typeof msg.permissionMode === 'string' && AUTO_APPROVE_MODES.has(msg.permissionMode)
+      return bypass
     default:
       return false
   }
@@ -383,7 +384,7 @@ export function frameNeedsStepUp(frame: string): boolean {
  * read as UTF-8 JSON counts as privileged: the local server might parse it
  * (another charset) where this can't.
  */
-export function requestNeedsStepUp(method: string, path: string, body: Uint8Array | null): boolean {
+export function requestNeedsStepUp(method: string, path: string, body: Uint8Array | null, bypassNeedsPasskey = true): boolean {
   if (standingRouteReason(method, path)) return true
   if (method.toUpperCase() !== 'POST') return false
   const route = routeOf(path)
@@ -401,7 +402,7 @@ export function requestNeedsStepUp(method: string, path: string, body: Uint8Arra
   }
   if (!msg) return true
   return isCreate
-    ? (typeof msg.permissionMode === 'string' && AUTO_APPROVE_MODES.has(msg.permissionMode)) || preApprovesTools(msg.allowedTools)
+    ? (bypassNeedsPasskey && typeof msg.permissionMode === 'string' && AUTO_APPROVE_MODES.has(msg.permissionMode)) || preApprovesTools(msg.allowedTools)
     : answersStanding(msg.value)
 }
 

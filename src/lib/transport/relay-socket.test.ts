@@ -153,7 +153,7 @@ describe('refusals', () => {
 
   it('says what works instead in the desktop app, which has no passkeys', () => {
     const error = { code: 'not_permitted', message: 'This action needs your passkey', detail: 'intent_step_up_required' }
-    expect(refusalMessage(error, true)).toMatch(/Mac app can't use passkeys.*Auto approve/)
+    expect(refusalMessage(error, true)).toMatch(/Mac app can't use passkeys yet: do this from a browser/)
     expect(refusalMessage(error, false)).toBe('This action needs your passkey')
     expect(refusalMessage({ code: 'machine_offline', message: 'gone' }, true)).toBe('gone')
   })

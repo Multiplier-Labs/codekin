@@ -18,7 +18,7 @@ export function refusalMessage(error: RelayErrorPayload, desktop = isDesktopApp(
   // The desktop app's web view can't use passkeys (D12), so it can't take
   // an action that needs one: say what will work instead.
   if (error.detail === 'intent_step_up_required' && desktop) {
-    return `${error.message}. The Mac app can't use passkeys: start bypass sessions or save "always allow" rules from a browser, or use Auto approve here.`
+    return `${error.message}. The Mac app can't use passkeys yet: do this from a browser.`
   }
   return error.message
 }

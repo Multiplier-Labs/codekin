@@ -197,6 +197,13 @@ export interface MachinePin {
    * passkey here (ms). Within STEP_UP_WINDOW_MS the browser key does (§6.6b).
    */
   passkeyStepUpAt?: number
+  /**
+   * The machine asked for a passkey for bypass permissions (it has
+   * `passkey-for-bypass on`, §6.2): learned from its refusal. Without it, a
+   * bypass session is signed with the browser key, which a machine on the
+   * default accepts.
+   */
+  passkeyForBypass?: boolean
   /** Keep the pin until the machine proves removal; another attempt can retry. */
   removalPending?: boolean
 }

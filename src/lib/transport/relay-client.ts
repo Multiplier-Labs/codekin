@@ -68,7 +68,7 @@ export interface RelaySigner {
   /** Whether the machine's own key signed this time (so the relay didn't make it up). */
   verifyMachineTime(nonce: string, machineTime: number, sig: string): Promise<boolean>
   /** Remember the passkeys a machine named when it asked for step-up. */
-  learnPasskeys?(passkeys: Array<{ credentialId: string; keyId: string }>): Promise<void>
+  learnPasskeys?(passkeys: Array<{ credentialId: string; keyId: string }>, refusedReason?: StepUpReason | null): Promise<void>
   /** The user's standing on the machine (hello_ack): grantees sign with their own key. */
   setRole?(role: 'owner' | 'grantee'): void
 }
@@ -92,6 +92,8 @@ interface SignedChannel {
   session: string | null
   /** Closed by the app; frames still being signed are sent, then the close. */
   closing: boolean
+  /** Why the latest privileged frame was privileged, so a step-up refusal teaches the signer. */
+  lastStepUpReason?: StepUpReason
 }
 
 function channelToken(): string {
@@ -408,7 +410,7 @@ export class RelayConnection {
       // independently classified as privileged, with the SAME operation
       // nonce. The machine deduplicates across this user's signing keys.
       if (stepUp && nonce && signedAt !== undefined && performance.now() - started < 60_000 && err instanceof RelayRequestError && err.detail === 'intent_step_up_required' && err.stepUpPasskeys?.length && signer.learnPasskeys) {
-        await signer.learnPasskeys(err.stepUpPasskeys)
+        await signer.learnPasskeys(err.stepUpPasskeys, stepUpReason)
         return signAndSend()
       }
       throw err
@@ -507,6 +509,7 @@ export class RelayConnection {
     // machine tracks them (intent-actions.ts), even though signing finishes later.
     const exempt = isExemptFrame(data)
     const stepUpReason = exempt ? null : frameStepUpReason(data)
+    if (stepUpReason) state.lastStepUpReason = stepUpReason
     const seq = exempt ? undefined : ++state.seq
     const before = state.session
     state.session = channelSessionAfter(data, before, seq)
@@ -633,7 +636,10 @@ export class RelayConnection {
       }
       // A step-up refusal names the passkey to use next time.
       if (err.detail === 'intent_step_up_required' && Array.isArray((err as { stepUpPasskeys?: unknown }).stepUpPasskeys)) {
-        void this.opts.signer?.learnPasskeys?.((err as { stepUpPasskeys: Array<{ credentialId: string; keyId: string }> }).stepUpPasskeys)
+        void this.opts.signer?.learnPasskeys?.(
+          (err as { stepUpPasskeys: Array<{ credentialId: string; keyId: string }> }).stepUpPasskeys,
+          this.signedChannels.get(channelId)?.lastStepUpReason ?? null,
+        )
       }
       // A stale-clock refusal closes this channel; fix the clock for the next one.
       if (err.detail === 'intent_stale' && typeof err.machineTime === 'number') {
