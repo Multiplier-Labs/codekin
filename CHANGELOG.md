@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.4] - 2026-11-09
+
+### Added
+- **Know when a session needs you.** The page title shows how many sessions are waiting for you, for example `(2) Codekin`: a pending approval or question, and by default a turn that finished. When one starts waiting while you're elsewhere, a single quiet notification (several at once become one; no sound, no repeats). Opening the session clears it. Settings → Session preferences → Notifications has the switches and a button to allow browser notifications (#850).
+- **Mac app:** the Dock icon shows the same count, and macOS shows one notification without sound when it goes up while Codekin isn't the app you're using (#851).
+- **Mac app:** before macOS asks for your password for the "Codekin WebCrypto Master Key", a note says to choose **Always Allow**. **Allow** works only once, so macOS would keep asking. Until the app is signed by its developer, this comes once per update (#849).
+
 ## [0.11.3] - 2026-11-09
 
 ### Fixed
