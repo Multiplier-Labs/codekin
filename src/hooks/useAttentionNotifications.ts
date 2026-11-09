@@ -60,7 +60,7 @@ export function nextAttention(prev: AttentionState, input: AttentionInput): { st
   for (const s of input.sessions) {
     const working = s.isProcessing === true
     processing.set(s.id, working)
-    const waiting = input.waiting[s.id] === true
+    const waiting = input.waiting[s.id]
     if (working || waiting) finished.delete(s.id)
     else if (prev.processing.get(s.id) === true) finished.add(s.id)
     if (looking(s.id)) finished.delete(s.id)
@@ -113,7 +113,7 @@ export function useAttentionNotifications(args: {
   const finishedPref = usePref('notifyTurnFinished')
   const notify = notifyPref !== false
   const includeFinished = finishedPref !== false
-  const state = useRef<AttentionState>(EMPTY_ATTENTION)
+  const state = useRef(EMPTY_ATTENTION)
   const [focused, setFocused] = useState(pageFocused)
   const open = useRef(args.onOpenSession)
   useEffect(() => { open.current = args.onOpenSession }, [args.onOpenSession])
