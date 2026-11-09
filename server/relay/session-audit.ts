@@ -133,3 +133,91 @@ export function classifyRestRequest(method: string, path: string): 'upload' | 'c
   if (route === '/api/sessions/create') return 'create_session'
   return null
 }
+
+/** Audit rows written per user, machine and kind before further ones are counted instead. */
+export const AUDIT_BURST = 30
+/** Rows that budget earns back per minute. */
+export const AUDIT_PER_MINUTE = 30
+
+interface AuditBucket {
+  tokens: number
+  at: number
+  /** Events not recorded one by one since the last row of this kind. */
+  coalesced: number
+  /** The latest of them, for the summary row. */
+  last: { localSessionId: string | null; metadata: Record<string, string | number | boolean | null> } | null
+}
+
+export interface CoalescedRow {
+  actorUserId: string
+  machineId: string
+  kind: AuditEventKind
+  localSessionId: string | null
+  metadata: Record<string, string | number | boolean | null>
+}
+
+/**
+ * Bounds the audit rows one user can cause on one machine (each forwarded
+ * frame would otherwise be a row). Up to AUDIT_BURST rows of a kind go in at
+ * once and AUDIT_PER_MINUTE more each minute; past that, events are counted,
+ * and the next row of that kind carries `coalesced: N`. A burst that ends is
+ * summed up in one row by sweep(), so nothing goes unrecorded, only
+ * unitemized. Keyed by user, not channel, so reopening channels doesn't
+ * reset it.
+ */
+export class AuditBudget {
+  private buckets = new Map<string, AuditBucket>()
+
+  constructor(
+    private readonly burst = AUDIT_BURST,
+    private readonly perMinute = AUDIT_PER_MINUTE,
+    private readonly now: () => number = Date.now,
+  ) {}
+
+  /**
+   * Whether to write this event now. Returns the extra metadata for its row
+   * (`coalesced` when earlier ones were counted), or null to count it instead.
+   */
+  admit(
+    actorUserId: string, machineId: string, kind: AuditEventKind,
+    event: { localSessionId: string | null; metadata: Record<string, string | number | boolean | null> },
+  ): { coalesced?: number } | null {
+    const key = `${actorUserId}\u0000${machineId}\u0000${kind}`
+    const t = this.now()
+    let bucket = this.buckets.get(key)
+    if (!bucket) {
+      bucket = { tokens: this.burst, at: t, coalesced: 0, last: null }
+      this.buckets.set(key, bucket)
+    }
+    bucket.tokens = Math.min(this.burst, bucket.tokens + ((t - bucket.at) / 60_000) * this.perMinute)
+    bucket.at = t
+    if (bucket.tokens < 1) {
+      bucket.coalesced += 1
+      bucket.last = event
+      return null
+    }
+    bucket.tokens -= 1
+    const coalesced = bucket.coalesced
+    bucket.coalesced = 0
+    bucket.last = null
+    return coalesced > 0 ? { coalesced } : {}
+  }
+
+  /**
+   * Summary rows for counted events whose burst has ended (no event for
+   * `idleMs`), and forget buckets that are full again.
+   */
+  sweep(idleMs = 60_000): CoalescedRow[] {
+    const t = this.now()
+    const rows: CoalescedRow[] = []
+    for (const [key, bucket] of this.buckets) {
+      if (t - bucket.at < idleMs) continue
+      if (bucket.coalesced > 0 && bucket.last) {
+        const [actorUserId, machineId, kind] = key.split('\u0000') as [string, string, AuditEventKind]
+        rows.push({ actorUserId, machineId, kind, localSessionId: bucket.last.localSessionId, metadata: { ...bucket.last.metadata, coalesced: bucket.coalesced } })
+      }
+      this.buckets.delete(key)
+    }
+    return rows
+  }
+}

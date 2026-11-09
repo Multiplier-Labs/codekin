@@ -77,6 +77,8 @@ describe('POST /api/telemetry/errors', () => {
     it('refuses other origins and cross-site fetches', async () => {
       expect((await post({ type: 'E', message: 'm' }, { origin: 'https://evil.example' })).status).toBe(403)
       expect((await post({ type: 'E', message: 'm' }, { 'sec-fetch-site': 'cross-site' })).status).toBe(403)
+      // Outside a browser (no Origin at all): refused too.
+      expect((await post({ type: 'E', message: 'm' }, {})).status).toBe(403)
       expect(send).not.toHaveBeenCalled()
     })
 

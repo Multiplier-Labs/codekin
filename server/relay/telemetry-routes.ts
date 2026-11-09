@@ -22,11 +22,12 @@ export function createTelemetryRouter(publicUrl: string, reporter: ErrorReporter
   const router = Router()
 
   router.post(TELEMETRY_ERRORS_PATH, express.json({ limit: MAX_TELEMETRY_BYTES }), (req, res) => {
-    // Only the app itself reports: a page elsewhere can't fill the error
-    // tracker in our name.
+    // Only the app itself reports: a page elsewhere, or a script outside a
+    // browser, can't fill the error tracker in our name. Browsers send
+    // Origin on every POST, same-origin ones included.
     const origin = req.get('origin')
     const fetchSite = req.get('sec-fetch-site')
-    if ((origin !== undefined && origin !== expectedOrigin) || (fetchSite !== undefined && fetchSite !== 'same-origin')) {
+    if (origin !== expectedOrigin || (fetchSite !== undefined && fetchSite !== 'same-origin')) {
       res.status(403).end()
       return
     }
