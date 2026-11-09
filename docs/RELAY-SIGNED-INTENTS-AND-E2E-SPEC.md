@@ -365,8 +365,9 @@ A frame type that isn't in the map needs a signature and has no audit kind. It f
 | `ws:prompt_response` | `approval_answered` | answers of `always_allow` / `approve_pattern` |
 | `ws:stop` | `session_stopped` | — |
 | `rest:POST /api/upload` | `file_uploaded` | — |
-| `ws:create_session`, `rest:POST /api/sessions/create` | `session_created` (new) | when `permissionMode` is `bypassPermissions` |
-| `ws:set_permission_mode` | `permission_mode_changed` (new) | to `bypassPermissions` |
+| `ws:create_session`, `rest:POST /api/sessions/create` | `session_created` (new) | with pre-approved tools (`allowedTools`); in `bypassPermissions` only on a machine with `passkey-for-bypass on` |
+| `ws:set_permission_mode` | `permission_mode_changed` (new) | to `bypassPermissions`, only on a machine with `passkey-for-bypass on` |
+| `rest:POST /api/orchestrator/trust/pin\|approve`, `/api/workflows/schedules`, `/api/workflows/config/repos` (create, change) | — | always: standing authority (§6.6) |
 | `grant`, `grant_revoke` | `session_shared` / `session_unshared` | grants that include `approve_shell` |
 | `device_certify`, `device_revoke` | `device_enrolled` / `device_revoked` (new) | always (`device_certify` *is* a passkey assertion) |
 | `device_policy` (raise only, §6.8) | `machine_policy_changed` (relay, from the connector's report) | never: raising is the safe direction |
@@ -484,7 +485,7 @@ Verification sits at the relay message boundary in `connector.ts`: `request`, `s
 
 ### 6.6 Step-up with a passkey
 
-**Privileged actions** are listed in §6.2: saving standing approval rules, bypass permission mode, shell-approving grants, and device and policy changes. Standing authority set over REST is privileged whatever its body: trusting the orchestrator (`POST /api/orchestrator/trust/pin|approve`) and creating or changing scheduled or webhook-triggered automations (`/api/workflows/schedules`, `/api/workflows/config/repos`). If the owner has a passkey enrolled on the machine, these need a passkey assertion. The OS prompt ("Use Face ID to approve: Share session 'api-fix' with Dana, shell approvals") is the one thing a compromised page can't fake. The prompt text comes from the intent, so the connector sees the same action the user approved.
+**Privileged actions** are listed in §6.2: saving standing approval rules and pre-approved tools, shell-approving grants, standing automation, and device changes. Bypass permission mode is privileged only on a machine whose owner turned on `codekin relay devices passkey-for-bypass on` (`relay-devices.json` → `passkeyForBypass`). By default a confirmed device may start or switch to bypass: prompts sent to a bypass session have never needed a passkey, so asking for one when it starts added friction (often tens of sessions a day) without stopping a page that holds the browser key. A browser learns that a machine is strict from its first step-up refusal of a bypass action, and asks for the passkey there from then on. Standing authority set over REST is privileged whatever its body: trusting the orchestrator (`POST /api/orchestrator/trust/pin|approve`) and creating or changing scheduled or webhook-triggered automations (`/api/workflows/schedules`, `/api/workflows/config/repos`). If the owner has a passkey enrolled on the machine, these need a passkey assertion. The OS prompt ("Use Face ID to approve: Share session 'api-fix' with Dana, shell approvals") is the one thing a compromised page can't fake. The prompt text comes from the intent, so the connector sees the same action the user approved.
 
 If the owner has no enrolled passkey, the browser key is accepted (D2 in §13). A passkey can't be required everywhere, because the desktop app's web view can't use passkeys (§4.2). Instead:
 - The pairing flow offers passkey enrolment while the user is at the machine (§5.3).

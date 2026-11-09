@@ -20,7 +20,7 @@ import type { IntentBody, SignedIntent } from './intent-actions.js'
 import { IntentVerifier } from './intent-verify.js'
 import { IntentLog, readRecentIntents } from './intent-log.js'
 import { ensureMachineIdentity, keyIdForSpki } from './machine-identity.js'
-import { emptyTrustStore, readTrustStore, revokeCredential, setLocalConfirmationOnly, setPasskeyWindow, setRequirePasskeyStepUp, writeTrustStore } from './trust-store.js'
+import { emptyTrustStore, readTrustStore, revokeCredential, setLocalConfirmationOnly, setPasskeyForBypass, setPasskeyWindow, setRequirePasskeyStepUp, writeTrustStore } from './trust-store.js'
 import { keyIdForCoseKey } from './webauthn-verify.js'
 import { softPasskey } from './__fixtures__/authenticator.js'
 import type { SoftPasskey } from './__fixtures__/authenticator.js'
@@ -272,6 +272,34 @@ describe('passkeys on the machine', () => {
       expect(requestStepUpReason('POST', '/api/sessions/create', new Uint8Array([0xff, 0xfe]))).toBeNull()
     })
 
+    it('lets a confirmed device turn on bypass by default, and asks for the passkey there only when the machine says so', () => {
+      const { b } = enrolWithPasskey()
+      const bypass = '{"type":"create_session","name":"n","workingDir":"/w","permissionMode":"bypassPermissions"}'
+      const toBypass = '{"type":"set_permission_mode","permissionMode":"bypassPermissions"}'
+      const tools = '{"type":"create_session","name":"n","workingDir":"/w","allowedTools":["Bash"]}'
+      const ch = channel()
+      const opened = verifier.checkChannelOpen(OWNER, browserIntent(b, { action: 'channel:open', payload: new Uint8Array(), channel: ch.token }))
+      let seq = 0
+      let session: string | null = null
+      const send = (frame: string) => {
+        seq += 1
+        const d = verifier.checkFrame(OWNER, frame, browserIntent(b, { action: frameAction(frame), sessionId: frameSession(frame, session), payload: framePayload(frame), channel: ch.token, seq }), opened.channel)
+        if (d.forward) session = channelSessionAfter(frame, session, seq)
+        return d
+      }
+      expect(send(bypass).verdict).toBe('accepted')
+      expect(send(toBypass).verdict).toBe('accepted')
+      // Standing rules still need the passkey.
+      expect(send(tools).reason).toBe('intent_step_up_required')
+      expect(send(always).reason).toBe('intent_step_up_required')
+      // Strict, set on the machine.
+      setPasskeyForBypass(true, devicesFile, 'm1')
+      expect(send(toBypass).reason).toBe('intent_step_up_required')
+      expect(requestNeedsStepUp('POST', '/api/sessions/create', new TextEncoder().encode('{"permissionMode":"bypassPermissions"}'), false)).toBe(false)
+      expect(requestNeedsStepUp('POST', '/api/sessions/create', new TextEncoder().encode('{"permissionMode":"bypassPermissions","allowedTools":["Bash"]}'), false)).toBe(true)
+      expect(frameNeedsStepUp(bypass, false)).toBe(false)
+    })
+
     describe('a recent passkey step-up covers its browser for a while (§6.6b)', () => {
       const bypass = '{"type":"create_session","name":"n","workingDir":"/w","permissionMode":"bypassPermissions"}'
       let clock: number
@@ -283,6 +311,8 @@ describe('passkeys on the machine', () => {
       })
 
       function open(b: ReturnType<typeof browserKey>) {
+        // These use bypass as the privileged action: a machine that asks for the passkey there.
+        setPasskeyForBypass(true, devicesFile, 'm1')
         const ch = channel()
         const opened = timed.checkChannelOpen(OWNER, browserIntent(b, { action: 'channel:open', payload: new Uint8Array(), channel: ch.token, ts: clock }))
         // The session each frame acts on moves as the client tracks it.

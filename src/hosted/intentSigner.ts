@@ -52,7 +52,7 @@ export interface IntentSigner {
   /** Whether the pinned machine key signed this time for this nonce (MACHINE_TIME_LABEL). */
   verifyMachineTime(nonce: string, machineTime: number, sig: string): Promise<boolean>
   /** Remember which of this user's passkeys the machine trusts (from a step-up refusal). */
-  learnPasskeys(passkeys: Array<{ credentialId: string; keyId: string }>): Promise<void>
+  learnPasskeys(passkeys: Array<{ credentialId: string; keyId: string }>, refusedReason?: StepUpReason | null): Promise<void>
   /**
    * The user's standing on the machine, from the relay's hello_ack. A
    * grantee signs with their browser key without being confirmed on the
@@ -75,6 +75,7 @@ interface SigningKey {
   userId: string
   passkeys: Array<{ credentialId: string; keyId: string }>
   passkeyStepUpAt?: number
+  passkeyForBypass?: boolean
 }
 
 /**
@@ -117,6 +118,7 @@ export function createIntentSigner(machineId: string, storage: TrustStorage = tr
     return {
       privateKey: browserKey.keyPair.privateKey, keyId: browserKey.keyId, userId, passkeys: pin.passkeys ?? [],
       ...(pin.passkeyStepUpAt !== undefined ? { passkeyStepUpAt: pin.passkeyStepUpAt } : {}),
+      ...(pin.passkeyForBypass ? { passkeyForBypass: true } : {}),
     }
   }
 
@@ -183,7 +185,9 @@ export function createIntentSigner(machineId: string, storage: TrustStorage = tr
         ...(intent.channel !== undefined ? { channel: intent.channel } : {}),
         ...(intent.seq !== undefined ? { seq: intent.seq } : {}),
       }
-      if (intent.stepUp && !(intent.stepUpReason && inStepUpWindow(signing))) {
+      // Bypass alone needs no passkey unless this machine said it does (§6.2).
+      const bypassOnly = intent.stepUpReason === 'bypass' && !signing.passkeyForBypass
+      if (intent.stepUp && !bypassOnly && !(intent.stepUpReason && inStepUpWindow(signing))) {
         const stepped = await withPasskey(signing, body, intent.stepUpReason)
         if (stepped) return stepped
       }
@@ -191,7 +195,7 @@ export function createIntentSigner(machineId: string, storage: TrustStorage = tr
       const sig = new Uint8Array(await crypto.subtle.sign(SIGN, signing.privateKey, utf8.encode(text) as BufferSource))
       return { body: text, sig: toB64url(sig) }
     },
-    async learnPasskeys(passkeys) {
+    async learnPasskeys(passkeys, refusedReason) {
       // A hint from the relay path: add to what we know, never wipe it.
       if (passkeys.length === 0) return
       const signing = await (key ??= load().catch(() => null))
@@ -204,6 +208,8 @@ export function createIntentSigner(machineId: string, storage: TrustStorage = tr
       // or shorter than ours: ask for the passkey next time.
       const next: MachinePin = { ...pin, passkeys: merged }
       delete next.passkeyStepUpAt
+      // A bypass refused for want of a passkey: this machine asks for one there.
+      if (refusedReason === 'bypass') next.passkeyForBypass = true
       await storage.putPin(next)
       key = null
     },

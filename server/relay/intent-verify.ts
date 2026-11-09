@@ -269,6 +269,11 @@ export class IntentVerifier {
     }
   }
 
+  /** Whether this machine asks for the passkey for bypass permissions too (§6.2, off by default). */
+  private bypassNeedsPasskey(): boolean {
+    return this.currentStore()?.passkeyForBypass === true
+  }
+
   /** The machine's intent policy right now. */
   policy(): IntentPolicy {
     return this.currentStore()?.policy ?? this.lastPolicy
@@ -283,7 +288,7 @@ export class IntentVerifier {
       action: requestAction(req.method, req.path),
       sessionId: requestSession(req.path),
       payload: requestPayload(req.method, req.path, req.contentType, body),
-      privileged: requestNeedsStepUp(req.method, req.path, body),
+      privileged: requestNeedsStepUp(req.method, req.path, body, this.bypassNeedsPasskey()),
       windowEligible: requestStepUpReason(req.method, req.path, body) !== null && standingRouteReason(req.method, req.path) === null,
     }).decision
   }
@@ -342,7 +347,7 @@ export class IntentVerifier {
       sessionId: frameSession(frame, channel.session),
       payload: framePayload(frame),
       channel,
-      privileged: frameNeedsStepUp(frame),
+      privileged: frameNeedsStepUp(frame, this.bypassNeedsPasskey()),
       windowEligible: frameStepUpReason(frame) !== null,
     })
     if (decision.verdict === 'accepted' && body?.seq !== undefined) channel.lastSeq = body.seq

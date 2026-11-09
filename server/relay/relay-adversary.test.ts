@@ -34,7 +34,7 @@ import {
 import type { GrantBody, IntentBody, SignedGrant, SignedIntent } from './intent-actions.js'
 import { commitment, POP_LABEL, signP1363, transcript, verifyP1363 } from './enrolment-crypto.js'
 import { ensureMachineIdentity, keyIdForSpki, loadMachineSigningKey } from './machine-identity.js'
-import { emptyTrustStore, readTrustStore, recordOwnerUserId, revokeCredential, setIntentPolicy, writeTrustStore } from './trust-store.js'
+import { emptyTrustStore, readTrustStore, recordOwnerUserId, revokeCredential, setIntentPolicy, setPasskeyForBypass, writeTrustStore } from './trust-store.js'
 import type { TrustedCredential } from './trust-store.js'
 import { envelope } from './relay-protocol.js'
 import type { ProxyRequest, RelayEnvelopeKind, RelayPrincipal } from './relay-protocol.js'
@@ -523,6 +523,8 @@ describe('a malicious hub against a real connector (§11 attacker harness)', () 
         keyId: keyIdForCoseKey(passkey.cosePublicKey), kind: 'passkey', userId: OWNER_ID, credentialId: passkey.credentialId,
         cosePublicKey: passkey.cosePublicKey, rpId: 'relay.test', label: 'Passkey', addedAt: 'x', addedBy: 'local',
       }])
+      // The cases below use bypass as the privileged action.
+      setPasskeyForBypass(true, devicesFile, MACHINE)
     })
 
     it('refuses a privileged request signed with the browser key, and runs it signed with the passkey', async () => {
