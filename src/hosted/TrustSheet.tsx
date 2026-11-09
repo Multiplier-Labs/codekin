@@ -298,9 +298,16 @@ export function TrustSheet({ machineId, machineName, onClose, onTrusted, preferC
 
         {phase.kind === 'done' && (
           phase.outcome === 'approved' ? (
-            <p className="flex items-center gap-2 text-body text-success-5">
-              <IconCircleCheckFilled size={18} /> This browser is confirmed on {machineName}.
-            </p>
+            <div className="space-y-2">
+              <p className="flex items-center gap-2 text-body text-success-5">
+                <IconCircleCheckFilled size={18} /> This browser is confirmed on {machineName}.
+              </p>
+              <p className="text-meta text-ink-muted">
+                Every browser, and the Codekin app, keeps its own key, so confirm each one you use with {machineName} the same way.
+                If this was your first device there, {machineName} now accepts only confirmed devices.
+                If your passkey was confirmed too, the others can use it instead of a code.
+              </p>
+            </div>
           ) : (
             <p className="text-body text-ink">
               {phase.outcome === 'rejected' ? `The request was turned down on ${machineName}.` : 'The code expired before it was typed.'}
