@@ -24,7 +24,7 @@ describe('PasskeyStepUpNotice', () => {
     fire({ active: true, reason: 'bypass' })
     expect(el.textContent).toContain('Confirm with your passkey')
     expect(el.textContent).toContain('bypass permissions')
-    expect(el.textContent).toContain("won't ask again for 15 minutes")
+    expect(el.textContent).toContain("won't ask again for up to 15 minutes")
     fire({ active: false, reason: 'bypass' })
     expect(el.textContent).toBe('')
     // No session reason (a share with shell approvals, a device change): no promise of a window.
