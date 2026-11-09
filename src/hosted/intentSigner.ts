@@ -9,10 +9,10 @@
  * server/relay/intent-actions.ts, which the machine applies to verify.
  */
 
-import { INTENT_VERSION, MACHINE_TIME_LABEL, MAX_CLOCK_OFFSET_MS, PASSKEY_ANY, intentChallengeInput } from '../../server/relay/intent-actions'
-import type { IntentBody, SignedIntent } from '../../server/relay/intent-actions'
+import { INTENT_VERSION, MACHINE_TIME_LABEL, MAX_CLOCK_OFFSET_MS, PASSKEY_ANY, STEP_UP_WINDOW_MS, intentChallengeInput } from '../../server/relay/intent-actions'
+import type { IntentBody, SignedIntent, StepUpReason } from '../../server/relay/intent-actions'
 import {
-  DEVICE_TRUST_CHANGED, currentUserId, fromB64url, getOrCreateBrowserKey, toB64url, transcript, trustStorage, type TrustStorage,
+  DEVICE_TRUST_CHANGED, currentUserId, fromB64url, getOrCreateBrowserKey, toB64url, transcript, trustStorage, type MachinePin, type TrustStorage,
 } from './deviceTrust'
 
 export type { SignedIntent }
@@ -30,6 +30,13 @@ export interface IntentToSign {
   nonce?: string
   /** A privileged action (§6.6): signed with the passkey the machine trusts, when there is one. */
   stepUp?: boolean
+  /**
+   * Why: a privileged *session* action (bypass permissions, pre-approved
+   * tools, an "always allow" rule). Shown to the user before the passkey
+   * prompt, and only these may use a recent step-up's window (§6.6b).
+   * Without it (grants, device changes) the passkey is asked every time.
+   */
+  stepUpReason?: StepUpReason
   /**
    * The time to sign (ms), when the caller has one it trusts more than this
    * signer's clock: share grants, dated by a machine-signed time (§6.7).
@@ -67,7 +74,29 @@ interface SigningKey {
   keyId: string
   userId: string
   passkeys: Array<{ credentialId: string; keyId: string }>
+  passkeyStepUpAt?: number
 }
+
+/**
+ * Raised around a passkey prompt for a privileged action, so the app can say
+ * why it is asking (PasskeyStepUpNotice): `detail` is PasskeyStepUpDetail.
+ */
+export const PASSKEY_STEP_UP_EVENT = 'codekin:passkey-step-up'
+export interface PasskeyStepUpDetail {
+  active: boolean
+  reason: StepUpReason | null
+}
+
+function announceStepUp(detail: PasskeyStepUpDetail): void {
+  if (typeof window === 'undefined' || typeof window.dispatchEvent !== 'function') return
+  window.dispatchEvent(new CustomEvent<PasskeyStepUpDetail>(PASSKEY_STEP_UP_EVENT, { detail }))
+}
+
+/**
+ * Stop using the window this long before the machine would: its clock and
+ * ours differ a little, and a refused frame closes its channel.
+ */
+const STEP_UP_WINDOW_MARGIN_MS = 60_000
 
 export function createIntentSigner(machineId: string, storage: TrustStorage = trustStorage(), now: () => number = Date.now): IntentSigner {
   let offset = 0
@@ -85,26 +114,52 @@ export function createIntentSigner(machineId: string, storage: TrustStorage = tr
     const [browserKey, pin] = await Promise.all([storage.getKey(userId), storage.getPin(userId, machineId)])
     // Sign only where the machine confirmed this very key.
     if (!browserKey || !pin || pin.keyId !== browserKey.keyId) return null
-    return { privateKey: browserKey.keyPair.privateKey, keyId: browserKey.keyId, userId, passkeys: pin.passkeys ?? [] }
+    return {
+      privateKey: browserKey.keyPair.privateKey, keyId: browserKey.keyId, userId, passkeys: pin.passkeys ?? [],
+      ...(pin.passkeyStepUpAt !== undefined ? { passkeyStepUpAt: pin.passkeyStepUpAt } : {}),
+    }
   }
 
   /** A passkey intent for a privileged action, or null to fall back to the browser key. */
-  const withPasskey = async (signing: SigningKey, body: IntentBody): Promise<SignedIntent | null> => {
+  const withPasskey = async (signing: SigningKey, body: IntentBody, reason: StepUpReason | undefined): Promise<SignedIntent | null> => {
     if (signing.passkeys.length === 0 || typeof window === 'undefined') return null
+    let announced = false
     try {
       const { assertWithPasskey, passkeysSupported } = await import('./passkeys')
       if (!passkeysSupported()) return null
       // Offer every passkey we know the machine trusts and let the user's
       // authenticator answer with the one it has (keyId "*"): a wrong hint
-      // first in the list can't then block step-up.
-      const text = JSON.stringify({ ...body, keyId: PASSKEY_ANY })
+      // first in the list can't then block step-up. A session action names
+      // this browser, so the machine can open its window for it (§6.6b).
+      const text = JSON.stringify({ ...body, keyId: PASSKEY_ANY, ...(reason ? { browserKeyId: signing.keyId } : {}) })
       const challenge = new Uint8Array(await crypto.subtle.digest('SHA-256', intentChallengeInput(text) as BufferSource))
+      announceStepUp({ active: true, reason: reason ?? null })
+      announced = true
       const assertion = await assertWithPasskey(challenge, signing.passkeys.map(p => p.credentialId))
+      if (reason) {
+        signing.passkeyStepUpAt = now()
+        await rememberStepUp(signing.userId, signing.passkeyStepUpAt)
+      }
       return { body: text, webauthn: assertion }
     } catch {
       // Cancelled or unavailable: the machine decides whether the browser key will do.
       return null
+    } finally {
+      if (announced) announceStepUp({ active: false, reason: reason ?? null })
     }
+  }
+
+  /** Record this browser's last passkey step-up on the machine. */
+  const rememberStepUp = async (userId: string, at: number) => {
+    const pin = await storage.getPin(userId, machineId)
+    if (pin) await storage.putPin({ ...pin, passkeyStepUpAt: at })
+  }
+
+  /** Within a recent step-up's window (§6.6b): the browser key will do. */
+  const inStepUpWindow = (signing: SigningKey) => {
+    const at = signing.passkeyStepUpAt
+    const t = now()
+    return at !== undefined && t >= at && t - at < STEP_UP_WINDOW_MS - STEP_UP_WINDOW_MARGIN_MS
   }
   if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
     window.addEventListener(DEVICE_TRUST_CHANGED, () => { key = null })
@@ -128,8 +183,8 @@ export function createIntentSigner(machineId: string, storage: TrustStorage = tr
         ...(intent.channel !== undefined ? { channel: intent.channel } : {}),
         ...(intent.seq !== undefined ? { seq: intent.seq } : {}),
       }
-      if (intent.stepUp) {
-        const stepped = await withPasskey(signing, body)
+      if (intent.stepUp && !(intent.stepUpReason && inStepUpWindow(signing))) {
+        const stepped = await withPasskey(signing, body, intent.stepUpReason)
         if (stepped) return stepped
       }
       const text = JSON.stringify(body)
@@ -145,7 +200,11 @@ export function createIntentSigner(machineId: string, storage: TrustStorage = tr
       if (!pin) return
       const known = pin.passkeys ?? []
       const merged = [...passkeys, ...known.filter(k => !passkeys.some(p => p.credentialId === k.credentialId))].slice(0, 10)
-      await storage.putPin({ ...pin, passkeys: merged })
+      // A step-up refusal also means the machine's window (§6.6b) is over,
+      // or shorter than ours: ask for the passkey next time.
+      const next: MachinePin = { ...pin, passkeys: merged }
+      delete next.passkeyStepUpAt
+      await storage.putPin(next)
       key = null
     },
     setClockOffset(ms) {

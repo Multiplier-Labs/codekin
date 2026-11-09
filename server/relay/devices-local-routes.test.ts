@@ -311,6 +311,17 @@ describe('codekin relay devices', () => {
     expect(readTrustStore(devicesFile)?.credentials.map(c => c.label)).toEqual(['Edge · Windows', 'Safari · iPad'])
   })
 
+  it('sets how long a passkey confirmation covers its browser', () => {
+    pair()
+    writeTrustStore(devicesFile, emptyTrustStore('m1', 'https://relay.test', 'u1'))
+    expect(run(['list']).out).toContain('not again on that browser for 15 min')
+    expect(run(['passkey-window', '5'])).toMatchObject({ code: 0, out: expect.stringContaining('5 minutes') })
+    expect(run(['passkey-window', '0'])).toMatchObject({ code: 0, out: expect.stringContaining('every bypass session') })
+    expect(run(['list']).out).toContain('passkey asked every time')
+    expect(run(['passkey-window', '90'])).toMatchObject({ code: 1, err: expect.stringContaining('0 to 15') })
+    expect(run(['passkey-window'])).toMatchObject({ code: 1 })
+  })
+
   it('revokes and sets the policy', () => {
     pair()
     writeTrustStore(devicesFile, { ...emptyTrustStore('m1', 'https://relay.test', 'u1'), credentials: [BROWSER] })

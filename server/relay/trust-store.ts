@@ -126,6 +126,12 @@ export interface TrustStore {
    * an enrolled passkey can't add a browser. Local surfaces only.
    */
   localConfirmationOnly?: boolean
+  /**
+   * After a passkey step-up, for how many minutes the browser that asked may
+   * confirm privileged session actions with its own key (§6.6b). Unset means
+   * 15; 0 asks for the passkey every time. Local surfaces only.
+   */
+  passkeyWindowMinutes?: number
   credentials: TrustedCredential[]
   /** Enrolment requests, until they expire. */
   pending: PendingEnrolment[]
@@ -251,6 +257,7 @@ export function parseTrustStore(text: string): TrustStore {
     relayOrigin: v.relayOrigin,
     policy: v.policy,
     ...(v.localConfirmationOnly === true ? { localConfirmationOnly: true } : {}),
+    ...(isPasskeyWindow(v.passkeyWindowMinutes) ? { passkeyWindowMinutes: v.passkeyWindowMinutes } : {}),
     credentials,
     // An unreadable request is only a request: dropping it is harmless.
     pending: Array.isArray(v.pending) ? v.pending.map(parsePending).filter((e): e is PendingEnrolment => e !== null) : [],
@@ -547,6 +554,31 @@ export function raiseIntentPolicy(policy: IntentPolicy, file = relayDevicesPath(
   }, now)
 }
 
+/** Longest passkey window a machine may set (§6.6b): the browser itself never assumes more than 15. */
+export const MAX_PASSKEY_WINDOW_MINUTES = 15
+export const DEFAULT_PASSKEY_WINDOW_MINUTES = 15
+
+export function isPasskeyWindow(value: unknown): value is number {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= MAX_PASSKEY_WINDOW_MINUTES
+}
+
+/** The passkey window in force, in minutes. */
+export function passkeyWindowMinutes(store: TrustStore): number {
+  return store.passkeyWindowMinutes ?? DEFAULT_PASSKEY_WINDOW_MINUTES
+}
+
+/** Set the passkey window (§6.6b). Local surfaces only. */
+export function setPasskeyWindow(minutes: unknown, file = relayDevicesPath(), machineId?: string): TrustStore {
+  if (!isPasskeyWindow(minutes)) {
+    throw new TrustStoreError('invalid_policy', `The passkey window is a whole number of minutes from 0 to ${MAX_PASSKEY_WINDOW_MINUTES}`)
+  }
+  return mutateTrustStore(file, machineId, store => {
+    if (minutes === DEFAULT_PASSKEY_WINDOW_MINUTES) delete store.passkeyWindowMinutes
+    else store.passkeyWindowMinutes = minutes
+    return store
+  })
+}
+
 /** Turn passkey-added browsers off (true) or on (false) for this machine. Local surfaces only. */
 export function setLocalConfirmationOnly(value: boolean, file = relayDevicesPath(), machineId?: string): TrustStore {
   return mutateTrustStore(file, machineId, store => {
@@ -569,6 +601,8 @@ export interface TrustStoreView {
   ownerUserId: string | null
   policy: IntentPolicy
   localConfirmationOnly: boolean
+  /** §6.6b: minutes a passkey step-up covers its browser; 0 asks every time. */
+  passkeyWindowMinutes: number
   credentials: Array<Pick<TrustedCredential, 'keyId' | 'kind' | 'userId' | 'label' | 'addedAt' | 'addedBy' | 'lastUsedAt'>>
   /**
    * Requests waiting for their code, newest first. The code itself is never
@@ -598,6 +632,7 @@ export function describeTrustStore(store: TrustStore, now = Date.now()): TrustSt
     ownerUserId: store.ownerUserId,
     policy: store.policy,
     localConfirmationOnly: store.localConfirmationOnly === true,
+    passkeyWindowMinutes: passkeyWindowMinutes(store),
     credentials: store.credentials.map(c => ({
       keyId: c.keyId,
       kind: c.kind,

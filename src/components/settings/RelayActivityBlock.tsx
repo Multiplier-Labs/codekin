@@ -78,8 +78,8 @@ export function RelayActivityBlock({ token, deviceLabels }: Props) {
                 <span className="font-mono text-ink">{e.action}</span>
                 {e.keyId && <span className="text-ink-muted">{deviceLabels[e.keyId] ?? e.keyId}</span>}
                 {e.stepUp && (
-                  <span className={e.stepUp === 'passkey' ? 'text-ink-muted' : 'text-warning-5'}>
-                    {e.stepUp === 'passkey' ? 'confirmed with passkey' : 'browser key only'}
+                  <span className={e.stepUp === 'browser-key' ? 'text-warning-5' : 'text-ink-muted'}>
+                    {e.stepUp === 'passkey' ? 'confirmed with passkey' : e.stepUp === 'passkey-recent' ? 'passkey used recently' : 'browser key only'}
                   </span>
                 )}
                 {e.reason && e.verdict === 'rejected' && <span className="text-warning-5">{e.reason}{e.forwarded ? ' (let through)' : ''}</span>}

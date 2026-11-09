@@ -44,8 +44,11 @@ export interface IntentLogEntry {
   payloadHash: string | null
   /** Kept for accepted intents only: it proves who signed what. */
   intent?: SignedIntent
-  /** Privileged actions (§6.6): whether a passkey or only the browser key confirmed it. */
-  stepUp?: 'passkey' | 'browser-key'
+  /**
+   * Privileged actions (§6.6): a passkey confirmed it, or the browser key
+   * within a passkey step-up's window (§6.6b), or only the browser key.
+   */
+  stepUp?: 'passkey' | 'passkey-recent' | 'browser-key'
   /** Refusals not written since the previous line (rate limit). */
   suppressedBefore?: number
 }
