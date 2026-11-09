@@ -39,6 +39,11 @@ pub fn react(previous: u32, count: u32, app_focused: bool) -> (Option<i64>, bool
     (badge, count > previous && !app_focused)
 }
 
+/// Whether a window's count is the app's: shown on screen, or minimized to the Dock.
+pub fn speaks_for_app(visible: bool, minimized: bool) -> bool {
+    visible || minimized
+}
+
 /// The notification text for `count` sessions waiting.
 pub fn message(count: u32) -> (String, String) {
     if count == 1 {
@@ -65,8 +70,14 @@ pub fn on_title<R: Runtime>(window: &WebviewWindow<R>, title: &str) {
             .insert(window.label().to_string(), count)
             .unwrap_or(0)
     };
-    // Only the window on screen speaks for the app (a hidden one may still run).
-    if !window.is_visible().unwrap_or(false) {
+    // Only the window on screen speaks for the app (a hidden one, such as
+    // This Mac's behind a hosted location, may still run). A minimized window
+    // still counts: macOS reports it as not visible, but it is the window the
+    // user left, and the badge matters most then.
+    if !speaks_for_app(
+        window.is_visible().unwrap_or(false),
+        window.is_minimized().unwrap_or(false),
+    ) {
         return;
     }
     let app_focused = app
@@ -102,6 +113,13 @@ mod tests {
         assert_eq!(react(2, 2, false), (Some(2), false));
         assert_eq!(react(3, 1, false), (Some(1), false));
         assert_eq!(react(1, 0, false), (None, false));
+    }
+
+    #[test]
+    fn a_minimized_window_still_speaks_for_the_app() {
+        assert!(speaks_for_app(true, false));
+        assert!(speaks_for_app(false, true));
+        assert!(!speaks_for_app(false, false));
     }
 
     #[test]
