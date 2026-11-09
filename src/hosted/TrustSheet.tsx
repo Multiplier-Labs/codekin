@@ -300,7 +300,7 @@ export function TrustSheet({ machineId, machineName, onClose, onTrusted, preferC
             <p className="text-body text-ink-muted">Run this once in a terminal on {machineName}. This browser finishes by itself.</p>
             <CopyBlock label="Command" command={trustCommand(secret)} />
             <ul className="list-disc space-y-1 pl-5 text-meta text-ink-muted">
-              <li>No screen on {machineName}? Run it over SSH, or ask a Codekin session running on {machineName} to run it.</li>
+              <li>No screen on {machineName}? Run it over SSH. Don't give it to a Codekin session opened through this site: that passes it through the relay.</li>
               <li>Or paste it into Settings → Remote access → Confirm a browser, in Codekin opened on {machineName} itself.</li>
               <li>Only paste it on {machineName}: whoever runs it lets this browser in.</li>
             </ul>
@@ -322,7 +322,7 @@ export function TrustSheet({ machineId, machineName, onClose, onTrusted, preferC
               command={`codekin relay devices approve ${phase.enrolment.code}`}
             />
             <ul className="list-disc space-y-1 pl-5 text-meta text-ink-muted">
-              <li>No screen on {machineName}? Run it over SSH, or ask a Codekin session running on {machineName} to run it.</li>
+              <li>No screen on {machineName}? Run it over SSH. Don't give it to a Codekin session opened through this site: that passes it through the relay.</li>
               <li>Or, in Codekin opened on {machineName} itself (not through this site): Settings → Remote access → Confirm a browser, and type the code there.</li>
               <li>If you just ran <code className="font-mono">codekin relay login</code>, it is asking for this code.</li>
             </ul>
