@@ -15,6 +15,7 @@
 //! - this file: window, menus (app + menu bar icon), navigation guard,
 //!   splash commands, Quit flow, the deferred local server start
 
+pub mod attention;
 pub mod background;
 mod hosted;
 pub mod http;
@@ -347,6 +348,8 @@ fn build_window(app: &AppHandle, shared: Arc<Shared>) -> tauri::Result<WebviewWi
         open_external(&new_window_opener, &url);
         NewWindowResponse::Deny
     })
+    // The page's title carries how many sessions need you (Dock badge, notification).
+    .on_document_title_changed(|window, title| attention::on_title(&window, &title))
     .build()
 }
 
@@ -680,6 +683,7 @@ pub fn run() {
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_notification::init())
         // A LaunchAgent, not an AppleScript login item: no Automation permission prompt.
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_autostart::init(
@@ -720,6 +724,7 @@ pub fn run() {
                 });
                 build_window(&handle, shared.clone())?;
                 app.manage(hosted::HostedState::default());
+                app.manage(attention::AttentionState::default());
                 if let Some(menu) = handle
                     .menu()
                     .and_then(|m| m.get("location_menu"))
