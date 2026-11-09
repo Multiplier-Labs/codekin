@@ -997,7 +997,7 @@ export interface RelayIntentEntry {
   userId: string | null
   keyId: string | null
   /** Privileged actions: whether a passkey or only the browser key confirmed it. */
-  stepUp?: 'passkey' | 'browser-key'
+  stepUp?: 'passkey' | 'passkey-recent' | 'browser-key'
 }
 
 export async function getRelayIntents(token: string, filter: { limit?: number; keyId?: string; verdict?: RelayIntentEntry['verdict'] } = {}): Promise<RelayIntentEntry[]> {

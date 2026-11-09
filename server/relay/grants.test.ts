@@ -10,7 +10,7 @@ import {
   grantRevokedBy, grantRevokedParts, intentChallengeInput,
 } from './intent-actions.js'
 import type { GrantBody, IntentBody, SignedGrant, SignedIntent } from './intent-actions.js'
-import { IntentVerifier } from './intent-verify.js'
+import { IntentVerifier, MAX_SIGNED_GRANTS } from './intent-verify.js'
 import { MachineEnrolment } from './enrolment.js'
 import { signP1363, transcript, verifyP1363 } from './enrolment-crypto.js'
 import { checkServerFrame, newChannelState } from './connector-policy.js'
@@ -84,6 +84,29 @@ describe('signed share grants on the machine', () => {
     const relayKey = key()
     expect(verifier.effectivePrincipal(danaPrincipal([grant({}, relayKey)]))?.grants).toEqual({})
     expect(verifier.effectivePrincipal(danaPrincipal([]))?.grants).toEqual({})
+  })
+
+  it('verifies a bounded number of presented grants, cheapest checks first', () => {
+    // Junk naming the owner's key with a bad signature, and twenty keys each.
+    const many = Array.from({ length: 20 }, () => ({ keyId: dana.keyId, spki: dana.spki }))
+    const junk = (sessionId: string, i: number): SignedGrant => {
+      const g = grant({ grantId: `junk-${i}`, sessionId, granteeKeys: many })
+      return { ...g, intent: { ...g.intent, sig: Buffer.alloc(64, i % 256).toString('base64url') } }
+    }
+    const checks = vi.spyOn(verifier as unknown as { checkSignature: () => unknown }, 'checkSignature')
+    // For a session the relay doesn't say is shared: never verified.
+    verifier.effectivePrincipal(danaPrincipal(Array.from({ length: 300 }, (_, i) => junk('s9', i))))
+    expect(checks).not.toHaveBeenCalled()
+    // Hundreds for one shared session: a few looked at.
+    verifier.effectivePrincipal(danaPrincipal(Array.from({ length: 300 }, (_, i) => junk('s1', i))))
+    expect(checks.mock.calls.length).toBeLessThanOrEqual(4)
+    checks.mockClear()
+    // Spread over many shared sessions: capped overall.
+    const sessions = Object.fromEntries(Array.from({ length: 300 }, (_, i) => [`s${i}`, ['view']]))
+    verifier.effectivePrincipal(danaPrincipal(Array.from({ length: 300 }, (_, i) => junk(`s${i}`, i)), sessions))
+    expect(checks.mock.calls.length).toBeLessThanOrEqual(MAX_SIGNED_GRANTS)
+    // A genuine grant among a few junk ones for its session still counts.
+    expect(verifier.effectivePrincipal(danaPrincipal([junk('s1', 1), junk('s1', 2), grant()]))?.grants).toEqual({ s1: ['view', 'send_prompt'] })
   })
 
   it('ignores grants that are expired, too long, for someone else, tampered, or for another machine', () => {

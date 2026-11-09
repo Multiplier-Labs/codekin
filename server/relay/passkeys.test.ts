@@ -13,14 +13,14 @@ import { MachineEnrolment, approveEnrolment } from './enrolment.js'
 import { POP_LABEL, commitment, shortAuthString, signP1363, transcript } from './enrolment-crypto.js'
 import type { EnrolPasskey } from './enrolment-crypto.js'
 import {
-  DEVICE_CERTIFY_ACTION, DEVICE_REVOKE_ACTION, PASSKEY_ANY, PASSKEY_PROOF_LABEL, certifyPayload, frameAction, framePayload,
-  encodePasskeyProofs, frameNeedsStepUp, intentChallengeInput, requestNeedsStepUp, revokePayload,
+  DEVICE_CERTIFY_ACTION, DEVICE_REVOKE_ACTION, PASSKEY_ANY, PASSKEY_PROOF_LABEL, certifyPayload, channelSessionAfter, frameAction, framePayload, frameSession,
+  encodePasskeyProofs, frameNeedsStepUp, frameStepUpReason, intentChallengeInput, requestNeedsStepUp, requestStepUpReason, revokePayload,
 } from './intent-actions.js'
 import type { IntentBody, SignedIntent } from './intent-actions.js'
 import { IntentVerifier } from './intent-verify.js'
 import { IntentLog, readRecentIntents } from './intent-log.js'
 import { ensureMachineIdentity, keyIdForSpki } from './machine-identity.js'
-import { emptyTrustStore, readTrustStore, setLocalConfirmationOnly, writeTrustStore } from './trust-store.js'
+import { emptyTrustStore, readTrustStore, setLocalConfirmationOnly, setPasskeyWindow, writeTrustStore } from './trust-store.js'
 import { keyIdForCoseKey } from './webauthn-verify.js'
 import { softPasskey } from './__fixtures__/authenticator.js'
 import type { SoftPasskey } from './__fixtures__/authenticator.js'
@@ -238,6 +238,90 @@ describe('passkeys on the machine', () => {
       const log = readRecentIntents(logFile, { limit: 10 }).reverse()
       expect(log.at(-1)).toMatchObject({ action: 'ws:prompt_response', stepUp: 'passkey', verdict: 'accepted' })
       expect(log.at(-1)?.intent?.webauthn?.credentialId).toBe(passkey.credentialId)
+    })
+
+    it('names why an action is privileged', () => {
+      const json = (o: unknown) => new TextEncoder().encode(JSON.stringify(o))
+      expect(frameStepUpReason('{"type":"create_session","permissionMode":"bypassPermissions"}')).toBe('bypass')
+      expect(frameStepUpReason('{"type":"set_permission_mode","permissionMode":"dangerouslySkipPermissions"}')).toBe('bypass')
+      expect(frameStepUpReason('{"type":"create_session","allowedTools":["Bash"]}')).toBe('allowed-tools')
+      expect(frameStepUpReason(always)).toBe('standing-approval')
+      expect(frameStepUpReason(once)).toBeNull()
+      expect(requestStepUpReason('POST', '/api/sessions/create', json({ permissionMode: 'bypassPermissions' }))).toBe('bypass')
+      expect(requestStepUpReason('POST', '/api/orchestrator/sessions/s1/respond', json({ value: 'always_allow' }))).toBe('standing-approval')
+      // Privileged but unreadable: no reason, so no window either.
+      expect(requestStepUpReason('POST', '/api/sessions/create', new Uint8Array([0xff, 0xfe]))).toBeNull()
+    })
+
+    describe('a recent passkey step-up covers its browser for a while (§6.6b)', () => {
+      const bypass = '{"type":"create_session","name":"n","workingDir":"/w","permissionMode":"bypassPermissions"}'
+      let clock: number
+      let timed: IntentVerifier
+
+      beforeEach(() => {
+        clock = Date.now()
+        timed = new IntentVerifier({ machineId: 'm1', devicesFile, log: new IntentLog(logFile), now: () => clock })
+      })
+
+      function open(b: ReturnType<typeof browserKey>) {
+        const ch = channel()
+        const opened = timed.checkChannelOpen(OWNER, browserIntent(b, { action: 'channel:open', payload: new Uint8Array(), channel: ch.token, ts: clock }))
+        // The session each frame acts on moves as the client tracks it.
+        let session: string | null = null
+        const send = (frame: string, how: 'browser' | 'passkey' | 'passkey-unnamed' = 'browser', named = b) => {
+          const seq = ++ch.seq
+          const fields = { action: frameAction(frame), sessionId: frameSession(frame, session), payload: framePayload(frame), channel: ch.token, seq, ts: clock }
+          const intent = how === 'browser' ? browserIntent(b, fields)
+            : passkeyIntent(how === 'passkey' ? { ...fields, browserKeyId: named.keyId } : fields)
+          const decision = timed.checkFrame(OWNER, frame, intent, opened.channel)
+          // (A real refusal closes the channel; here the test keeps going.)
+          if (decision.forward) session = channelSessionAfter(frame, session, seq)
+          return decision
+        }
+        return send
+      }
+
+      it('lets the browser that asked use its own key for 15 minutes, then asks again', () => {
+        const { b } = enrolWithPasskey()
+        const send = open(b)
+        expect(send(bypass).reason).toBe('intent_step_up_required')
+        expect(send(bypass, 'passkey').verdict).toBe('accepted')
+        clock += 14 * 60_000
+        expect(send(bypass)).toMatchObject({ forward: true, verdict: 'accepted' })
+        expect(send(always).verdict).toBe('accepted')
+        expect(readRecentIntents(logFile, { limit: 1 })[0]).toMatchObject({ stepUp: 'passkey-recent' })
+        clock += 2 * 60_000
+        expect(send(bypass).reason).toBe('intent_step_up_required')
+      })
+
+      it('covers only the browser the passkey named, of the same user', () => {
+        const { b } = enrolWithPasskey()
+        const other = browserKey('Firefox · Linux')
+        const store = readTrustStore(devicesFile)!
+        writeTrustStore(devicesFile, { ...store, credentials: [...store.credentials, { keyId: other.keyId, kind: 'browser', userId: 'u-owner', spki: other.spkiB64, label: 'x', addedAt: 'x', addedBy: 'local' }] })
+        const send = open(b)
+        // Unnamed: no window at all.
+        expect(send(bypass, 'passkey-unnamed').verdict).toBe('accepted')
+        expect(send(bypass).reason).toBe('intent_step_up_required')
+        // Naming another browser covers that one, not this one.
+        expect(send(bypass, 'passkey', other).verdict).toBe('accepted')
+        expect(send(bypass).reason).toBe('intent_step_up_required')
+        expect(open(other)(bypass).verdict).toBe('accepted')
+      })
+
+      it('never covers device changes, and is off when the machine says 0', () => {
+        const { b } = enrolWithPasskey()
+        const send = open(b)
+        expect(send(bypass, 'passkey').verdict).toBe('accepted')
+        const phone = browserKey()
+        const certify = browserIntent(b, { action: DEVICE_CERTIFY_ACTION, payload: certifyPayload(phone.spkiB64, phone.label), ts: clock })
+        expect(timed.checkDeviceIntent(OWNER, certify, DEVICE_CERTIFY_ACTION, certifyPayload(phone.spkiB64, phone.label)).decision.reason).toBe('intent_step_up_required')
+
+        setPasskeyWindow(0, devicesFile, 'm1')
+        expect(send(bypass).reason).toBe('intent_step_up_required')
+        expect(readTrustStore(devicesFile)?.passkeyWindowMinutes).toBe(0)
+        expect(() => setPasskeyWindow(60, devicesFile, 'm1')).toThrow(/0 to 15/)
+      })
     })
 
     it('accepts the browser key without a passkey enrolled, and logs it as the weaker step-up', () => {

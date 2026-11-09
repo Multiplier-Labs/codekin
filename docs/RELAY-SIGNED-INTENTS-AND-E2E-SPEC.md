@@ -491,6 +491,23 @@ If the owner has no enrolled passkey, the browser key is accepted (D2 in §13). 
 - A workspace setting, **"Privileged actions need a passkey"** (default off), refuses browser-key step-up in that workspace. Workspaces turning it on should expect the desktop app's web mode to be unable to perform privileged actions.
 - The machine-local intent log (§7.2) records the step-up as `stepUp: "browser-key"` or `"passkey"`, so the owner can see which actions had only the weaker confirmation.
 
+### 6.6b A recent passkey covers its browser for a while
+
+Asking for the passkey on every privileged session action got in the way. Owners run most sessions in bypass permissions, so every new session prompted. Now one passkey confirmation covers the browser that asked, for a while, the way `sudo` remembers a password.
+
+- **Opening the window.** A passkey intent for a privileged *session* action carries `browserKeyId`, the key id of the browser asking. It sits in the body, so the passkey signs it. When the machine accepts that intent and `browserKeyId` names one of the same user's confirmed browsers, it opens a window for that browser.
+- **Inside the window.** The machine accepts that browser's own key for privileged session actions (bypass permissions, pre-approved tools, "always allow" answers) and logs them as `stepUp: "passkey-recent"`.
+- **Not covered:**
+  - device changes (`device_certify`, `device_revoke`);
+  - shell-approving share grants;
+  - any request whose body the browser can't classify.
+
+  These still need the passkey every time.
+- **Length.** The window lasts 15 minutes (`STEP_UP_WINDOW_MS`). The machine can shorten it, down to 0, with `relay-devices.json` → `passkeyWindowMinutes`, set locally with `codekin relay devices passkey-window <0-15>`.
+- **Where it lives.** The machine keeps windows in memory, so a connector restart just asks again.
+- **The browser's side.** The browser stores when it last stepped up (on its pin), and stops using its window a minute before the machine's would end. A step-up refusal clears its record, so a machine with a shorter window costs one refused action, then a prompt.
+- **Telling the user why.** The OS prompt can't carry our text, so while the passkey prompt is up the app shows a notice saying what made the action privileged (for example "This session uses bypass permissions, so it runs commands without asking you first") and that this browser won't be asked again for 15 minutes.
+
 ### 6.6a As built (slice 5)
 
 - **Verifying passkeys on the machine.** The connector ships in the npm package and can't use the relay's `@simplewebauthn/server`. `server/relay/webauthn-verify.ts` is a small, dependency-free verifier for `get()` assertions:

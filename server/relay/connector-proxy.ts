@@ -434,6 +434,8 @@ export async function executeProxyRequest(
       error: {
         code: RELAY_ERROR.localUnreachable,
         message: `Local Codekin server did not answer: ${message}`,
+        // A timeout may have reached the server; a refused connection did not.
+        ...(controller.signal.aborted ? { detail: 'timeout' } : {}),
       },
     }
   } finally {
