@@ -18,6 +18,7 @@ import { useSettings } from './hooks/useSettings'
 import { getPref, loadPrefs, setPref } from './lib/prefs'
 import { useRepos } from './hooks/useRepos'
 import { useSessions } from './hooks/useSessions'
+import { useAttentionNotifications } from './hooks/useAttentionNotifications'
 import { useChatSocket } from './hooks/useChatSocket'
 import { usePageVisibility } from './hooks/usePageVisibility'
 import { useRouter } from './hooks/useRouter'
@@ -718,6 +719,9 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
   const viewJoeTasks = useJoeTasks(settings.token, taskRepoFilter, !!settings.token && view === 'tasks' && !!taskRepoFilter)
   const joeTasks = taskRepoFilter ? viewJoeTasks : allJoeTasks
   const joeStatus = useJoeStatus(settings.token)
+  // The title count, Dock badge (desktop app) and quiet notifications for sessions that need you.
+  useAttentionNotifications({ sessions, waitingSessions, activeSessionId, onOpenSession: handleSelectSession })
+
   const joeWaiting = !!joeStatus.status?.sessionId && waitingSessions[joeStatus.status.sessionId]
   const joeMessageCount = useMemo(() => messages.filter(m => m.type === 'joe').length, [messages])
   const sessionTasks = useSessionTasks(settings.token, view === 'chat' ? activeSessionId : null, joeMessageCount)
