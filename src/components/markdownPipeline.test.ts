@@ -93,6 +93,17 @@ describe('renderMarkdownToSafeHtml — remote images', () => {
     expect(renderMarkdownToSafeHtml('<img src="//tracker.example/p.gif">')).not.toMatch(/<img/i)
   })
 
+  it('turns images that resolve to another host into links', () => {
+    // The test page is http:, so `https:/host` resolves to https://host.
+    for (const src of ['https:/evil.test/x', '/\\evil.test/x', 'https:\\\\evil.test/x']) {
+      const html = renderMarkdownToSafeHtml(`<img src="${src}" alt="x">`)
+      expect(html, src).not.toMatch(/<img/i)
+      expect(html, src).toMatch(/<a [^>]*href="https?:\/\/evil\.test\/x"/)
+      expect(html, src).toMatch(/External image: x \(evil\.test\)/)
+    }
+    expect(renderMarkdownToSafeHtml('![x](https:/evil.test/x)')).not.toMatch(/<img/i)
+  })
+
   it('still renders data: and same-origin images', () => {
     expect(renderMarkdownToSafeHtml('![x](data:image/png;base64,AAAA)')).toMatch(/<img/i)
     expect(renderMarkdownToSafeHtml('![x](/screenshots/a.png)')).toMatch(/<img/i)

@@ -5,7 +5,7 @@
 
 import { IconPhoto } from '@tabler/icons-react'
 import type { ImgHTMLAttributes } from 'react'
-import { remoteImageHost, remoteImageLabel } from '../lib/remoteImage'
+import { classifyImageSrc, remoteImageLabel } from '../lib/remoteImage'
 
 export function ExternalImageLink({ src, host, alt }: { src: string; host: string; alt?: string }) {
   return (
@@ -24,12 +24,13 @@ export function ExternalImageLink({ src, host, alt }: { src: string; host: strin
 
 /**
  * react-markdown `img` override for transcripts that need no other image
- * handling: remote images become links, everything else renders as is.
+ * handling: remote images become links, unloadable ones are dropped, and
+ * everything else renders as is.
  */
 // eslint-disable-next-line @typescript-eslint/no-unused-vars -- `node` is react-markdown's hast node, not a DOM attribute
 export function MarkdownImage({ src, alt, node, ...props }: ImgHTMLAttributes<HTMLImageElement> & { node?: unknown }) {
-  const href = typeof src === 'string' ? src : undefined
-  const host = remoteImageHost(href)
-  if (href && host) return <ExternalImageLink src={href} host={host} alt={alt} />
-  return <img src={href} alt={alt ?? ''} className="max-w-full" {...props} />
+  const image = classifyImageSrc(typeof src === 'string' ? src : undefined)
+  if (image.kind === 'remote') return <ExternalImageLink src={image.href} host={image.host} alt={alt} />
+  if (image.kind === 'blocked') return alt ? <span>{alt}</span> : null
+  return <img src={image.src} alt={alt ?? ''} className="max-w-full" {...props} />
 }
