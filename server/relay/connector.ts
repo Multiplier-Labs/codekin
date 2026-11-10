@@ -7,7 +7,7 @@
 
 import WebSocket from 'ws'
 import { asProxyRequest, asStreamClose, asStreamData, asStreamOpen, isRecord } from './connector-frames.js'
-import { ENROLMENT_FEATURE, envelope, INTENTS_FEATURE, isEnrolRequestKind, parseEnvelope, RELAY_ERROR, STREAM_CLOSE } from './relay-protocol.js'
+import { ENROLMENT_FEATURE, envelope, INTENTS_FEATURE, isEnrolRequestKind, MAX_PROXY_BODY_BYTES, parseEnvelope, RELAY_ERROR, STREAM_CLOSE } from './relay-protocol.js'
 import type {
   ConnectorHello,
   EnrolRequest,
@@ -52,6 +52,14 @@ export function liveChannelPolicy(
     userId: principal.userId,
   }
 }
+
+/**
+ * Largest frame accepted from the relay: the largest proxied body, base64
+ * encoded (as the relay itself bounds browser frames, relay-server.ts), plus
+ * room for the principal and its signed grants. `ws` would otherwise accept
+ * 100 MiB.
+ */
+export const CONNECTOR_MAX_FRAME_BYTES = Math.ceil(MAX_PROXY_BODY_BYTES * 1.4) + 4 * 1024 * 1024
 
 /** How often an owner channel re-checks its device while output flows. */
 const OWNER_CHANNEL_CHECK_MS = 1000
@@ -155,6 +163,8 @@ export class RelayConnector {
   private reportedPolicy: string | null = null
   /** From hello_ack: the relay refuses this connector until it is updated. */
   private updateRequired = false
+  /** The socket whose hello_ack started the timers: one per connection, later ones are ignored. */
+  private ackedSocket: WebSocket | null = null
   private displayName: string | null = null
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
   private backoffMs = BACKOFF_MIN_MS
@@ -195,7 +205,7 @@ export class RelayConnector {
   private connect(): void {
     if (this.stopped) return
     this.opts.onStatus?.('connecting', connectorWsUrl(this.opts.relayUrl))
-    const ws = new WebSocket(connectorWsUrl(this.opts.relayUrl))
+    const ws = new WebSocket(connectorWsUrl(this.opts.relayUrl), { maxPayload: CONNECTOR_MAX_FRAME_BYTES })
     this.ws = ws
 
     ws.on('open', () => {
@@ -245,6 +255,10 @@ export class RelayConnector {
     const msg = parseEnvelope(typeof data === 'string' ? data : data.toString('utf-8'))
     if (!msg) return
     if (msg.kind === 'hello_ack') {
+      // One per connection. Each would start timers and a local request, and
+      // the relay may send anything (policy changes come as `event`).
+      if (this.ackedSocket === ws) return
+      this.ackedSocket = ws
       this.backoffMs = BACKOFF_MIN_MS
       const ack = (isRecord(msg.payload) ? msg.payload : {}) as Partial<ConnectorHelloAck>
       this.updateRequired = !!ack.updateRequired
@@ -325,6 +339,7 @@ export class RelayConnector {
   private onSocketClose(code: number, reason: Buffer): void {
     this.clearTimers()
     this.ws = null
+    this.ackedSocket = null
     // Local sockets outlive nothing: without the relay there is no browser
     // on the other end, and a stale session would keep the CLI busy.
     this.closeAllChannels('relay disconnected')
