@@ -169,15 +169,26 @@ export const MAX_SIGNED_GRANTS = 64
 /** Grants looked at per session (renewals and a narrowing can overlap briefly). */
 const MAX_GRANTS_PER_SESSION = 4
 
+/** Longest base64url P1363 signature (64 bytes) is 86 characters; this leaves room. */
+const MAX_SIG_CHARS = 256
+/** Bounds each field of a passkey assertion (credential ids are at most 1023 bytes). */
+const MAX_WEBAUTHN_FIELD_CHARS = 8192
+
+/** Grant checks remembered, and for how long (the device list's signature is part of each key). */
+const GRANT_CACHE_MAX = 1000
+const GRANT_CACHE_TTL_MS = 60_000
+
 function asSignedIntent(value: unknown): SignedIntent | null {
   if (!value || typeof value !== 'object') return null
   const v = value as Partial<SignedIntent>
   if (typeof v.body !== 'string' || v.body.length > MAX_INTENT_BODY_CHARS) return null
-  if (v.sig !== undefined && typeof v.sig !== 'string') return null
+  if (v.sig !== undefined && (typeof v.sig !== 'string' || v.sig.length > MAX_SIG_CHARS)) return null
   if (v.webauthn !== undefined) {
     const w = v.webauthn as Partial<NonNullable<SignedIntent['webauthn']>> | null
     if (!w || typeof w.credentialId !== 'string' || typeof w.authenticatorData !== 'string'
       || typeof w.clientDataJSON !== 'string' || typeof w.signature !== 'string') return null
+    if (w.credentialId.length > MAX_WEBAUTHN_FIELD_CHARS || w.authenticatorData.length > MAX_WEBAUTHN_FIELD_CHARS
+      || w.clientDataJSON.length > MAX_WEBAUTHN_FIELD_CHARS || w.signature.length > MAX_WEBAUTHN_FIELD_CHARS) return null
   }
   return v as SignedIntent
 }
@@ -201,6 +212,12 @@ export class IntentVerifier {
   private grantCache = new Map<string, { verified: { grant: GrantBody; signedAt: number } | null; until: number }>()
   /** The workspace's "Privileged actions need a passkey" (§6.6), as the relay reports it. */
   private requirePasskey = false
+  /**
+   * The relay turned the requirement on but it isn't recorded in the device
+   * list yet (lock busy, no list yet). Until it is, it holds in memory and
+   * the relay can't turn it off again.
+   */
+  private requirePasskeyUnrecorded = false
   private lastReadWarning = -Infinity
   /**
    * §6.6b: until when each browser (by `${userId}:${keyId}`) may confirm
@@ -255,17 +272,28 @@ export class IntentVerifier {
    * turns it off again: the relay can raise the requirement, never drop it.
    */
   setRequirePasskey(value: boolean): void {
-    this.requirePasskey = value
-    if (!value) return
+    if (!value) {
+      // Only what is already recorded may be turned off from here (by a local surface).
+      if (!this.requirePasskeyUnrecorded) this.requirePasskey = false
+      return
+    }
+    this.requirePasskey = true
+    this.requirePasskeyUnrecorded = !this.recordRequirePasskey()
+  }
+
+  /** Record "passkey required" in the device list; false when it couldn't be, this time. */
+  private recordRequirePasskey(): boolean {
     const store = this.currentStore()
-    if (!store || store.requirePasskeyStepUp === true) return
+    if (!store) return false
+    if (store.requirePasskeyStepUp === true) return true
     try {
       // No waiting for the lock: this runs on the connector's message path.
       mutateTrustStore(this.opts.devicesFile, this.opts.machineId, s => { s.requirePasskeyStepUp = true }, this.now(), 0)
       this.storeSignature = null
+      return true
     } catch {
-      // Not recorded this time (lock busy, file unreadable): it still holds
-      // in memory, and the relay says it again at the next connect.
+      // Lock busy or file unreadable: tried again with the next message.
+      return false
     }
   }
 
@@ -289,7 +317,7 @@ export class IntentVerifier {
       sessionId: requestSession(req.path),
       payload: requestPayload(req.method, req.path, req.contentType, body),
       privileged: requestNeedsStepUp(req.method, req.path, body, this.bypassNeedsPasskey()),
-      windowEligible: requestStepUpReason(req.method, req.path, body) !== null && standingRouteReason(req.method, req.path) === null,
+      windowEligible: requestStepUpReason(req.method, req.path, body) !== null && standingRouteReason(req.method, req.path, body) === null,
     }).decision
   }
 
@@ -357,6 +385,7 @@ export class IntentVerifier {
   }
 
   private check(principal: RelayPrincipal | undefined, rawIntent: unknown, expected: Expected): { decision: IntentDecision; body: IntentBody | null; signerKeyId?: string | null } {
+    if (this.requirePasskeyUnrecorded) this.requirePasskeyUnrecorded = !this.recordRequirePasskey()
     const store = this.currentStore()
     const policy = store?.policy ?? this.lastPolicy
 
@@ -455,7 +484,7 @@ export class IntentVerifier {
     const replay = this.replay.consume(principal.userId, body.nonce, this.now())
     if (replay) return replay
     if (ownerCredential) this.noteUsed(signerKeyId)
-    if (stepUp === 'passkey' && !deviceChange && ownerCredential) this.openStepUpWindow(store, ownerCredential, body.browserKeyId, body.ts)
+    if (stepUp === 'passkey' && !deviceChange && expected.windowEligible === true && ownerCredential) this.openStepUpWindow(store, ownerCredential, body.browserKeyId, body.ts)
     return { keyId: signerKeyId, ...(stepUp ? { stepUp } : {}) }
   }
 
@@ -564,14 +593,22 @@ export class IntentVerifier {
   private verifyGrant(store: TrustStore, granteeUserId: string, value: unknown): { grant: GrantBody; signedAt: number } | null {
     const signed = value as Partial<SignedGrant> | null
     if (!signed || typeof signed.grant !== 'string' || signed.grant.length > MAX_GRANT_CHARS) return null
-    const cacheKey = `${this.storeSignature ?? ''}|${granteeUserId}|${signed.grant}|${JSON.stringify(signed.intent)}`
+    // The intent's shape (and so its size) is checked before anything keeps it.
+    const intent = asSignedIntent(signed.intent)
+    if (!intent) return null
+    const cacheKey = createHash('sha256')
+      .update(JSON.stringify([this.storeSignature ?? '', granteeUserId, signed.grant, intent.body, intent.sig ?? null, intent.webauthn ?? null]))
+      .digest('base64url')
     const cached = this.grantCache.get(cacheKey)
     const now = this.now()
     if (cached && cached.until > now) return cached.verified && cached.verified.grant.expiresAt > now ? cached.verified : null
 
-    const verified = this.checkGrant(store, granteeUserId, { grant: signed.grant, intent: signed.intent as SignedIntent }, now)
-    if (this.grantCache.size > 1000) this.grantCache.clear()
-    this.grantCache.set(cacheKey, { verified, until: now + 60_000 })
+    const verified = this.checkGrant(store, granteeUserId, { grant: signed.grant, intent }, now)
+    if (this.grantCache.size >= GRANT_CACHE_MAX) {
+      for (const [k, entry] of this.grantCache) if (entry.until <= now) this.grantCache.delete(k)
+      if (this.grantCache.size >= GRANT_CACHE_MAX) this.grantCache.clear()
+    }
+    this.grantCache.set(cacheKey, { verified, until: now + GRANT_CACHE_TTL_MS })
     return verified
   }
 

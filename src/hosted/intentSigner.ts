@@ -38,6 +38,12 @@ export interface IntentToSign {
    */
   stepUpReason?: StepUpReason
   /**
+   * Standing authority (orchestrator trust, automations): the machine never
+   * lets a step-up window cover it, so the passkey is asked every time and
+   * no window is opened or used.
+   */
+  standing?: boolean
+  /**
    * The time to sign (ms), when the caller has one it trusts more than this
    * signer's clock: share grants, dated by a machine-signed time (§6.7).
    */
@@ -123,7 +129,9 @@ export function createIntentSigner(machineId: string, storage: TrustStorage = tr
   }
 
   /** A passkey intent for a privileged action, or null to fall back to the browser key. */
-  const withPasskey = async (signing: SigningKey, body: IntentBody, reason: StepUpReason | undefined): Promise<SignedIntent | null> => {
+  const withPasskey = async (signing: SigningKey, body: IntentBody, reason: StepUpReason | undefined, standing = false): Promise<SignedIntent | null> => {
+    // Only a session action names this browser and so opens its window (§6.6b).
+    const opensWindow = reason !== undefined && !standing
     if (signing.passkeys.length === 0 || typeof window === 'undefined') return null
     let announced = false
     try {
@@ -133,12 +141,12 @@ export function createIntentSigner(machineId: string, storage: TrustStorage = tr
       // authenticator answer with the one it has (keyId "*"): a wrong hint
       // first in the list can't then block step-up. A session action names
       // this browser, so the machine can open its window for it (§6.6b).
-      const text = JSON.stringify({ ...body, keyId: PASSKEY_ANY, ...(reason ? { browserKeyId: signing.keyId } : {}) })
+      const text = JSON.stringify({ ...body, keyId: PASSKEY_ANY, ...(opensWindow ? { browserKeyId: signing.keyId } : {}) })
       const challenge = new Uint8Array(await crypto.subtle.digest('SHA-256', intentChallengeInput(text) as BufferSource))
       announceStepUp({ active: true, reason: reason ?? null })
       announced = true
       const assertion = await assertWithPasskey(challenge, signing.passkeys.map(p => p.credentialId))
-      if (reason) {
+      if (opensWindow) {
         signing.passkeyStepUpAt = now()
         await rememberStepUp(signing.userId, signing.passkeyStepUpAt)
       }
@@ -187,8 +195,9 @@ export function createIntentSigner(machineId: string, storage: TrustStorage = tr
       }
       // Bypass alone needs no passkey unless this machine said it does (§6.2).
       const bypassOnly = intent.stepUpReason === 'bypass' && !signing.passkeyForBypass
-      if (intent.stepUp && !bypassOnly && !(intent.stepUpReason && inStepUpWindow(signing))) {
-        const stepped = await withPasskey(signing, body, intent.stepUpReason)
+      const windowCovers = intent.stepUpReason !== undefined && !intent.standing && inStepUpWindow(signing)
+      if (intent.stepUp && !bypassOnly && !windowCovers) {
+        const stepped = await withPasskey(signing, body, intent.stepUpReason, intent.standing === true)
         if (stepped) return stepped
       }
       const text = JSON.stringify(body)

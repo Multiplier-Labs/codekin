@@ -365,6 +365,20 @@ describe('passkeys on the machine', () => {
         expect(rest(b, 'POST', '/api/sessions/create', new TextEncoder().encode('{"permissionMode":"bypassPermissions"}')).verdict).toBe('accepted')
       })
 
+      it('opens no window from a passkey used for standing authority', () => {
+        const { b } = enrolWithPasskey()
+        const send = open(b)
+        const path = '/api/orchestrator/automations'
+        const bytes = new TextEncoder().encode('{"repo":"/r","kind":"k","cronExpression":"0 * * * *"}')
+        // Even if the intent names the browser, the machine only opens a
+        // window for the session actions it classifies as window-eligible.
+        const intent = passkeyIntent({
+          action: requestAction('POST', path), sessionId: requestSession(path), payload: requestPayload('POST', path, 'application/json', bytes), ts: clock, browserKeyId: b.keyId,
+        })
+        expect(timed.checkRequest({ method: 'POST', path, contentType: 'application/json', body: Buffer.from(bytes).toString('base64'), principal: OWNER, intent }).verdict).toBe('accepted')
+        expect(send(bypass).reason).toBe('intent_step_up_required')
+      })
+
       it('ends a window at once when the machine lowers its setting, or the passkey is removed', () => {
         const { b } = enrolWithPasskey()
         const send = open(b)

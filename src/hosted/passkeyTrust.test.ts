@@ -212,6 +212,22 @@ describe('passkeys from the browser to the machine', () => {
     expect(fake.asserted).toBe(before + 1)
   })
 
+  it('asks for the passkey for standing authority inside a window, and opens none', async () => {
+    const storage = memoryStorage()
+    await enrolWithCodes(storage)
+    const openedAt = Date.now()
+    await storage.putPin({ ...storage.pins.get('u-owner:m1')!, passkeyStepUpAt: openedAt })
+    const signer = createIntentSigner('m1', storage)
+    const before = fake.asserted
+    const intent = await signer.sign({
+      action: 'rest:POST /api/orchestrator/automations', sessionId: null, payload: new Uint8Array(), stepUp: true, stepUpReason: 'automation', standing: true,
+    })
+    expect(fake.asserted).toBe(before + 1)
+    // The passkey intent doesn't name this browser, and the window isn't restarted.
+    expect(JSON.parse((intent as { body: string }).body)).not.toHaveProperty('browserKeyId')
+    expect(storage.pins.get('u-owner:m1')?.passkeyStepUpAt).toBe(openedAt)
+  })
+
   it('lets the codes replace a machine key taken on first use, which never vouches for the clock', async () => {
     const storage = memoryStorage()
     // A pin from device_certify, possibly the relay's key.

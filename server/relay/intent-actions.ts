@@ -315,44 +315,89 @@ export function frameStepUpReason(frame: string): StepUpReason | null {
   if (!msg) return null
   if (msg.type === 'prompt_response') return answersStanding(msg.value) ? 'standing-approval' : null
   if (msg.type === 'create_session' || msg.type === 'set_permission_mode') {
-    if (typeof msg.permissionMode === 'string' && AUTO_APPROVE_MODES.has(msg.permissionMode)) return 'bypass'
+    // Pre-approved tools first: with them, bypass alone is not the whole reason.
     if (msg.type === 'create_session' && preApprovesTools(msg.allowedTools)) return 'allowed-tools'
+    if (typeof msg.permissionMode === 'string' && AUTO_APPROVE_MODES.has(msg.permissionMode)) return 'bypass'
   }
   return null
 }
 
 /**
- * Routes that set up standing authority whatever their body says: trust the
- * orchestrator to act without asking, or schedule and configure automations
- * that run agent sessions with nobody watching. Always privileged (§6.2).
+ * Standing authority (§6.2): trusting the orchestrator to act without asking,
+ * or setting up automations that run agent sessions, or call out, with
+ * nobody watching. Always privileged, and never covered by a step-up window.
+ *
+ * Under the automation prefixes below, every create or change (POST, PUT,
+ * PATCH) counts, unless STANDING_EXEMPT lists it: a new route there is
+ * privileged until someone decides otherwise. DELETE never counts (removing
+ * is the safe direction).
  */
-const STANDING_ROUTES: ReadonlyArray<{ method: string; route: RegExp; reason: StepUpReason }> = [
-  { method: 'POST', route: /^\/api\/orchestrator\/trust\/(pin|approve)$/, reason: 'standing-approval' },
-  { method: 'POST', route: /^\/api\/workflows\/(schedules|config\/repos)$/, reason: 'automation' },
-  { method: 'PATCH', route: /^\/api\/workflows\/(schedules|config\/repos)\/[^/]+$/, reason: 'automation' },
-  { method: 'PUT', route: /^\/api\/workflows\/(schedules|config\/repos)(\/[^/]+)?$/, reason: 'automation' },
+const STANDING_PREFIXES: readonly string[] = [
+  '/api/orchestrator/automations',
+  '/api/orchestrator/maintenance',
+  '/api/workflows/schedules',
+  '/api/workflows/config',
+  '/api/deployments',
+  '/api/integrations/github/pr-review',
 ]
 
-export function standingRouteReason(method: string, path: string): StepUpReason | null {
+/** Under STANDING_PREFIXES: routes that act once, or only in the safe direction. */
+export const STANDING_EXEMPT: ReadonlyArray<{ method: string; route: RegExp }> = [
+  // Checks and one-off runs.
+  { method: 'POST', route: /^\/api\/orchestrator\/automations\/workflows\/validate$/ },
+  { method: 'POST', route: /^\/api\/orchestrator\/automations\/runs$/ },
+  { method: 'POST', route: /^\/api\/orchestrator\/automations\/[^/]+\/trigger$/ },
+  { method: 'POST', route: /^\/api\/workflows\/schedules\/[^/]+\/trigger$/ },
+  { method: 'POST', route: /^\/api\/integrations\/github\/pr-review\/test$/ },
+  // Stopping or removing.
+  { method: 'POST', route: /^\/api\/orchestrator\/automations\/[^/]+\/remove$/ },
+  { method: 'POST', route: /^\/api\/orchestrator\/maintenance\/(pause|off)$/ },
+  { method: 'POST', route: /^\/api\/orchestrator\/maintenance\/responsibilities\/[^/]+\/remove$/ },
+  // Joe recording what it found: data, not authority.
+  { method: 'POST', route: /^\/api\/orchestrator\/maintenance\/activity$/ },
+]
+
+/** Trusting the orchestrator: standing approval wherever it is set. */
+const ORCHESTRATOR_TRUST = /^\/api\/orchestrator\/trust\/(pin|approve)$/
+
+const STANDING_METHODS = new Set(['POST', 'PUT', 'PATCH'])
+
+/** The PR-review setup only previews when its body says `dryRun: true`. */
+const PR_REVIEW_SETUP = '/api/integrations/github/pr-review/setup'
+
+function readJson(body: Uint8Array | null | undefined): Record<string, unknown> | null | 'unreadable' {
+  if (!body || body.length === 0) return null
+  try {
+    return parsed(new TextDecoder('utf-8', { fatal: true }).decode(body)) ?? 'unreadable'
+  } catch {
+    return 'unreadable'
+  }
+}
+
+export function standingRouteReason(method: string, path: string, body?: Uint8Array | null): StepUpReason | null {
   const m = method.toUpperCase()
+  if (!STANDING_METHODS.has(m)) return null
   const route = routeOf(path)
-  return STANDING_ROUTES.find(r => r.method === m && r.route.test(route))?.reason ?? null
+  if (m === 'POST' && ORCHESTRATOR_TRUST.test(route)) return 'standing-approval'
+  if (!STANDING_PREFIXES.some(p => route === p || route.startsWith(`${p}/`))) return null
+  if (STANDING_EXEMPT.some(r => r.method === m && r.route.test(route))) return null
+  if (m === 'POST' && route === PR_REVIEW_SETUP) {
+    const msg = readJson(body)
+    if (msg !== null && msg !== 'unreadable' && msg.dryRun === true) return null
+  }
+  return 'automation'
 }
 
 /** The step-up reason for a REST request; null when not privileged, or not readable. */
 export function requestStepUpReason(method: string, path: string, body: Uint8Array | null): StepUpReason | null {
-  const standing = standingRouteReason(method, path)
+  const standing = standingRouteReason(method, path, body)
   if (standing) return standing
   if (!requestNeedsStepUp(method, path, body) || !body) return null
-  let msg: Record<string, unknown> | null
-  try {
-    msg = parsed(new TextDecoder('utf-8', { fatal: true }).decode(body))
-  } catch {
-    return null
-  }
-  if (!msg) return null
-  if (typeof msg.permissionMode === 'string' && AUTO_APPROVE_MODES.has(msg.permissionMode)) return 'bypass'
+  const msg = readJson(body)
+  if (msg === null || msg === 'unreadable') return null
+  // Pre-approved tools first: with them, bypass alone is not the whole reason.
   if (preApprovesTools(msg.allowedTools)) return 'allowed-tools'
+  if (typeof msg.permissionMode === 'string' && AUTO_APPROVE_MODES.has(msg.permissionMode)) return 'bypass'
   return answersStanding(msg.value) ? 'standing-approval' : null
 }
 
@@ -385,7 +430,7 @@ export function frameNeedsStepUp(frame: string, bypassNeedsPasskey = true): bool
  * (another charset) where this can't.
  */
 export function requestNeedsStepUp(method: string, path: string, body: Uint8Array | null, bypassNeedsPasskey = true): boolean {
-  if (standingRouteReason(method, path)) return true
+  if (standingRouteReason(method, path, body)) return true
   if (method.toUpperCase() !== 'POST') return false
   const route = routeOf(path)
   // Creating a session, or an orchestrator child session, in an auto-approve

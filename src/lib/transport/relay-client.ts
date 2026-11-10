@@ -9,7 +9,7 @@
 
 import {
   CHANNEL_OPEN_ACTION, channelOpenPayload, channelSessionAfter, frameAction, frameNeedsStepUp, framePayload, frameSession, isExemptFrame,
-  requestAction, requestNeedsStepUp, requestPayload, requestSession, requestStepUpReason, frameStepUpReason,
+  requestAction, requestNeedsStepUp, requestPayload, requestSession, requestStepUpReason, frameStepUpReason, standingRouteReason,
 } from '../../../server/relay/intent-actions'
 import type { StepUpReason } from '../../../server/relay/intent-actions'
 
@@ -83,6 +83,7 @@ interface IntentInput {
   ts?: number
   stepUp?: boolean
   stepUpReason?: StepUpReason
+  standing?: boolean
 }
 
 /** One channel's signing state: the token its signed open fixed, the next seq, and its session. */
@@ -375,6 +376,8 @@ export class RelayConnection {
     const bytes = base64Bytes(body)
     const stepUp = requestNeedsStepUp(method, path, bytes)
     const stepUpReason = stepUp ? requestStepUpReason(method, path, bytes) : null
+    // Standing authority: never inside a step-up window, as the machine decides.
+    const standing = stepUp && standingRouteReason(method, path, bytes) !== null
     const signAndSend = async () => {
       const intent = await this.signSafely({
         action: requestAction(method, path),
@@ -384,6 +387,7 @@ export class RelayConnection {
         ...(signedAt !== undefined ? { ts: signedAt } : {}),
         ...(stepUp ? { stepUp } : {}),
         ...(stepUpReason ? { stepUpReason } : {}),
+        ...(standing ? { standing } : {}),
       })
       nonce ??= intent ? intentNonce(intent) : undefined
       if (signedAt === undefined && intent) {
