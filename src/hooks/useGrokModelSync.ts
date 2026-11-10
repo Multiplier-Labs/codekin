@@ -1,7 +1,17 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { fetchGrokModels } from '../lib/ccApi'
+import { fetchGrokModels, type GrokModelEntry } from '../lib/ccApi'
 import type { ModelOption, CodingProvider } from '../types'
 import { getPref } from '../lib/prefs'
+
+/** Map a /api/grok/models entry to a picker option, keeping its effort levels. */
+function toModelOption(m: GrokModelEntry): ModelOption {
+  return {
+    id: m.id,
+    label: m.name,
+    ...(m.efforts?.length ? { efforts: m.efforts } : {}),
+    ...(m.defaultEffort ? { defaultEffort: m.defaultEffort } : {}),
+  }
+}
 
 interface UseGrokModelSyncOptions {
   token: string
@@ -46,10 +56,7 @@ export function useGrokModelSync({
     const currentIsValidGrok = currentModelRef.current && grokModels.some(m => m.id === currentModelRef.current)
     if (grokModels.length > 0 && currentIsValidGrok) return
     fetchGrokModels(token).then(result => {
-      const models: ModelOption[] = result.models.map(m => ({
-        id: m.id,
-        label: m.name,
-      }))
+      const models: ModelOption[] = result.models.map(toModelOption)
       setGrokModels(models)
       setGrokConnected(models.length > 0)
       const currentIsGrok = currentModelRef.current && models.some(m => m.id === currentModelRef.current)
@@ -74,10 +81,7 @@ export function useGrokModelSync({
   const reconnect = useCallback(() => {
     if (!token) return
     fetchGrokModels(token).then(result => {
-      const models: ModelOption[] = result.models.map(m => ({
-        id: m.id,
-        label: m.name,
-      }))
+      const models: ModelOption[] = result.models.map(toModelOption)
       setGrokModels(models)
       setGrokConnected(models.length > 0)
     }).catch(() => { setGrokConnected(false) })

@@ -222,6 +222,7 @@ const grok: HarnessDefinition = {
       sessionId: ctx.sessionId,
       grokSessionId: session.claudeSessionId || undefined,
       model: session.model,
+      effort: session.effort,
       extraEnv: ctx.extraEnv,
       permissionMode: session.permissionMode,
     })

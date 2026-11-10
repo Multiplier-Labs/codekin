@@ -154,6 +154,8 @@ export interface GrokProcessOptions {
   grokSessionId?: string
   /** Grok model ID (e.g. 'grok-4.7'). Omit to use the CLI default. */
   model?: string
+  /** Reasoning effort (one of the model's `reasoning_effort` options). Omit to use the model default. */
+  effort?: string
   /** Additional environment variables (CODEKIN_SESSION_ID, scoped tokens, …). */
   extraEnv?: Record<string, string>
   /** Codekin permission mode — see grok-acp.ts for the mapping. */
@@ -189,6 +191,11 @@ export class GrokProcess extends EventEmitter<ClaudeProcessEvents> implements Co
   private grokSessionId: string | null
   private readonly workingDir: string
   private model?: string
+  private effort?: string
+  /** Model id → its default effort, from initialize's model state (stands in for "Default"). */
+  private defaultEfforts = new Map<string, string>()
+  /** Model the native session is on once initialized. */
+  private currentModel?: string
   private readonly extraEnv: Record<string, string>
   private permissionMode?: PermissionMode
 
@@ -224,6 +231,7 @@ export class GrokProcess extends EventEmitter<ClaudeProcessEvents> implements Co
     this.codekinSessionId = opts?.sessionId || randomUUID()
     this.grokSessionId = opts?.grokSessionId || null
     this.model = opts?.model
+    this.effort = opts?.effort
     this.extraEnv = opts?.extraEnv || {}
     this.permissionMode = opts?.permissionMode
   }
@@ -315,7 +323,10 @@ export class GrokProcess extends EventEmitter<ClaudeProcessEvents> implements Co
       // Advertise nothing we don't implement: without fs/terminal client
       // capabilities, Grok runs its own tools in-process.
       clientCapabilities: {},
-    }) as { protocolVersion?: unknown }
+    }) as { protocolVersion?: unknown; _meta?: { modelState?: unknown } } | undefined
+    for (const m of modelsFromState(init?._meta?.modelState)) {
+      if (m.defaultEffort) this.defaultEfforts.set(m.id, m.defaultEffort)
+    }
     if (init?.protocolVersion !== ACP_PROTOCOL_VERSION) {
       throw new Error(`unsupported ACP protocol version ${JSON.stringify(init?.protocolVersion)} (Codekin speaks ${ACP_PROTOCOL_VERSION})`)
     }
@@ -340,6 +351,11 @@ export class GrokProcess extends EventEmitter<ClaudeProcessEvents> implements Co
         this.emit('error', `Grok rejected model "${this.model}" (${err instanceof Error ? err.message : String(err)}) — using ${currentModel ?? 'the default model'}.`)
       }
     }
+    this.currentModel = currentModel
+
+    // Effort lives on the native session and survives session/load, so set
+    // it explicitly whenever one is chosen.
+    if (this.effort) await this.applyEffort(this.effort)
 
     // Align Grok's session mode (plan state persists inside Grok across
     // restarts, so set it explicitly either way).
@@ -380,6 +396,34 @@ export class GrokProcess extends EventEmitter<ClaudeProcessEvents> implements Co
     } finally {
       this.replaying = false
     }
+  }
+
+  /**
+   * Set the native session's reasoning effort. Grok rejects a level the
+   * current model doesn't offer (e.g. xhigh on grok-4.5) with -32602; that is
+   * reported and the session keeps its previous level.
+   */
+  private async applyEffort(effort: string): Promise<void> {
+    if (!this.grokSessionId) return
+    try {
+      await this.request('session/set_config_option', { sessionId: this.grokSessionId, configId: 'reasoning_effort', value: effort })
+    } catch (err) {
+      if (!this.alive) return
+      this.emit('error', `Grok rejected reasoning effort "${effort}" (${err instanceof Error ? err.message : String(err)}) — keeping the current level.`)
+    }
+  }
+
+  /**
+   * Change the reasoning effort without a restart: Grok switches the live
+   * session via set_config_option and applies it from the next turn.
+   * Clearing (undefined) selects the model's advertised default, since Grok
+   * has no "unset" for the option.
+   */
+  setEffort(effort: string | undefined): void {
+    this.effort = effort
+    if (!this.ready || !this.alive) return
+    const level = effort ?? (this.currentModel ? this.defaultEfforts.get(this.currentModel) : undefined)
+    if (level) void this.applyEffort(level)
   }
 
   /** Send session/set_mode and wait for Grok's current_mode_update acknowledgement. */
