@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Reasoning effort for Grok sessions. The effort picker now lists the levels each Grok model advertises (Grok 4.7: low, medium, high, extra high). A change takes effect on the next turn without restarting the session.
+
 ## [0.11.4] - 2026-11-09
 
 ### Added

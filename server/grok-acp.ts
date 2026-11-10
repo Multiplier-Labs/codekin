@@ -242,6 +242,29 @@ export interface GrokModelInfo {
   description: string
   isDefault: boolean
   contextTokens?: number
+  /** Reasoning efforts the model accepts (`_meta.reasoningEfforts`); absent when it has none. */
+  efforts?: { id: string; description?: string }[]
+  /** Effort the model uses when none is set (`_meta.reasoningEffort`). */
+  defaultEffort?: string
+}
+
+interface AcpModelMeta {
+  totalContextTokens?: unknown
+  supportsReasoningEffort?: unknown
+  reasoningEffort?: unknown
+  reasoningEfforts?: unknown
+}
+
+/** Effort levels from a model's `_meta`, or [] when it takes none. */
+function effortsFromMeta(meta: AcpModelMeta | undefined): { id: string; description?: string }[] {
+  if (!meta || meta.supportsReasoningEffort === false || !Array.isArray(meta.reasoningEfforts)) return []
+  const efforts: { id: string; description?: string }[] = []
+  for (const e of meta.reasoningEfforts as Array<{ id?: unknown; value?: unknown; description?: unknown } | null>) {
+    const id = typeof e?.value === 'string' ? e.value : typeof e?.id === 'string' ? e.id : undefined
+    if (!id) continue
+    efforts.push({ id, ...(typeof e?.description === 'string' && e.description ? { description: e.description } : {}) })
+  }
+  return efforts
 }
 
 /**
@@ -254,14 +277,18 @@ export function modelsFromState(state: unknown): GrokModelInfo[] {
   const current = typeof s.currentModelId === 'string' ? s.currentModelId : undefined
   const models: GrokModelInfo[] = []
   for (const m of s.availableModels) {
-    const model = m as { modelId?: unknown; name?: unknown; description?: unknown; _meta?: { totalContextTokens?: unknown } }
+    const model = m as { modelId?: unknown; name?: unknown; description?: unknown; _meta?: AcpModelMeta }
     if (typeof model?.modelId !== 'string') continue
+    const efforts = effortsFromMeta(model._meta)
+    const defaultEffort = model._meta?.reasoningEffort
     models.push({
       id: model.modelId,
       name: typeof model.name === 'string' ? model.name : model.modelId,
       description: typeof model.description === 'string' ? model.description : '',
       isDefault: model.modelId === current,
       ...(typeof model._meta?.totalContextTokens === 'number' ? { contextTokens: model._meta.totalContextTokens } : {}),
+      ...(efforts.length > 0 ? { efforts } : {}),
+      ...(efforts.length > 0 && typeof defaultEffort === 'string' && efforts.some(e => e.id === defaultEffort) ? { defaultEffort } : {}),
     })
   }
   return models

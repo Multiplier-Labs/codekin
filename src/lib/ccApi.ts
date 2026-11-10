@@ -685,19 +685,25 @@ export async function fetchCodexModels(
   }>(res)
 }
 
+/** A model from /api/grok/models (also carries per-model reasoning efforts). */
+export interface GrokModelEntry {
+  id: string
+  name: string
+  description?: string
+  isDefault?: boolean
+  efforts?: { id: string; description?: string }[]
+  defaultEffort?: string
+}
+
 /** Fetch available models from the Grok Build CLI (via a short-lived ACP handshake). */
 export async function fetchGrokModels(
   token: string,
-): Promise<{
-  models: Array<{ id: string; name: string; description?: string; isDefault?: boolean }>
-}> {
+): Promise<{ models: GrokModelEntry[] }> {
   const res = await transport.fetch(`/api/grok/models`, {
     headers: { Authorization: `Bearer ${token}` },
   })
   if (!res.ok) return { models: [] }
-  return jsonBody<{
-    models: Array<{ id: string; name: string; description?: string; isDefault?: boolean }>
-  }>(res)
+  return jsonBody<{ models: GrokModelEntry[] }>(res)
 }
 
 /** Fetch the OpenCode command list (slash commands / skills / MCP prompts). */

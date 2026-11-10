@@ -189,6 +189,60 @@ describe('GrokProcess', () => {
     gp.stop()
   })
 
+  it('sets the requested reasoning effort after the session opens', async () => {
+    const gp = new GrokProcess(WORKDIR, { effort: 'xhigh' })
+    gp.start()
+    const proc = lastProc()
+    await tick()
+    await respond(proc, 'initialize', { protocolVersion: 1 })
+    await respond(proc, 'session/new', { sessionId: 'sid-1', models: MODELS })
+    expect(lastRequest(proc, 'session/set_config_option').params).toEqual({ sessionId: 'sid-1', configId: 'reasoning_effort', value: 'xhigh' })
+    await respond(proc, 'session/set_config_option', { configOptions: [] })
+    await respond(proc, 'session/set_mode', {})
+    await update(proc, { sessionUpdate: 'current_mode_update', currentModeId: 'default' })
+    expect(gp.isReady()).toBe(true)
+    gp.stop()
+  })
+
+  it('reports a rejected effort and still opens the session', async () => {
+    const gp = new GrokProcess(WORKDIR, { effort: 'xhigh' })
+    const errors: string[] = []
+    gp.on('error', (e) => errors.push(e))
+    gp.start()
+    const proc = lastProc()
+    await tick()
+    await respond(proc, 'initialize', { protocolVersion: 1 })
+    await respond(proc, 'session/new', { sessionId: 'sid-1', models: MODELS })
+    await feed(proc, { id: lastRequest(proc, 'session/set_config_option').id, error: { code: -32602, message: 'Invalid params' } })
+    await respond(proc, 'session/set_mode', {})
+    await update(proc, { sessionUpdate: 'current_mode_update', currentModeId: 'default' })
+    expect(errors.some(e => e.includes('reasoning effort "xhigh"'))).toBe(true)
+    expect(gp.isReady()).toBe(true)
+    gp.stop()
+  })
+
+  it('changes effort live, and "Default" selects the model\'s advertised default', async () => {
+    const gp = new GrokProcess(WORKDIR)
+    gp.start()
+    const proc = lastProc()
+    await tick()
+    await respond(proc, 'initialize', {
+      protocolVersion: 1,
+      _meta: { modelState: { currentModelId: 'grok-4.7', availableModels: [{ modelId: 'grok-4.7', name: 'Grok 4.7', _meta: { reasoningEffort: 'high', reasoningEfforts: [{ value: 'high' }, { value: 'low' }] } }] } },
+    })
+    await respond(proc, 'session/new', { sessionId: 'sid-1', models: MODELS })
+    expect(writes(proc).some(m => m.method === 'session/set_config_option')).toBe(false)
+    await respond(proc, 'session/set_mode', {})
+    await update(proc, { sessionUpdate: 'current_mode_update', currentModeId: 'default' })
+
+    gp.setEffort('low')
+    expect(lastRequest(proc, 'session/set_config_option').params).toEqual({ sessionId: 'sid-1', configId: 'reasoning_effort', value: 'low' })
+    await respond(proc, 'session/set_config_option', { configOptions: [] })
+    gp.setEffort(undefined)
+    expect(lastRequest(proc, 'session/set_config_option').params).toEqual({ sessionId: 'sid-1', configId: 'reasoning_effort', value: 'high' })
+    gp.stop()
+  })
+
   it('loads a stored session and drops the replayed history', async () => {
     const gp = new GrokProcess(WORKDIR, { grokSessionId: 'sid-old' })
     const texts: string[] = []

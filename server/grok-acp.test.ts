@@ -185,4 +185,32 @@ describe('modelsFromState', () => {
     ])
     expect(modelsFromState(null)).toEqual([])
   })
+
+  it('keeps each model\'s reasoning efforts and default effort', () => {
+    const efforts = [
+      { id: 'xhigh', value: 'xhigh', label: 'Extra High', description: 'Maximum reasoning for the hardest tasks.' },
+      { id: 'high', value: 'high', label: 'High', description: 'Thorough reasoning and quality. Recommended.', default: true },
+      { id: 'low', value: 'low', label: 'Low' },
+    ]
+    expect(modelsFromState({
+      currentModelId: 'grok-4.7',
+      availableModels: [
+        { modelId: 'grok-4.7', name: 'Grok 4.7', _meta: { supportsReasoningEffort: true, reasoningEffort: 'high', reasoningEfforts: efforts } },
+        { modelId: 'grok-x', name: 'Grok X', _meta: { supportsReasoningEffort: false, reasoningEffort: 'high', reasoningEfforts: efforts } },
+        { modelId: 'grok-y', name: 'Grok Y', _meta: { reasoningEffort: 'ultra', reasoningEfforts: [{ value: 'low' }, { nope: 1 }] } },
+      ],
+    })).toEqual([
+      {
+        id: 'grok-4.7', name: 'Grok 4.7', description: '', isDefault: true, defaultEffort: 'high',
+        efforts: [
+          { id: 'xhigh', description: 'Maximum reasoning for the hardest tasks.' },
+          { id: 'high', description: 'Thorough reasoning and quality. Recommended.' },
+          { id: 'low' },
+        ],
+      },
+      { id: 'grok-x', name: 'Grok X', description: '', isDefault: false },
+      // An unknown default is dropped rather than offered as a choice.
+      { id: 'grok-y', name: 'Grok Y', description: '', isDefault: false, efforts: [{ id: 'low' }] },
+    ])
+  })
 })

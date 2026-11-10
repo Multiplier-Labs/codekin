@@ -364,7 +364,7 @@ Response to a `control_request`. Uses a nested format with a `response` wrapper.
 | `get_diff` | `scope?` | Request diff (scope: `staged`, `unstaged`, or `all`; defaults to `all`) |
 | `discard_changes` | `scope`, `paths?`, `statuses?` | Discard file changes by scope, optionally limited to specific paths |
 | `set_model` | `model`, `effort?` | Switch the model for the current session. `effort` (a level id, or `null` for the harness default) is applied in the same restart; omitted = unchanged |
-| `set_effort` | `effort` | Set the session's reasoning effort (`null` = harness default). Claude restarts with `--effort`; Codex applies it on the next `turn/start` without a restart |
+| `set_effort` | `effort` | Set the session's reasoning effort (`null` = harness default). Claude restarts with `--effort`; Codex applies it on the next `turn/start` without a restart; Grok switches the live session via `session/set_config_option` (`reasoning_effort`), and `null` selects the model's advertised default |
 
 ## Diff Viewer Types
 
