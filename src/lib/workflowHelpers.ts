@@ -40,6 +40,7 @@ export function isEventDriven(kind: string): boolean {
 /** Model options for the workflow config UI. Empty value means server default (Opus). */
 export const MODEL_OPTIONS = [
   { value: '', label: 'Default (Opus)' },
+  { value: 'claude-fable-5-2', label: 'Fable 5.2' },
   { value: 'claude-fable-5-1', label: 'Fable 5.1' },
   { value: 'claude-fable-5', label: 'Fable 5' },
   { value: 'claude-sonnet-4-6', label: 'Sonnet 4.6' },

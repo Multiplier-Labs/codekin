@@ -34,6 +34,7 @@ export interface ClaudeModelInfo {
  *  Per https://platform.claude.com/docs/en/about-claude/models/overview */
 export const FALLBACK_MODELS: ClaudeModelInfo[] = [
   { id: 'claude-opus-5-5', label: 'Opus 5.5' },
+  { id: 'claude-fable-5-2', label: 'Fable 5.2' },
   { id: 'claude-fable-5-1', label: 'Fable 5.1' },
   { id: 'claude-opus-5', label: 'Opus 5' },
   { id: 'claude-sonnet-5', label: 'Sonnet 5' },
@@ -63,10 +64,11 @@ const CANDIDATE_MODEL_IDS: string[] = [
   // list held whole-number 5th-gen IDs plus `-6` lookaheads only, so neither
   // could appear in the UI. Keep one or two point-release guesses per live
   // family: an ID that doesn't exist 404s in ~2.5s at zero token cost.
-  // Fable family (5 GA 2026-06-09, 5.1 GA 2026-09-01).
+  // Fable family (5 GA 2026-06-09, 5.1 GA 2026-09-01, 5.2 live by 2026-11-10).
   'claude-fable-5',
   'claude-fable-5-1',
   'claude-fable-5-2',
+  'claude-fable-5-3',
   'claude-fable-6',
   // Opus family (4.6/4.7/4.8, 5 and 5.5 are live; probe ahead for new releases)
   'claude-opus-4-6',
