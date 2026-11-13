@@ -27,7 +27,7 @@ interface Props {
   owners: string[]
   onGitInit: () => Promise<void>
   onPublish: (choice: PublishChoice) => Promise<string>
-  /** Move the folder into a chosen parent; absent where the agent can't follow (Grok, OpenCode). */
+  /** Move the folder into a chosen parent. */
   onMove?: (parent: string) => Promise<void>
   /** For the folder browser. */
   token?: string
