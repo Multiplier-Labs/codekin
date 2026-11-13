@@ -114,6 +114,12 @@ describe('browse view', () => {
     expect(rows[3]).toMatchObject({ icon: 'repo', tag: 'git', opens: true, action: { type: 'browse', path: `${HOME}/projects/site` } })
   })
 
+  it('a folder inside a repository is picked as git, naming the repository root', () => {
+    const inside = { path: `${HOME}/projects/site/src`, dirs: ['lib'], gitDirs: new Set<string>(), git: true, repoRoot: `${HOME}/projects/site` }
+    const rows = flatRows(pickerModel(browse, data({ listing: inside })))
+    expect(rows[1]).toMatchObject({ action: { type: 'pick', place: { path: `${HOME}/projects/site/src`, git: true, inRepo: `${HOME}/projects/site` } } })
+  })
+
   it('tags the folder itself when it is a repo', () => {
     const rows = flatRows(pickerModel(browse, data({ listing: { ...listing, git: true } })))
     expect(rows[1].tag).toBe('git repo')

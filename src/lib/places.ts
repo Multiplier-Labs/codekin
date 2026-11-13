@@ -19,8 +19,13 @@ export interface DraftPlace {
   kind: DraftPlaceKind
   /** Absolute path; absent for a scratch folder not yet created, a repo not yet cloned, or an org. */
   path?: string
-  /** The place is (or, for a GitHub repo, will be) a git work tree. */
+  /** The place is (or, for a GitHub repo, will be) in a git work tree. */
   git: boolean
+  /**
+   * The enclosing repository's root, when the folder is inside a repository
+   * rather than its root. Such a session runs in place: no worktree.
+   */
+  inRepo?: string
   /** Short display text: `~/notes`, `acme-co/web-app`, `Scratch folder`. */
   label: string
   /** GitHub coordinates, for repos listed through gh. */
@@ -69,9 +74,11 @@ export function placeFromRepo(repo: ApiRepo): DraftPlace {
   }
 }
 
-/** A place for a folder picked by path. */
-export function placeFromPath(path: string, git: boolean, home?: string | null): DraftPlace {
-  return { kind: 'folder', path, git, label: tildify(path, home) }
+/** A place for a folder picked by path; `repoRoot` is the work tree containing it, if any. */
+export function placeFromPath(path: string, git: boolean, home?: string | null, repoRoot?: string | null): DraftPlace {
+  const place: DraftPlace = { kind: 'folder', path, git, label: tildify(path, home) }
+  if (git && repoRoot && repoRoot !== path) place.inRepo = repoRoot
+  return place
 }
 
 /** A place for a whole GitHub owner (phase 2). */
@@ -84,7 +91,9 @@ export function placeFromSession(session: Pick<Session, 'workingDir' | 'groupDir
   const place: SessionPlace = session.place ?? { kind: 'folder', git: true }
   if (place.kind === 'scratch') return NEW_SCRATCH
   const path = session.groupDir ?? session.workingDir
-  return { kind: place.kind, path, git: place.git, label: place.kind === 'repo' ? baseName(path) : tildify(path, home) }
+  const draft: DraftPlace = { kind: place.kind, path, git: place.git, label: place.kind === 'repo' ? baseName(path) : tildify(path, home) }
+  if (place.inRepo) draft.inRepo = place.inRepo
+  return draft
 }
 
 /** Identity used to dedupe recent places and to mark the current one. */
@@ -166,6 +175,9 @@ export function placeHint(place: DraftPlace, useWorktree: boolean, opts: { home?
 
 function runsIn(place: DraftPlace, useWorktree: boolean, home?: string | null): string {
   const where = tildify(place.path ?? place.label, home)
+  if (place.inRepo) {
+    return `Runs in ${where}, inside ${tildify(place.inRepo, home)}, on the checked-out branch (no worktree in a subfolder).`
+  }
   return useWorktree ? `Runs in ${where}, on a fresh worktree.` : `Runs in ${where}, on the checked-out branch.`
 }
 

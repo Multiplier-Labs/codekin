@@ -211,8 +211,10 @@ export type PlaceKind = 'scratch' | 'folder' | 'repo'
 /** Where a session runs: a scratch folder, a plain folder (git or not), or a repository. */
 export interface SessionPlace {
   kind: PlaceKind
-  /** The folder is a git work tree. */
+  /** The folder is in a git work tree: its own, or an enclosing repository's. */
   git: boolean
+  /** The enclosing repository's root, when the folder is inside one rather than its root. */
+  inRepo?: string
 }
 
 /**

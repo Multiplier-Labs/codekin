@@ -20,7 +20,7 @@ vi.mock('./config.js', () => ({
 }))
 
 import {
-  configureScratchRoot, createScratchDir, describePlace, detectPlace, getScratchRoot,
+  configureScratchRoot, createScratchDir, describePlace, detectPlace, findWorkTreeRoot, getScratchRoot,
   invalidatePlace, scratchName, validateScratchRoot,
 } from './places.js'
 
@@ -91,6 +91,37 @@ describe('detectPlace', () => {
     expect(detectPlace(wt)).toEqual({ kind: 'repo', git: true })
   })
 
+  it('a folder inside a repository belongs to it, and names its root', () => {
+    const repo = join(REPOS, 'acme', 'api')
+    gitRepo(repo, '[remote "origin"]\n\turl = https://example.com/api.git\n')
+    const nested = join(repo, 'src', 'lib')
+    mkdirSync(nested, { recursive: true })
+    expect(detectPlace(nested)).toEqual({ kind: 'repo', git: true, inRepo: repo })
+    expect(findWorkTreeRoot(nested)).toBe(repo)
+    // The root itself carries no inRepo.
+    expect(detectPlace(repo)).toEqual({ kind: 'repo', git: true })
+    expect(findWorkTreeRoot(repo)).toBe(repo)
+  })
+
+  it('a folder inside a linked worktree belongs to that worktree', () => {
+    const main = join(REPOS, 'main')
+    gitRepo(main)
+    const wtGit = join(main, '.git', 'worktrees', 'wt1')
+    mkdirSync(wtGit, { recursive: true })
+    writeFileSync(join(wtGit, 'commondir'), '../..\n')
+    const wt = join(HOME, 'wt1')
+    mkdirSync(join(wt, 'pkg'), { recursive: true })
+    writeFileSync(join(wt, '.git'), `gitdir: ${wtGit}\n`)
+    expect(detectPlace(join(wt, 'pkg'))).toEqual({ kind: 'folder', git: true, inRepo: wt })
+  })
+
+  it('a folder with no repository above it has no git', () => {
+    const dir = join(HOME, 'a', 'b')
+    mkdirSync(dir, { recursive: true })
+    expect(findWorkTreeRoot(dir)).toBeNull()
+    expect(detectPlace(dir)).toEqual({ kind: 'folder', git: false })
+  })
+
   it('anything under the scratch root is scratch', () => {
     const dir = createScratchDir()
     expect(detectPlace(dir)).toEqual({ kind: 'scratch', git: false })
@@ -151,6 +182,26 @@ describe('createScratchDir', () => {
     const second = createScratchDir(undefined, always0)
     expect(second.endsWith('/amber-badger-10')).toBe(true)
     expect(existsSync(first) && existsSync(second)).toBe(true)
+  })
+
+  it('refuses a default root that resolves outside the allowed roots, without creating anything', () => {
+    // ~/codekin is a symlink to a folder outside home and the repos root.
+    symlinkSync(OUTSIDE, join(HOME, 'codekin'))
+    expect(() => createScratchDir()).toThrow(/under your home directory or the repositories root/)
+    expect(existsSync(join(OUTSIDE, 'scratch'))).toBe(false)
+  })
+
+  it('refuses an explicit out-of-bounds root before creating it', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    expect(() => createScratchDir(join(OUTSIDE, 'scratch'))).toThrow()
+    expect(existsSync(join(OUTSIDE, 'scratch'))).toBe(false)
+    // An invalid configured root falls back to an invalid default: still nothing written.
+    configureScratchRoot(join(OUTSIDE, 'configured'))
+    symlinkSync(OUTSIDE, join(HOME, 'codekin'))
+    expect(() => createScratchDir()).toThrow()
+    expect(existsSync(join(OUTSIDE, 'configured'))).toBe(false)
+    expect(existsSync(join(OUTSIDE, 'scratch'))).toBe(false)
+    warn.mockRestore()
   })
 
   it('names are two lowercase words', () => {

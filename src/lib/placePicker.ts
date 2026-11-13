@@ -91,7 +91,7 @@ export interface PickerData {
   recent: DraftPlace[]
   showOrgPlaces: boolean
   /** Current folder listing for browse view and path search. */
-  listing: { path: string; dirs: string[]; gitDirs: ReadonlySet<string>; git: boolean } | null
+  listing: { path: string; dirs: string[]; gitDirs: ReadonlySet<string>; git: boolean; repoRoot?: string | null } | null
   /** Allowed roots, once known. */
   roots: string[]
   home: string | null
@@ -241,7 +241,7 @@ function browseModel(data: PickerData, query: string): PickerModel {
     mono: true,
     accent: true,
     tag: listing.git ? 'git repo' : undefined,
-    action: { type: 'pick', place: placeFromPath(listing.path, listing.git, data.home) },
+    action: { type: 'pick', place: placeFromPath(listing.path, listing.git, data.home, listing.repoRoot) },
   }
   const dirs = listing.dirs.filter(d => !query || matches(d, query)).map(d => ({
     id: `dir:${listing.path}/${d}`,
@@ -289,7 +289,7 @@ function searchModel(data: PickerData, query: string): PickerModel {
         rows.push({
           id: `use:${dir}`, icon: 'folder-check', label: `Use ${tildify(dir, data.home)}`, mono: true, accent: true,
           tag: listing.git ? 'git repo' : undefined,
-          action: { type: 'pick', place: placeFromPath(dir, listing.git, data.home) },
+          action: { type: 'pick', place: placeFromPath(dir, listing.git, data.home, listing.repoRoot) },
         })
       }
       for (const d of listing.dirs) {
@@ -297,10 +297,12 @@ function searchModel(data: PickerData, query: string): PickerModel {
         const path = dir === '/' ? `/${d}` : `${dir}/${d}`
         const git = listing.gitDirs.has(d)
         if (partial && d === partial) {
+          // Inside a repository every subfolder belongs to it.
+          const inListingRepo = !git && listing.git
           rows.unshift({
             id: `use:${path}`, icon: 'folder-check', label: `Use ${tildify(path, data.home)}`, mono: true, accent: true,
             tag: git ? 'git repo' : undefined,
-            action: { type: 'pick', place: placeFromPath(path, git, data.home) },
+            action: { type: 'pick', place: placeFromPath(path, git || listing.git, data.home, git ? path : inListingRepo ? (listing.repoRoot ?? listing.path) : null) },
           })
         }
         rows.push({

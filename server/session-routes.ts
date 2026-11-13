@@ -30,7 +30,7 @@ import { execFile } from 'child_process'
 import { promisify } from 'util'
 import {
   allowedRoots as allowedRootsOf, configureScratchRoot, createScratchDir, describePlace, getScratchRoot, invalidatePlace,
-  isGitWorkTree, validateScratchRoot,
+  findWorkTreeRoot, isGitWorkTree, validateScratchRoot,
 } from './places.js'
 
 const execFileAsync = promisify(execFile)
@@ -528,7 +528,15 @@ export function createSessionRouter(
     const session = sessions.get(req.params.id)
     if (!session) return res.status(404).json({ error: 'Session not found' })
     const root = session.groupDir ?? session.workingDir
-    if (isGitWorkTree(root)) return res.status(409).json({ error: 'This folder is already a git repository' })
+    // detectPlace finds an enclosing repository too: initializing inside one
+    // would create a nested repository instead of using it.
+    invalidatePlace(root)
+    const current = describePlace(root)
+    if (current.git) {
+      return res.status(409).json({
+        error: current.inRepo ? `This folder is already inside a git repository (${current.inRepo})` : 'This folder is already a git repository',
+      })
+    }
     let realRoot: string
     try {
       realRoot = fsRealpathSync(root)
@@ -656,8 +664,11 @@ export function createSessionRouter(
         .sort((a, b) => a.localeCompare(b))
       // Which entries (and the folder itself) are git work trees, so the
       // place picker can tag them. Additive: older clients ignore these.
+      // `gitDirs` are repository roots; inside a repository every subfolder
+      // belongs to it, which `git` and `repoRoot` say for the listing itself.
       const gitDirs = entries.filter(name => isGitWorkTree(pathJoin(base, name)))
-      res.json({ path: base, dirs: entries, gitDirs, git: isGitWorkTree(base), roots: allowedRoots, home })
+      const repoRoot = findWorkTreeRoot(base)
+      res.json({ path: base, dirs: entries, gitDirs, git: repoRoot !== null, ...(repoRoot ? { repoRoot } : {}), roots: allowedRoots, home })
     } catch {
       res.status(400).json({ error: 'Cannot read directory' })
     }
