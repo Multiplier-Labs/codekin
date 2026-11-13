@@ -439,7 +439,9 @@ describe('WebhookHandler', () => {
       const publish = vi.fn()
       handler.setSignalPublisher(publish)
       const settings = { automationId: 'widget-pr-review', model: 'gpt-6', provider: 'codex' as const, customPrompt: 'Focus on SQL.' }
-      vi.mocked(resolvePrReviewAutomation).mockReturnValueOnce({ kind: 'review', settings })
+      vi.mocked(resolvePrReviewAutomation)
+        .mockReturnValueOnce({ kind: 'review', settings }) // at acceptance
+        .mockReturnValueOnce({ kind: 'review', settings }) // re-checked at dequeue
 
       const body = makePrBody()
       const result = await handler.handleWebhook(body, makeHeaders(body, { event: 'pull_request' }))
@@ -467,6 +469,39 @@ describe('WebhookHandler', () => {
       const opts = vi.mocked(sessions.create).mock.calls[0][2] as Record<string, unknown>
       expect(opts).not.toHaveProperty('model')
       expect(opts).not.toHaveProperty('provider')
+    })
+
+    it('drops a queued review whose automation was paused while it waited', async () => {
+      await handler.checkHealth()
+      const publish = vi.fn()
+      handler.setSignalPublisher(publish)
+      vi.mocked(resolvePrReviewAutomation).mockReturnValueOnce({ kind: 'review', settings: { automationId: 'a' } })
+      const body = makePrBody()
+      await handler.handleWebhook(body, makeHeaders(body, { event: 'pull_request' }))
+      const queued = (publish.mock.calls[0][0] as { payload: Record<string, unknown> }).payload
+
+      vi.mocked(resolvePrReviewAutomation).mockReturnValueOnce({ kind: 'skip', reason: 'paused' })
+      vi.mocked(sessions.get).mockReturnValue(undefined)
+      await handler.processQueuedPrReview(queued)
+      expect(sessions.create).not.toHaveBeenCalled()
+      const eventId = (queued.webhookEvent as { id: string }).id
+      expect(handler.getEvent(eventId)?.status).toBe('filtered')
+    })
+
+    it('uses the automation\'s current settings when a queued review starts', async () => {
+      await handler.checkHealth()
+      const publish = vi.fn()
+      handler.setSignalPublisher(publish)
+      vi.mocked(resolvePrReviewAutomation)
+        .mockReturnValueOnce({ kind: 'review', settings: { automationId: 'a', model: 'old-model' } })
+        .mockReturnValueOnce({ kind: 'review', settings: { automationId: 'a', model: 'new-model' } })
+      const body = makePrBody()
+      await handler.handleWebhook(body, makeHeaders(body, { event: 'pull_request' }))
+      vi.mocked(sessions.get).mockReturnValue(undefined)
+      await handler.processQueuedPrReview((publish.mock.calls[0][0] as { payload: Record<string, unknown> }).payload)
+      expect(sessions.create).toHaveBeenCalledWith(
+        expect.anything(), expect.anything(), expect.objectContaining({ model: 'new-model' }),
+      )
     })
 
     it('processQueuedPrReview drops malformed signals without throwing', async () => {
