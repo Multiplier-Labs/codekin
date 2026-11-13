@@ -697,7 +697,7 @@ export class PromptRouter {
 
   /**
    * True if the tool input's target path resolves inside the session's working
-   * directory (or its group repo). Inputs without a path target the cwd and count
+   * directory, its group repo, or a folder attached to it. Inputs without a path target the cwd and count
    * as in-project.
    */
   private isPathInProject(session: Session, toolInput: Record<string, unknown>): boolean {
@@ -705,7 +705,7 @@ export class PromptRouter {
     if (raw === undefined || raw === null) return true // defaults to cwd
     if (typeof raw !== 'string') return false
     const resolved = path.resolve(session.workingDir, raw)
-    const roots = [session.workingDir, session.groupDir].filter((r): r is string => !!r)
+    const roots = [session.workingDir, session.groupDir, ...(session.addDirs ?? [])].filter((r): r is string => !!r)
     return roots.some(root => resolved === root || resolved.startsWith(root + path.sep))
   }
 

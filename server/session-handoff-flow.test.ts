@@ -8,6 +8,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { SessionManager } from './session-manager.js'
 import type { Handoff } from './handoff-manager.js'
+import { mkdtempSync, realpathSync, rmSync } from 'fs'
+import { join } from 'path'
+import { homedir } from 'os'
 
 const mocks = vi.hoisted(() => ({
   generateHandoff: vi.fn(),
@@ -154,5 +157,71 @@ describe('org session manifest', () => {
 
     sm.sendInput(s.id, 'and the lockfiles')
     expect(cp.sendMessage.mock.calls[1][0]).toBe('and the lockfiles')
+  })
+})
+
+describe('attached places', () => {
+  function attachable(): string {
+    // Attached folders must sit under the home directory or the repos root.
+    return realpathSync(mkdtempSync(join(homedir(), '.codekin-attach-test-')))
+  }
+
+  it('attaches and detaches, persists notes and prefixes the next message with them, once', () => {
+    const sm = new SessionManager()
+    const s = sm.create('test', '/repo', { provider: 'grok' })
+    const extra = attachable()
+    try {
+      const res = sm.attachDir(s.id, extra)
+      expect(res).toEqual({ ok: true, attached: [extra] })
+      expect(s.addDirs).toEqual([extra])
+      expect(sm.attachDir(s.id, extra)).toMatchObject({ ok: false, status: 400 })
+      expect(sm.list().find(i => i.id === s.id)?.attached?.[0].path).toBe(extra)
+
+      const cp = fakeProcess(true)
+      s.claudeProcess = cp
+      s.claudeSessionId = 'live'
+      sm.sendInput(s.id, 'go on')
+      const sent = cp.sendMessage.mock.calls[0][0] as string
+      expect(sent.startsWith('<codekin-place-attached>')).toBe(true)
+      expect(sent).toContain(extra)
+      expect(sent.endsWith('go on')).toBe(true)
+      expect(s.pendingPlaceNotes).toBeUndefined()
+
+      expect(sm.detachDir(s.id, '/not/attached')).toMatchObject({ ok: false, status: 404 })
+      expect(sm.detachDir(s.id, extra)).toEqual({ ok: true, attached: [] })
+      expect(s.addDirs).toBeUndefined()
+      sm.sendInput(s.id, 'next')
+      expect(cp.sendMessage.mock.calls[1][0]).toMatch(/^<codekin-place-detached>[\s\S]*next$/)
+    } finally {
+      rmSync(extra, { recursive: true, force: true })
+    }
+  })
+
+  it('restarts Claude between turns, and leaves Grok running', () => {
+    const sm = new SessionManager()
+    const extra = attachable()
+    try {
+      const claude = sm.create('c', '/repo')
+      claude.claudeProcess = fakeProcess(true)
+      const spy = vi.spyOn(claude.coordinator, 'requestReconfigure').mockResolvedValue(true)
+      sm.attachDir(claude.id, extra)
+      expect(spy).toHaveBeenCalledOnce()
+
+      const busy = sm.create('b', '/repo2', { provider: 'codex' })
+      busy.claudeProcess = fakeProcess(true)
+      busy.isProcessing = true
+      const busySpy = vi.spyOn(busy.coordinator, 'requestReconfigure').mockResolvedValue(true)
+      sm.attachDir(busy.id, extra)
+      expect(busySpy).not.toHaveBeenCalled()
+      expect(busy._configRestartPending).toBe(true)
+
+      const grok = sm.create('g', '/repo3', { provider: 'grok' })
+      grok.claudeProcess = fakeProcess(true)
+      const grokSpy = vi.spyOn(grok.coordinator, 'requestReconfigure').mockResolvedValue(true)
+      sm.attachDir(grok.id, extra)
+      expect(grokSpy).not.toHaveBeenCalled()
+    } finally {
+      rmSync(extra, { recursive: true, force: true })
+    }
   })
 })

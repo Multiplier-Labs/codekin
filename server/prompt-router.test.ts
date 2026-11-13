@@ -124,6 +124,14 @@ describe('PromptRouter', () => {
       expect(router.resolveAutoApproval(session, 'Glob', { path: '/home/other' })).toBe('prompt')
     })
 
+    it('treats attached folders as in-project for read-only tools', () => {
+      session.permissionMode = 'default'
+      session.addDirs = ['/home/u/notes']
+      expect(router.resolveAutoApproval(session, 'Read', { file_path: '/home/u/notes/a.md' })).toBe('readOnly')
+      expect(router.resolveAutoApproval(session, 'Read', { file_path: '/home/u/notes-other/a.md' })).toBe('prompt')
+      session.addDirs = undefined
+    })
+
     it('returns "planDeny" for write tools while plan mode is active', () => {
       session.permissionMode = 'plan'
       expect(router.resolveAutoApproval(session, 'Write', { file_path: '/repos/test/a.ts' })).toBe('planDeny')

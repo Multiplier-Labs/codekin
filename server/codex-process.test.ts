@@ -993,3 +993,13 @@ describe('isCodexAuthError', () => {
     expect(isCodexAuthError(undefined)).toBe(false)
   })
 })
+
+describe('writableRootsArgs', () => {
+  it('adds no override without attached folders, and one -c override with them', async () => {
+    const { writableRootsArgs } = await import('./codex-process.js')
+    expect(writableRootsArgs([])).toEqual([])
+    expect(writableRootsArgs(['/home/u/a', '/home/u/b "q"'])).toEqual([
+      '-c', 'sandbox_workspace_write.writable_roots=["/home/u/a","/home/u/b \\"q\\""]',
+    ])
+  })
+})
