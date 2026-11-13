@@ -21,6 +21,8 @@ const api = vi.hoisted(() => ({
   setWorktreePrefix: vi.fn(() => Promise.resolve()),
   getQueueMessages: vi.fn(() => Promise.resolve(true)),
   setQueueMessages: vi.fn(() => Promise.resolve()),
+  getScratchRoot: vi.fn(() => Promise.resolve({ path: '', effective: '/home/u/codekin/scratch' })),
+  setScratchRoot: vi.fn(() => Promise.resolve({ path: '', effective: '/home/u/codekin/scratch' })),
   setAgentName: vi.fn(() => Promise.resolve('Joe')),
   getWebhookConfig: vi.fn(() => Promise.resolve({ enabled: true, maxConcurrentSessions: 3 })),
   getWebhookEvents: vi.fn(() => Promise.resolve([])),

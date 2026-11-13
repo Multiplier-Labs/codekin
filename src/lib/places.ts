@@ -24,7 +24,7 @@ export interface DraftPlace {
   /** Short display text: `~/notes`, `acme-co/web-app`, `Scratch folder`. */
   label: string
   /** GitHub coordinates, for repos listed through gh. */
-  repo?: { id: string; owner: string; name: string; cloned: boolean }
+  repo?: { id: string; owner: string; name: string; cloned: boolean; /** Where it is, or will be, checked out. */ dir?: string }
   /** Owner, for an org place. */
   owner?: string
 }
@@ -65,7 +65,7 @@ export function placeFromRepo(repo: ApiRepo): DraftPlace {
     path: repo.cloned ? repo.workingDir : undefined,
     git: true,
     label: repo.owner ? `${repo.owner}/${repo.name}` : repo.name,
-    repo: { id: repo.id, owner: repo.owner, name: repo.name, cloned: repo.cloned },
+    repo: { id: repo.id, owner: repo.owner, name: repo.name, cloned: repo.cloned, dir: repo.workingDir || undefined },
   }
 }
 

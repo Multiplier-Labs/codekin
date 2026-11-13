@@ -193,7 +193,9 @@ function rootModel(data: PickerData): PickerModel {
     ],
   })
   const owners = ownerRows(data)
-  if (owners.length) sections.push({ title: 'GitHub', rows: owners })
+  // Local checkouts alone are not GitHub.
+  const anyGithub = data.groups.some(g => g.source !== 'local' && (g.repos.length > 0 || g.error))
+  if (owners.length) sections.push({ title: anyGithub ? 'GitHub' : 'Repositories', rows: owners })
   return {
     sections,
     notices: [],

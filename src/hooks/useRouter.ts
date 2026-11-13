@@ -1,7 +1,8 @@
 /**
  * Minimal client-side router using the History API.
  *
- * Routes: `/s/:sessionId` for deep-linking to sessions, the Tasks, Joe
+ * Routes: `/s/:sessionId` for deep-linking to sessions, `/new` for the new-session
+ * composer, the Tasks, Joe
  * activity log and Automations views, and `/settings[/:section]` for Settings. Listens for
  * popstate events (browser back/forward) and provides a navigate() helper
  * for programmatic navigation.
@@ -12,7 +13,7 @@ import { useState, useCallback, useEffect } from 'react'
 interface RouteState {
   path: string
   sessionId: string | null
-  view: 'chat' | 'automations' | 'orchestrator' | 'tasks' | 'maintenance' | 'settings'
+  view: 'chat' | 'new' | 'automations' | 'orchestrator' | 'tasks' | 'maintenance' | 'settings'
   /** Which Automations tab a legacy deep link asked for (/workflows, /loops). */
   automationsTab: 'workflows' | 'loops' | null
   /** `/settings/:section` — null for bare `/settings` (the section list). */
@@ -39,6 +40,9 @@ export function parsePath(pathname: string): RouteState {
       repo = ''
     }
     if (repo) return { path: pathname, sessionId: null, view: 'maintenance', automationsTab: null, settingsSection: null, maintenanceRepo: repo }
+  }
+  if (pathname === '/new' || pathname === '/new/') {
+    return { path: pathname, sessionId: null, view: 'new', automationsTab: null, settingsSection: null }
   }
   if (pathname === '/tasks' || pathname === '/tasks/') {
     return { path: pathname, sessionId: null, view: 'tasks', automationsTab: null, settingsSection: null }

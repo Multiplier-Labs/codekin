@@ -61,3 +61,22 @@ describe('NewSessionButton popover placement', () => {
     expect(popover(c).style.maxWidth).toBe('calc(100vw - 16px)')
   })
 })
+
+describe('NewSessionButton with the composer', () => {
+  it('opens the composer instead of the repo popover, and marks it current', () => {
+    const onNewSession = vi.fn()
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    act(() => {
+      activeRoot = createRoot(container)
+      activeRoot.render(<NewSessionButton groups={[]} onOpen={() => {}} onNewSession={onNewSession} current />)
+    })
+    activeContainer = container
+    const button = container.querySelector('button')!
+    expect(button.getAttribute('aria-current')).toBe('page')
+    expect(button.hasAttribute('aria-expanded')).toBe(false)
+    act(() => { button.click() })
+    expect(onNewSession).toHaveBeenCalledTimes(1)
+    expect(container.querySelectorAll('button')).toHaveLength(1)
+  })
+})
