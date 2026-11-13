@@ -291,6 +291,20 @@ Detach a folder (the `path` as the session lists it). The agent is told to stop 
 
 **Response:** `{ "attached": [] }`. `404` unknown session or folder not attached.
 
+### `POST /api/sessions/:id/move`
+
+Move a scratch session's folder into another folder, keeping its name, and continue the session there. This only works between turns, and only for Claude and Codex sessions. Claude's conversation storage is copied to the new folder's project directory. Codex resumes its thread with the new working directory. The agent is told about the move before the next message.
+
+**Request body:** `{ "parent": "~/projects" }`. The parent must be an existing folder under the home directory or the repositories root, outside the scratch folders. The target (`<parent>/<folder name>`) must not exist yet.
+**Response:** `{ "path": "/home/user/projects/brisk-otter", "place": { … } }`. `400` invalid parent or target already exists. `404` unknown session. `409` not a scratch folder, a Grok or OpenCode session, or a turn is running.
+
+### `POST /api/sessions/:id/publish`
+
+Publish a session's folder to GitHub with the machine's `gh` login. It runs `git init` if needed, commits everything as "Initial commit", then runs `gh repo create <owner>/<name> --private|--public --source . --remote origin --push`. The folder stays where it is. The agent is told about it before the next message.
+
+**Request body:** `{ "owner": "acme-co", "name": "bank-csv", "visibility": "private" }`. `visibility` defaults to `private`.
+**Response:** `{ "url": "https://github.com/acme-co/bank-csv", "place": { … } }`. `400` invalid owner or name. `404` unknown session. `409` org folder, inside another repository, or already on GitHub. `500` with git's or gh's message when a step fails (for example, git has no user name and email configured).
+
 ### `GET /api/settings/repos-path`
 
 Get the configured repos discovery path (empty string = server default).

@@ -44,7 +44,8 @@ import {
 } from './review-comments.js'
 import { ProcessCoordinator } from './process-coordinator.js'
 import { inspectWorktree, prepareWorktree, removeWorktree, type WorktreeResult } from './worktree-ops.js'
-import { describePlace } from './places.js'
+import { describePlace, invalidatePlace } from './places.js'
+import { moveDir, validateMoveTarget } from './move-folder.js'
 import { buildPlaceNote, describeAttached, validateAttachPath } from './attached-places.js'
 import { takesDirsAtSpawn } from './harness-registry.js'
 import { discardOrgChanges, getOrgChangeSummary, getOrgDiff } from './org-diff.js'
@@ -1677,6 +1678,70 @@ export class SessionManager {
     if (!dirs.includes(rawPath)) return { ok: false, status: 404, error: 'That folder is not attached to this session' }
     const note = buildPlaceNote({ action: 'detached', path: rawPath, sessionId: session.id, worktrees: false, branchPrefix: '' })
     return { ok: true, attached: this.applyAttached(session, dirs.filter(d => d !== rawPath), note, `Detached ${rawPath}`) }
+  }
+
+  /**
+   * Move a scratch session's folder into `rawParent` and repoint the session
+   * (Keep this work? → Move to a folder…). Between turns only. Claude's
+   * conversation storage is copied to the new folder's project directory;
+   * Codex resumes its thread with the new cwd. Grok and OpenCode key their
+   * sessions by directory, so they don't move in this phase.
+   */
+  async moveSessionFolder(sessionId: string, rawParent: unknown): Promise<{ ok: true; path: string } | { ok: false; status: number; error: string }> {
+    const session = this.sessions.get(sessionId)
+    if (!session) return { ok: false, status: 404, error: 'Session not found' }
+    const provider = session.provider ?? 'claude'
+    if (provider !== 'claude' && provider !== 'codex') {
+      return { ok: false, status: 409, error: 'Only Claude and Codex sessions can move their folder for now' }
+    }
+    const source = session.workingDir
+    invalidatePlace(source)
+    if (session.groupDir || session.worktreePath || describePlace(source).kind !== 'scratch') {
+      return { ok: false, status: 409, error: 'Only a scratch folder can be moved' }
+    }
+    if (session.isProcessing) return { ok: false, status: 409, error: 'Wait for the current turn to finish' }
+    const checked = validateMoveTarget(rawParent, source)
+    if (!checked.ok) return { ok: false, status: 400, error: checked.error }
+
+    const wasAlive = session.claudeProcess?.isAlive() ?? false
+    await this.stopClaudeAndWait(sessionId)
+    try {
+      moveDir(source, checked.target)
+    } catch (err) {
+      if (wasAlive) this.startClaude(sessionId)
+      return { ok: false, status: 500, error: `Could not move the folder: ${err instanceof Error ? err.message : String(err)}` }
+    }
+    if (provider === 'claude' && session.claudeSessionId) {
+      try {
+        this.migrateClaudeSession(session.claudeSessionId, session.claudeSessionId, source, checked.target, session)
+      } catch (err) {
+        console.warn('[move] Failed to copy Claude session data:', err instanceof Error ? err.message : err)
+      }
+    }
+    session.workingDir = checked.target
+    invalidatePlace(source)
+    invalidatePlace(checked.target)
+    this.persistToDisk()
+    this.queuePlaceNote(session.id, [
+      '<codekin-place-moved>',
+      `The user moved this session's folder from ${source} to ${checked.target}. Your working directory is now ${checked.target}; the old path no longer exists.`,
+      '</codekin-place-moved>',
+    ].join('\n'), `Moved to ${checked.target}`)
+    if (wasAlive) this.startClaude(sessionId)
+    return { ok: true, path: checked.target }
+  }
+
+  /**
+   * Tell the agent about a change to its place before the next message
+   * (published, …), show `text` in the transcript and refresh session lists.
+   */
+  queuePlaceNote(sessionId: string, note: string, text: string): void {
+    const session = this.sessions.get(sessionId)
+    if (!session) return
+    session.pendingPlaceNotes = [...(session.pendingPlaceNotes ?? []), note]
+    this.persistToDiskDebounced()
+    this.broadcastAndHistory(session, { type: 'system_message', subtype: 'notification', text })
+    this._globalBroadcast?.({ type: 'sessions_updated' })
   }
 
   private applyAttached(session: Session, dirs: string[], note: string, text: string): string[] {

@@ -307,6 +307,20 @@ describe('createSessionRouter', () => {
     })
   })
 
+  describe('POST /api/sessions/:id/publish', () => {
+    it('refuses an unknown session and invalid input before touching git', async () => {
+      sessions = fakeSessions()
+      server = await startApp(createSessionRouter(verifyToken, extractToken, sessions))
+      const missing = await fetch(`${server.baseUrl}/api/sessions/nope/publish`, { method: 'POST', headers: auth(), body: JSON.stringify({ owner: 'sam', name: 'x' }) })
+      expect(missing.status).toBe(404)
+      sessions = fakeSessions({ get: vi.fn(() => ({ id: 's1', workingDir: join(HOME_DIR, 'ok') })) })
+      await server.close()
+      server = await startApp(createSessionRouter(verifyToken, extractToken, sessions))
+      const bad = await fetch(`${server.baseUrl}/api/sessions/s1/publish`, { method: 'POST', headers: auth(), body: JSON.stringify({ owner: 'sam', name: 'a/b' }) })
+      expect(bad.status).toBe(400)
+    })
+  })
+
   describe('GET /api/browse-dirs', () => {
     beforeEach(async () => {
       sessions = fakeSessions()

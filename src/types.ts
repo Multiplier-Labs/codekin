@@ -225,6 +225,10 @@ export interface SessionPlace {
   inRepo?: string
   /** The GitHub owner, for an org place (a folder directly under the repos root). */
   owner?: string
+  /** Scratch only: the folder holds something besides `.git`. */
+  hasFiles?: boolean
+  /** Scratch only: published (its repository has an `origin` remote). */
+  remote?: boolean
 }
 
 /**
