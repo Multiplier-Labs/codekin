@@ -201,6 +201,18 @@ export interface Session {
   provider?: CodingProvider
   /** Model pinned to this session, if one was chosen (shown in the sidebar row's tooltip). */
   model?: string
+  /** Where the session runs. Derived by the server from the session's root; absent from older servers. */
+  place?: SessionPlace
+}
+
+/** Kind of place a session runs in. Keep in sync with server/places.ts. */
+export type PlaceKind = 'scratch' | 'folder' | 'repo'
+
+/** Where a session runs: a scratch folder, a plain folder (git or not), or a repository. */
+export interface SessionPlace {
+  kind: PlaceKind
+  /** The folder is a git work tree. */
+  git: boolean
 }
 
 /**

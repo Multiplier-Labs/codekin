@@ -42,6 +42,8 @@ describe('checkProxyRequest', () => {
     expect(checkProxyRequest(asOwner({ method: 'POST', path: '/api/upload' })).allowed).toBe(true)
     expect(checkProxyRequest(asOwner({ method: 'POST', path: '/api/approvals' })).allowed).toBe(true)
     expect(checkProxyRequest(asOwner({ method: 'POST', path: '/api/clone' })).allowed).toBe(true)
+    expect(checkProxyRequest(asOwner({ method: 'POST', path: '/api/scratch' })).allowed).toBe(true)
+    expect(checkProxyRequest(asOwner({ method: 'POST', path: '/api/sessions/s1/git-init' })).allowed).toBe(true)
   })
 
   it('allows the reads and mutations the Automations views perform', () => {
@@ -215,6 +217,16 @@ describe('principal enforcement', () => {
     })
     expect(decision.allowed).toBe(false)
     expect(decision.error?.code).toBe(RELAY_ERROR.notPermitted)
+  })
+
+  it('keeps scratch folders and git-init owner-only, even for a grantee of the session', () => {
+    for (const path of ['/api/scratch', '/api/sessions/s1/git-init']) {
+      const decision = checkProxyRequest({
+        method: 'POST', path, principal: grantee({ 's1': ['view', 'send_prompt', 'upload_file', 'approve_shell'] }),
+      })
+      expect(decision.allowed).toBe(false)
+      expect(decision.error?.code).toBe(RELAY_ERROR.notPermitted)
+    }
   })
 
   it('gates uploads on the upload_file permission', () => {

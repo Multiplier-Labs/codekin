@@ -8,7 +8,7 @@ import express from 'express'
 import type { Request } from 'express'
 import type { AddressInfo } from 'net'
 import type { Server } from 'http'
-import { mkdirSync, rmSync, realpathSync, symlinkSync } from 'fs'
+import { existsSync, mkdirSync, rmSync, realpathSync, symlinkSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import { randomUUID } from 'crypto'
@@ -64,6 +64,7 @@ vi.mock('./native-folder-picker.js', () => ({
 }))
 
 import { createSessionRouter } from './session-routes.js'
+import { configureScratchRoot } from './places.js'
 import type { SessionManager } from './session-manager.js'
 
 const TOKEN = 'valid-token'
@@ -298,6 +299,126 @@ describe('createSessionRouter', () => {
       const body = await res.json()
       expect(body.dirs).toContain('sub1')
       expect(body.dirs).toContain('sub2')
+    })
+  })
+
+  describe('GET /api/browse-dirs git fields', () => {
+    beforeEach(async () => {
+      sessions = fakeSessions()
+      server = await startApp(createSessionRouter(verifyToken, extractToken, sessions))
+    })
+
+    it('reports which subfolders and whether the folder itself are git work trees', async () => {
+      mkdirSync(join(REPOS_DIR, 'ok', 'repo', '.git'), { recursive: true })
+      mkdirSync(join(REPOS_DIR, 'ok', 'plain'), { recursive: true })
+      const parent = await (await fetch(
+        `${server.baseUrl}/api/browse-dirs?path=${encodeURIComponent(join(REPOS_DIR, 'ok'))}`, { headers: auth() },
+      )).json()
+      expect(parent.dirs).toEqual(['plain', 'repo'])
+      expect(parent.gitDirs).toEqual(['repo'])
+      expect(parent.git).toBe(false)
+      expect(parent.roots).toEqual([HOME_DIR, REPOS_DIR])
+      expect(parent.home).toBe(HOME_DIR)
+      const child = await (await fetch(
+        `${server.baseUrl}/api/browse-dirs?path=${encodeURIComponent(join(REPOS_DIR, 'ok', 'repo'))}`, { headers: auth() },
+      )).json()
+      expect(child.git).toBe(true)
+    })
+  })
+
+  describe('scratch folders', () => {
+    beforeEach(async () => {
+      configureScratchRoot('')
+      delete process.env.SCRATCH_ROOT
+      sessions = fakeSessions()
+      server = await startApp(createSessionRouter(verifyToken, extractToken, sessions))
+    })
+
+    it('requires a token', async () => {
+      expect((await fetch(`${server.baseUrl}/api/scratch`, { method: 'POST' })).status).toBe(401)
+      expect((await fetch(`${server.baseUrl}/api/settings/scratch-root`)).status).toBe(401)
+    })
+
+    it('creates a new empty folder under ~/codekin/scratch by default', async () => {
+      const res = await fetch(`${server.baseUrl}/api/scratch`, { method: 'POST', headers: auth() })
+      expect(res.status).toBe(200)
+      const { path } = await res.json() as { path: string }
+      expect(path.startsWith(join(HOME_DIR, 'codekin', 'scratch') + '/')).toBe(true)
+      expect(existsSync(path)).toBe(true)
+      const second = await (await fetch(`${server.baseUrl}/api/scratch`, { method: 'POST', headers: auth() })).json() as { path: string }
+      expect(second.path).not.toBe(path)
+    })
+
+    it('saves a scratch root inside the allowed roots and uses it', async () => {
+      const target = join(REPOS_DIR, 'scratchpad')
+      const put = await fetch(`${server.baseUrl}/api/settings/scratch-root`, {
+        method: 'PUT', headers: auth(), body: JSON.stringify({ path: target }),
+      })
+      expect(put.status).toBe(200)
+      expect((await put.json()).effective).toBe(target)
+      expect(sessions.archive.setSetting).toHaveBeenCalledWith('scratch_root', target)
+      const { path } = await (await fetch(`${server.baseUrl}/api/scratch`, { method: 'POST', headers: auth() })).json() as { path: string }
+      expect(path.startsWith(target + '/')).toBe(true)
+    })
+
+    it('refuses a scratch root outside the allowed roots', async () => {
+      const res = await fetch(`${server.baseUrl}/api/settings/scratch-root`, {
+        method: 'PUT', headers: auth(), body: JSON.stringify({ path: join(OUTSIDE_DIR, 'scratch') }),
+      })
+      expect(res.status).toBe(400)
+      expect(sessions.archive.setSetting).not.toHaveBeenCalled()
+    })
+
+    it('refuses a scratch root that escapes through a symlink', async () => {
+      symlinkSync(OUTSIDE_DIR, join(HOME_DIR, 'escape'))
+      const res = await fetch(`${server.baseUrl}/api/settings/scratch-root`, {
+        method: 'PUT', headers: auth(), body: JSON.stringify({ path: join(HOME_DIR, 'escape', 'scratch') }),
+      })
+      expect(res.status).toBe(400)
+    })
+  })
+
+  describe('POST /api/sessions/:id/git-init', () => {
+    function withSession(workingDir: string) {
+      sessions = fakeSessions({
+        get: vi.fn((id: string) => id === 's1' ? { id: 's1', workingDir } : undefined),
+        notifySessionsUpdated: vi.fn(),
+      })
+    }
+
+    it('returns 404 for an unknown session', async () => {
+      withSession(join(HOME_DIR, 'ok'))
+      server = await startApp(createSessionRouter(verifyToken, extractToken, sessions))
+      const res = await fetch(`${server.baseUrl}/api/sessions/nope/git-init`, { method: 'POST', headers: auth() })
+      expect(res.status).toBe(404)
+    })
+
+    it('initializes git in the session folder and reports the new place', async () => {
+      const dir = join(HOME_DIR, 'ok')
+      withSession(dir)
+      server = await startApp(createSessionRouter(verifyToken, extractToken, sessions))
+      const res = await fetch(`${server.baseUrl}/api/sessions/s1/git-init`, { method: 'POST', headers: auth() })
+      expect(res.status).toBe(200)
+      expect((await res.json()).place).toEqual({ kind: 'folder', git: true })
+      expect(existsSync(join(dir, '.git'))).toBe(true)
+      expect(sessions.notifySessionsUpdated).toHaveBeenCalled()
+    })
+
+    it('returns 409 when the folder is already a repository', async () => {
+      const dir = join(HOME_DIR, 'ok')
+      mkdirSync(join(dir, '.git'))
+      withSession(dir)
+      server = await startApp(createSessionRouter(verifyToken, extractToken, sessions))
+      const res = await fetch(`${server.baseUrl}/api/sessions/s1/git-init`, { method: 'POST', headers: auth() })
+      expect(res.status).toBe(409)
+    })
+
+    it('refuses a session folder outside the allowed roots', async () => {
+      withSession(OUTSIDE_DIR)
+      server = await startApp(createSessionRouter(verifyToken, extractToken, sessions))
+      const res = await fetch(`${server.baseUrl}/api/sessions/s1/git-init`, { method: 'POST', headers: auth() })
+      expect(res.status).toBe(403)
+      expect(existsSync(join(OUTSIDE_DIR, '.git'))).toBe(false)
     })
   })
 

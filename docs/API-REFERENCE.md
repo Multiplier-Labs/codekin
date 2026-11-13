@@ -272,6 +272,12 @@ Set the session retention period.
 **Request body:** `{ "days": 30 }` (must be >= 1)
 **Response:** `{ "days": 30 }`
 
+### `POST /api/sessions/:id/git-init`
+
+Run `git init` in a session's folder. The session keeps running; its `place` becomes `git: true`, and a `sessions_updated` broadcast tells clients.
+
+**Response:** `{ "place": { "kind": "folder", "git": true } }`; `404` unknown session, `409` already a repository, `403` folder outside the allowed roots, `500` when `git init` fails.
+
 ### `GET /api/settings/repos-path`
 
 Get the configured repos discovery path (empty string = server default).
@@ -355,8 +361,34 @@ Keys must be camelCase identifiers, and the stored blob is capped at 256 KB (413
 
 Browse directories on the server filesystem (for folder picker UI).
 
-**Query params:** `path` (optional) — directory to list; defaults to home directory
-**Response:** `{ "dirs": [{ "name": "repos", "path": "/home/user/repos" }] }`
+**Query params:** `path` (optional) — directory to list; defaults to home directory. Must resolve inside the home directory or `REPOS_ROOT` (`403` otherwise).
+**Response:**
+
+```json
+{
+  "path": "/home/user/projects",
+  "dirs": ["notes", "site"],
+  "gitDirs": ["site"],
+  "git": false,
+  "roots": ["/home/user", "/home/user/repos"],
+  "home": "/home/user"
+}
+```
+
+`dirs` lists non-hidden subfolders. `gitDirs` is the subset that are git work trees, and `git` says whether `path` itself is one. `roots` are the allowed roots, so a picker can explain a refusal before asking.
+
+### `POST /api/scratch`
+
+Create a new, empty scratch folder for a session (`<scratch root>/<adjective-noun>`). The scratch root is the Settings value, else the `SCRATCH_ROOT` env var, else `~/codekin/scratch`, and must sit inside the home directory or `REPOS_ROOT`. Scratch folders are never deleted automatically.
+
+**Response:** `{ "path": "/home/user/codekin/scratch/brisk-otter" }`
+
+### `GET /api/settings/scratch-root` / `PUT /api/settings/scratch-root`
+
+Read or set the scratch root. An empty `path` resets it to `SCRATCH_ROOT` or the default. The path may not exist yet, but whatever part exists must resolve inside the allowed roots and must not be a file (`400` otherwise).
+
+**Request body (PUT):** `{ "path": "~/scratch" }`
+**Response:** `{ "path": "/home/user/scratch", "effective": "/home/user/scratch" }`
 
 ---
 

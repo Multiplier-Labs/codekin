@@ -74,14 +74,18 @@ export const ALLOWED_MUTATION_PREFIXES = [
   // Starting a session on a repo the machine has not cloned yet needs this;
   // without it the hosted UI can list remote repos but never open one. Writes
   // only inside the machine's repos root, and grantees never reach it (see
-  // GRANTEE_WRITE_PREFIXES).
+  // GRANTEE_ROUTES in connector-policy.ts).
   '/api/clone',
+  // Starting a session in a fresh scratch folder (an empty directory under the
+  // machine's scratch root). Owner-only: grantees reach only the routes
+  // listed in connector-policy's GRANTEE_ROUTES.
+  '/api/scratch',
   // Triggering, cancelling and configuring automations. `/api/runs` stays out:
   // it is a read model, so widening it here would grant nothing.
   '/api/workflows',
   '/api/loops',
   // Adding, editing and removing monitored deployments. Owner-only like the
-  // rest of this list — grantees never reach it (see GRANTEE_WRITE_PREFIXES).
+  // rest of this list — grantees never reach it (see GRANTEE_ROUTES).
   '/api/deployments',
   // Settings → Webhooks: the PR review setup wizard (create or update the
   // repository webhook on GitHub with the machine's gh login) and its test

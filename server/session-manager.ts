@@ -44,6 +44,7 @@ import {
 } from './review-comments.js'
 import { ProcessCoordinator } from './process-coordinator.js'
 import { inspectWorktree, prepareWorktree, removeWorktree, type WorktreeResult } from './worktree-ops.js'
+import { describePlace } from './places.js'
 
 /** Max messages retained in a session's output history buffer. */
 const MAX_HISTORY = 2000
@@ -901,6 +902,7 @@ export class SessionManager {
       source: s.source,
       provider: s.provider,
       model: s.model,
+      place: describePlace(s.groupDir ?? s.workingDir),
     }
   }
 

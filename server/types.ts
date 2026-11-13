@@ -219,6 +219,9 @@ export interface Session {
 }
 
 /** Serializable session info returned by the REST API (no process refs or Sets). */
+export type { SessionPlace } from './places.js'
+import type { SessionPlace } from './places.js'
+
 export interface SessionInfo {
   id: string
   name: string
@@ -251,6 +254,8 @@ export interface SessionInfo {
   lastActivity: string
   /** When a turn last started or finished — the sidebar orders sessions by it. */
   lastTurnAt?: string
+  /** Where the session runs: scratch folder, plain folder, or repository; derived, never stored. */
+  place?: SessionPlace
   source: 'manual' | 'webhook' | 'workflow' | 'stepflow' | 'orchestrator' | 'agent'
   provider?: CodingProvider
   /** Model pinned to the session, if any — the sidebar row names it in its tooltip. */
