@@ -20,7 +20,8 @@ vi.mock('./config.js', () => ({
 }))
 
 import {
-  configureScratchRoot, createScratchDir, describePlace, detectPlace, findWorkTreeRoot, getScratchRoot,
+  configureScratchRoot, createScratchDir, describePlace, detectPlace, ensureOrgFolder, findWorkTreeRoot, getScratchRoot,
+  isValidOwner,
   invalidatePlace, scratchName, validateScratchRoot,
 } from './places.js'
 
@@ -127,6 +128,41 @@ describe('detectPlace', () => {
     expect(detectPlace(dir)).toEqual({ kind: 'scratch', git: false })
     gitRepo(dir)
     expect(detectPlace(dir)).toEqual({ kind: 'scratch', git: true })
+  })
+})
+
+describe('org places', () => {
+  it('a plain folder directly under the repos root is an org', () => {
+    mkdirSync(join(REPOS, 'acme-co'))
+    expect(detectPlace(join(REPOS, 'acme-co'))).toEqual({ kind: 'org', git: false, owner: 'acme-co' })
+  })
+
+  it('a repository or a deeper folder under the repos root is not', () => {
+    gitRepo(join(REPOS, 'flat'))
+    mkdirSync(join(REPOS, 'acme-co', 'notes'), { recursive: true })
+    expect(detectPlace(join(REPOS, 'flat')).kind).toBe('folder')
+    expect(detectPlace(join(REPOS, 'acme-co', 'notes'))).toEqual({ kind: 'folder', git: false })
+    expect(detectPlace(REPOS)).toEqual({ kind: 'folder', git: false })
+  })
+
+  it('validates owner names', () => {
+    for (const ok of ['acme', 'acme-co', 'A1', 'x'.repeat(39)]) expect(isValidOwner(ok)).toBe(true)
+    for (const bad of ['', '-acme', 'acme-', 'ac--me', 'a/b', '..', '.git', 'a.b', 'x'.repeat(40)]) expect(isValidOwner(bad)).toBe(false)
+  })
+
+  it('creates the owner folder on first use and reuses it', () => {
+    const dir = ensureOrgFolder('acme-co')
+    expect(dir).toBe(join(REPOS, 'acme-co'))
+    expect(existsSync(dir)).toBe(true)
+    expect(ensureOrgFolder('acme-co')).toBe(dir)
+  })
+
+  it('refuses an invalid owner, a symlinked owner folder and a file', () => {
+    expect(() => ensureOrgFolder('../x')).toThrow(/Invalid owner/)
+    symlinkSync(OUTSIDE, join(REPOS, 'linked'))
+    expect(() => ensureOrgFolder('linked')).toThrow(/symlink/)
+    writeFileSync(join(REPOS, 'afile'), '')
+    expect(() => ensureOrgFolder('afile')).toThrow(/not a directory/)
   })
 })
 

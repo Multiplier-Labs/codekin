@@ -47,6 +47,8 @@ export interface PersistedSession {
   outputHistory: WsServerMessage[]
   /** Handoff awaiting injection after a carry-context provider switch. */
   pendingHandoff?: import('./handoff-manager.js').Handoff
+  /** Org manifest awaiting injection into the first message. */
+  pendingOrgManifest?: string
 }
 
 export class SessionPersistence {
@@ -87,6 +89,7 @@ export class SessionPersistence {
       wasActive: s.claudeProcess?.isAlive() ?? false,
       outputHistory: s.outputHistory,
       pendingHandoff: s.pendingHandoff,
+      pendingOrgManifest: s.pendingOrgManifest,
     }))
 
     try {
@@ -164,6 +167,7 @@ export class SessionPersistence {
           // history from its own session storage (not just our 4000-char summary).
           claudeSessionId: s.claudeSessionId ?? null,
           pendingHandoff: s.pendingHandoff,
+          pendingOrgManifest: s.pendingOrgManifest,
           restartCount: 0,
           lastRestartAt: null,
           _isStarting: false,

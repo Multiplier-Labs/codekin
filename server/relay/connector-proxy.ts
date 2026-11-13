@@ -80,6 +80,9 @@ export const ALLOWED_MUTATION_PREFIXES = [
   // machine's scratch root). Owner-only: grantees reach only the routes
   // listed in connector-policy's GRANTEE_ROUTES.
   '/api/scratch',
+  // Starting an org session: creates the owner folder under the machine's
+  // repos root on first use. Owner-only, like /api/scratch.
+  '/api/orgs',
   // Triggering, cancelling and configuring automations. `/api/runs` stays out:
   // it is a read model, so widening it here would grant nothing.
   '/api/workflows',

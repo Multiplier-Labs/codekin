@@ -5,7 +5,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 vi.mock('./config.js', () => ({ REPOS_ROOT: '/projects' }))
 // The test paths are fake; treat every folder as a git work tree unless a test says otherwise.
 const isGitWorkTreeMock = vi.hoisted(() => vi.fn((_dir: string) => true))
-vi.mock('./places.js', () => ({ isGitWorkTree: isGitWorkTreeMock }))
+const describePlaceMock = vi.hoisted(() => vi.fn((_dir: string): { kind: string; git: boolean; owner?: string } => ({ kind: 'repo', git: true })))
+vi.mock('./places.js', () => ({ isGitWorkTree: isGitWorkTreeMock, describePlace: describePlaceMock }))
 
 // The orchestrator manager reads DATA_DIR from the (mocked) config at import
 // time, so stub it out — only the two model helpers are used here.
@@ -69,6 +70,7 @@ function createContext(): WsHandlerContext & { sent: WsServerMessage[] } {
   return {
     ws: {} as WsHandlerContext['ws'],
     sessions: {
+      getWorktreeBranchPrefix: vi.fn(() => 'wt/'),
       create: vi.fn().mockReturnValue(session),
       join: vi.fn().mockReturnValue(session),
       leave: vi.fn(),
@@ -209,6 +211,28 @@ describe('handleWsMessage', () => {
       expect(ctx.sessions.create).toHaveBeenCalledWith('Notes', '/projects/notes', expect.objectContaining({ useWorktree: false }))
       expect(ctx.sessions.prepareSessionWorktree).not.toHaveBeenCalled()
       expect(ctx.sent[0]).toMatchObject({ type: 'session_created', sessionId: 'plain-1' })
+    })
+
+    it('gives an org session the org manifest and one worktree per repo, not a session worktree', () => {
+      isGitWorkTreeMock.mockReturnValueOnce(false)
+      describePlaceMock.mockReturnValueOnce({ kind: 'org', git: false, owner: 'acme-co' })
+      const session = mockSession({ id: 'org-1', name: 'Org', workingDir: '/projects/acme-co' })
+      ;(ctx.sessions.create as ReturnType<typeof vi.fn>).mockReturnValue(session)
+      handleWsMessage({
+        type: 'create_session', name: 'Org', workingDir: '/projects/acme-co', useWorktree: true,
+      } as WsClientMessage, ctx)
+      const opts = (ctx.sessions.create as ReturnType<typeof vi.fn>).mock.calls[0][2]
+      expect(opts.useWorktree).toBe(false)
+      expect(opts.orgManifest).toContain('GitHub owner "acme-co"')
+      expect(opts.orgManifest).toContain(`-wt-${opts.id.slice(0, 8)} -b wt/${opts.id.slice(0, 8)}`)
+      expect(ctx.sessions.prepareSessionWorktree).not.toHaveBeenCalled()
+    })
+
+    it('gives other sessions no manifest', () => {
+      const session = mockSession({ id: 'r-1' })
+      ;(ctx.sessions.create as ReturnType<typeof vi.fn>).mockReturnValue(session)
+      handleWsMessage({ type: 'create_session', name: 'R', workingDir: '/projects/app' } as WsClientMessage, ctx)
+      expect((ctx.sessions.create as ReturnType<typeof vi.fn>).mock.calls[0][2].orgManifest).toBeUndefined()
     })
 
     it('creates session, creates worktree async, sends session_created after', async () => {

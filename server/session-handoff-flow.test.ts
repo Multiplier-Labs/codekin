@@ -134,3 +134,25 @@ describe('carry-context provider switch', () => {
     expect(cp.sendMessage.mock.calls[1][0]).toBe('and then?')
   })
 })
+
+describe('org session manifest', () => {
+  it('prefixes the first message with the manifest, once, and names the session from the user text', () => {
+    const sm = new SessionManager()
+    const s = sm.create('hub:org', '/repos/acme-co', { orgManifest: '<codekin-org-session>\nacme-co\n</codekin-org-session>' })
+    expect(s.pendingOrgManifest).toContain('acme-co')
+    const cp = fakeProcess(true)
+    s.claudeProcess = cp
+    s.claudeSessionId = 'live-session'
+
+    sm.sendInput(s.id, 'bump node everywhere')
+
+    const sent = cp.sendMessage.mock.calls[0][0] as string
+    expect(sent.startsWith('<codekin-org-session>')).toBe(true)
+    expect(sent.endsWith('bump node everywhere')).toBe(true)
+    expect(s.pendingOrgManifest).toBeUndefined()
+    expect(s._namingUserInput).toBe('bump node everywhere')
+
+    sm.sendInput(s.id, 'and the lockfiles')
+    expect(cp.sendMessage.mock.calls[1][0]).toBe('and the lockfiles')
+  })
+})

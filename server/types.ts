@@ -209,6 +209,9 @@ export interface Session {
    *  into the first user message under the new provider. Persisted so a server
    *  restart between switch and first message doesn't lose it. */
   pendingHandoff?: Handoff
+  /** Org session: the manifest (see org-manifest.ts) awaiting injection into
+   *  the first user message. Persisted like pendingHandoff. */
+  pendingOrgManifest?: string
   /** Plan mode state machine — owns the enter/review/approve lifecycle. */
   planManager: PlanManager
   /** Unified process lifecycle coordinator — serializes start/stop/restart

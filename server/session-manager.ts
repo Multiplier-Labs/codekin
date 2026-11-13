@@ -125,6 +125,8 @@ export interface CreateSessionOptions {
   addDirs?: string[]
   /** AI provider to use for this session. Defaults to 'claude'. */
   provider?: import('./coding-process.js').CodingProvider
+  /** Org session manifest, injected into the first message (see org-manifest.ts). */
+  orgManifest?: string
 }
 
 
@@ -423,6 +425,7 @@ export class SessionManager {
       permissionMode: options?.permissionMode,
       allowedTools: options?.allowedTools,
       addDirs: options?.addDirs,
+      ...(options?.orgManifest ? { pendingOrgManifest: options.orgManifest } : {}),
       claudeProcess: null,
       clients: new Set(),
       outputHistory: [],
@@ -1123,7 +1126,7 @@ export class SessionManager {
     // first user message or fall back to a short ID-based placeholder.
     let archiveName = session.name
     if (archiveName.startsWith('hub:')) {
-      const firstUserMsg = session._lastUserInput?.slice(0, 60)?.trim()
+      const firstUserMsg = (session._namingUserInput ?? session._lastUserInput)?.slice(0, 60)?.trim()
       archiveName = firstUserMsg || `session-${session.id.slice(0, 8)}`
     }
     try {
@@ -1445,6 +1448,13 @@ export class SessionManager {
     // --- Phase 2: determine message content (with context injection if needed) ---
     let messageToSend = data
 
+    // An org session's first message carries the org manifest (prefixed below).
+    const orgManifest = session.pendingOrgManifest
+    if (orgManifest) {
+      delete session.pendingOrgManifest
+      this.persistToDiskDebounced()
+    }
+
     // A carry-context provider switch left a handoff waiting: inject it into
     // the first message under the new provider (takes precedence over the
     // display-buffer summary — it is built from the real transcript).
@@ -1461,6 +1471,7 @@ export class SessionManager {
         messageToSend = context + '\n\n' + data
       }
     }
+    if (orgManifest) messageToSend = orgManifest + '\n\n' + messageToSend
 
     // Track turn count; retry naming on subsequent interactions if still unnamed
     if (session._turnCount === 0 && session.name.startsWith('hub:')) {
