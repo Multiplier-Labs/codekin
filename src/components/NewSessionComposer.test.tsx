@@ -18,7 +18,7 @@ vi.mock('../lib/ccApi', () => ({
 }))
 
 import { NewSessionComposer } from './NewSessionComposer.js'
-import { NEW_SCRATCH, placeFromPath } from '../lib/places'
+import { NEW_SCRATCH, placeFromOwner, placeFromPath } from '../lib/places'
 
 type Props = ComponentProps<typeof NewSessionComposer>
 
@@ -99,6 +99,18 @@ describe('NewSessionComposer', () => {
     render(props({ place: placeFromPath('/home/sam/site', true, '/home/sam') }))
     expect(text()).toContain('Worktree')
     expect(text()).toContain('Runs in ~/site, on a fresh worktree.')
+  })
+
+  it('offers the worktree control for an org, and org places among the recent chips', () => {
+    const org = { ...placeFromOwner('acme-co'), path: '/home/sam/repos/acme-co' }
+    render(props({ place: placeFromPath('/home/sam/notes', false, '/home/sam'), recent: [org] }))
+    expect(Array.from(container!.querySelectorAll('button')).some(b => b.textContent === 'acme-co')).toBe(true)
+    act(() => { root!.unmount() })
+    root = null
+    container!.remove()
+    render(props({ place: placeFromOwner('acme-co') }))
+    expect(text()).toContain('Worktree')
+    expect(text()).toContain('Works across acme-co')
   })
 
   it('hides the worktree control for a folder inside a repository', () => {

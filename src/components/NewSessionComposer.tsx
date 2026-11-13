@@ -131,9 +131,10 @@ export function NewSessionComposer({
 
   /** Folder paths read as `~/…` once the home directory is known. */
   const labelOf = (p: DraftPlace) => p.kind === 'folder' && p.path ? tildify(p.path, homeDir) : p.label
-  const recentChips = recent.filter(p => !samePlace(p, place) && p.kind !== 'org').slice(0, RECENT_CHIPS)
+  const recentChips = recent.filter(p => !samePlace(p, place)).slice(0, RECENT_CHIPS)
   // Worktrees start from a repository root; a subfolder of one runs in place.
-  const showWorktree = place.git && place.kind !== 'org' && !place.inRepo
+  // For an org the switch means one worktree per repository.
+  const showWorktree = place.kind === 'org' || (place.git && !place.inRepo)
   const hint = progress ?? placeHint(place, useWorktree, { home: homeDir, scratchRoot: scratchDir })
 
   const placeChip = (
@@ -161,6 +162,7 @@ export function NewSessionComposer({
             groups={groups}
             recent={recent}
             current={place}
+            showOrgPlaces
             onPick={pick}
             onClose={() => { closePicker() }}
           />
@@ -300,6 +302,7 @@ export function NewSessionComposer({
               groups={groups}
               recent={recent}
               current={place}
+              showOrgPlaces
               onPick={pick}
               onClose={() => { setPlaceScreenOpen(false) }}
               variant="screen"

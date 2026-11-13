@@ -39,7 +39,7 @@ import { deriveActivityLabel } from './lib/deriveActivityLabel'
 import { emitWorkflowEvent } from './lib/workflowEvents'
 import { setAgentHealth, getAgentHealth, resolveDefaultProvider } from './lib/agentHealth'
 import { useAgentHealth } from './hooks/useAgentHealth'
-import { getQueueMessages, getAgentName, listArchivedSessions, type ArchivedSessionInfo, cloneRepo, createScratch, gitInit, uploadAndBuildMessage } from './lib/ccApi'
+import { getQueueMessages, getAgentName, listArchivedSessions, type ArchivedSessionInfo, cloneRepo, createScratch, gitInit, orgFolder, uploadAndBuildMessage } from './lib/ccApi'
 import { SettingsView } from './components/settings/SettingsView'
 import { LeftSidebar } from './components/LeftSidebar'
 import { MobileTopBar } from './components/MobileTopBar'
@@ -48,7 +48,7 @@ import { CommandPalette } from './components/CommandPalette'
 import type { InputBarHandle } from './components/InputBar'
 import { NewSessionComposer } from './components/NewSessionComposer'
 import { EnvironmentChecklist } from './components/EnvironmentChecklist'
-import { defaultPlace, getRecentPlaces, placeFromSession, rememberPlace, type DraftPlace } from './lib/places'
+import { defaultPlace, getRecentPlaces, isNotRepoPlace, placeFromSession, rememberPlace, type DraftPlace } from './lib/places'
 import { startDraftSession } from './lib/startDraftSession'
 import { useDraftPermissionMode, useDraftState } from './hooks/useDraftState'
 import { DiffPanel } from './components/DiffPanel'
@@ -604,6 +604,7 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
     }, {
       createScratch: () => createScratch(token),
       cloneRepo: (owner, name) => cloneRepo(token, owner, name),
+      orgFolder: (owner) => orgFolder(token, owner),
       uploadAndBuildMessage: (f, t) => uploadAndBuildMessage(token, f, t),
       createSession: (name, workingDir, worktree, mode, provider, explicit, start) => {
         // From here a server error lands in onError, which restores the draft;
@@ -1292,7 +1293,7 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
           sessionId={activeSessionId}
           defaultView={activeSession?.worktreePath ? 'branch' : 'all'}
           isMobile={isMobile}
-          notRepo={activeSession?.place ? !activeSession.place.git : false}
+          notRepo={isNotRepoPlace(activeSession?.place)}
           onInitGit={settings.token && activeSessionId ? async () => {
             await gitInit(settings.token, activeSessionId)
             await refreshSessions()

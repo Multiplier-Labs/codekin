@@ -6,6 +6,7 @@
  * for an active session.
  */
 
+import { isNotRepoPlace } from '../lib/places'
 import type { RefObject } from 'react'
 import { ChatView } from './ChatView'
 import { TodoPanel } from './TodoPanel'
@@ -164,7 +165,7 @@ export function SessionContent({
 
   const { show: showChangesButton, count: changesCount, detail: changesDetail } = changesButtonState(hasFileChanges, changeSummary)
   // Older servers send no place; then nothing changes.
-  const notRepo = place ? !place.git : false
+  const notRepo = isNotRepoPlace(place)
   const placeLabel = placePath
     ? (place?.kind === 'scratch' ? `scratch/${placePath.replace(/\/+$/, '').split('/').pop() ?? ''}` : placePath.replace(/\/+$/, '').split('/').pop() ?? placePath)
     : activeRepoName

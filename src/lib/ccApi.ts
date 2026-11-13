@@ -526,6 +526,19 @@ export async function createScratch(token: string): Promise<string> {
   return (await jsonBody<{ path: string }>(res)).path
 }
 
+/** The folder an org session runs in (`REPOS_ROOT/<owner>`), created on first use. */
+export async function orgFolder(token: string, owner: string): Promise<string> {
+  const res = await transport.authFetch(`/api/orgs/${encodeURIComponent(owner)}/folder`, {
+    method: 'POST',
+    headers: headers(token),
+  })
+  if (!res.ok) {
+    const data = await errorBody(res, `Could not prepare the folder for ${owner}`)
+    throw new Error(data.error ?? `Could not prepare the folder for ${owner}: ${res.status}`)
+  }
+  return (await jsonBody<{ path: string }>(res)).path
+}
+
 /** The configured scratch root (`path`, empty = default) and the one in effect. */
 export async function getScratchRoot(token: string): Promise<{ path: string; effective: string }> {
   const res = await transport.authFetch(`/api/settings/scratch-root`, {

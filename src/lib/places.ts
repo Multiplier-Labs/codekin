@@ -12,7 +12,7 @@ import type { Session, SessionPlace } from '../types'
 import type { ApiRepo } from '../hooks/useRepos'
 import { getPref, setPref } from './prefs'
 
-/** `org` is phase 2 and stays behind `showOrgPlaces`. */
+/** `org`: every repository of a GitHub owner, from `REPOS_ROOT/<owner>`. */
 export type DraftPlaceKind = 'scratch' | 'folder' | 'repo' | 'org'
 
 export interface DraftPlace {
@@ -30,7 +30,7 @@ export interface DraftPlace {
   label: string
   /** GitHub coordinates, for repos listed through gh. */
   repo?: { id: string; owner: string; name: string; cloned: boolean; /** Where it is, or will be, checked out. */ dir?: string }
-  /** Owner, for an org place. */
+  /** GitHub owner, for an org place. */
   owner?: string
 }
 
@@ -91,6 +91,10 @@ export function placeFromSession(session: Pick<Session, 'workingDir' | 'groupDir
   const place: SessionPlace = session.place ?? { kind: 'folder', git: true }
   if (place.kind === 'scratch') return NEW_SCRATCH
   const path = session.groupDir ?? session.workingDir
+  if (place.kind === 'org') {
+    const owner = place.owner ?? baseName(path)
+    return { kind: 'org', path, git: false, label: owner, owner }
+  }
   const draft: DraftPlace = { kind: place.kind, path, git: place.git, label: place.kind === 'repo' ? baseName(path) : tildify(path, home) }
   if (place.inRepo) draft.inRepo = place.inRepo
   return draft
@@ -160,8 +164,11 @@ export function placeHint(place: DraftPlace, useWorktree: boolean, opts: { home?
       const where = scratchRoot ? `${tildify(scratchRoot, home)}/…` : 'a new scratch folder'
       return `Creates ${where} when you send. Git is optional: connect a repo later or never.`
     }
-    case 'org':
-      return `Works across ${place.label} from its owner folder.`
+    case 'org': {
+      const where = place.path ? tildify(place.path, home) : `the repositories folder's ${place.owner ?? place.label}/`
+      const edits = useWorktree ? 'each repo it changes gets its own worktree' : 'it edits the clones in place'
+      return `Works across ${place.owner ?? place.label} from ${where}. The agent clones repos as it needs them (you approve each), and ${edits}.`
+    }
     case 'repo':
       if (!place.path && place.repo) {
         return `Clones ${place.repo.owner}/${place.repo.name} into the repositories folder when you send.`
@@ -179,6 +186,14 @@ function runsIn(place: DraftPlace, useWorktree: boolean, home?: string | null): 
     return `Runs in ${where}, inside ${tildify(place.inRepo, home)}, on the checked-out branch (no worktree in a subfolder).`
   }
   return useWorktree ? `Runs in ${where}, on a fresh worktree.` : `Runs in ${where}, on the checked-out branch.`
+}
+
+/**
+ * True when a running session's folder has no git to review and could be
+ * made a repository. An org folder holds repositories but is never one itself.
+ */
+export function isNotRepoPlace(place: SessionPlace | undefined): boolean {
+  return !!place && !place.git && place.kind !== 'org'
 }
 
 /** Tag shown next to a place in lists and sidebar group headers. */
