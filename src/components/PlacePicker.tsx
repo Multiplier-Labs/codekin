@@ -326,7 +326,8 @@ export function PlacePicker({
         )}
       </div>
 
-      <div className="border-t border-edge px-3 py-1.5 text-micro text-ink-muted">{model.footer}</div>
+      {/* Key hints mean nothing on a touch screen. */}
+      {variant === 'popover' && <div className="border-t border-edge px-3 py-1.5 text-micro text-ink-muted">{model.footer}</div>}
     </div>
   )
 }

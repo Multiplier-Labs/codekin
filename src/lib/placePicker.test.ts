@@ -71,6 +71,11 @@ describe('root view', () => {
     expect(pickerModel(INITIAL_PICKER_STATE, local).sections.map(s => s.title)).toEqual(['Recent', 'Start fresh', 'Repositories'])
   })
 
+  it('leaves a recent scratch folder to Start fresh', () => {
+    const rows = flatRows(pickerModel(INITIAL_PICKER_STATE, data({ recent: [NEW_SCRATCH, placeFromPath(`${HOME}/notes`, false, HOME)] })))
+    expect(rows.filter(r => r.label === 'Scratch folder')).toHaveLength(1)
+  })
+
   it('drops the Recent section with no history', () => {
     expect(pickerModel(INITIAL_PICKER_STATE, data({ recent: [] })).sections[0].title).toBe('Start fresh')
   })

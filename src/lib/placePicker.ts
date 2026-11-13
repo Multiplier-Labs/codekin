@@ -181,6 +181,8 @@ function matches(text: string | undefined, q: string): boolean {
 
 function rootModel(data: PickerData): PickerModel {
   const recent = data.recent
+    // A new scratch folder is always offered under Start fresh.
+    .filter(p => p.kind !== 'scratch')
     .filter(p => data.showOrgPlaces || p.kind !== 'org')
     .map(p => placeRow(p, 'recent', data.home))
   const sections: PickerSection[] = []
