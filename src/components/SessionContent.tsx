@@ -14,7 +14,7 @@ import { TentativeBanner } from './TentativeBanner'
 import { WorktreeRecoveryBanner } from './WorktreeRecoveryBanner'
 import { changesButtonState } from '../lib/changesButton'
 import { InputBar, type InputBarHandle } from './InputBar'
-import { IconEye, IconRobotFace } from '@tabler/icons-react'
+import { IconEye, IconFolder, IconPencil, IconRobotFace } from '@tabler/icons-react'
 import type { JoeChatContext } from './JoeChatMessage'
 import type { SkillGroup } from './SkillMenu'
 import type { SlashCommand } from '../lib/slashCommands'
@@ -41,6 +41,10 @@ export interface SessionContentProps {
   sendPromptResponse: (value: string | string[], requestId?: string) => void
   activeTentativeCount: number
   activeRepoName: string
+  /** Where the session runs (absent from older servers). */
+  place?: import('../types').SessionPlace
+  /** The session's folder, for the place chip. */
+  placePath?: string
   onExecuteTentative: () => void
   onDiscardTentative: () => void
   inputBarRef: RefObject<InputBarHandle | null>
@@ -111,6 +115,8 @@ export function SessionContent({
   sendPromptResponse,
   activeTentativeCount,
   activeRepoName,
+  place,
+  placePath,
   onExecuteTentative,
   onDiscardTentative,
   inputBarRef,
@@ -157,6 +163,11 @@ export function SessionContent({
   const isProviderDisabled = claudeDisabled || isOpenCodeDisconnected || isCodexDisconnected || isGrokDisconnected
 
   const { show: showChangesButton, count: changesCount, detail: changesDetail } = changesButtonState(hasFileChanges, changeSummary)
+  // Older servers send no place; then nothing changes.
+  const notRepo = place ? !place.git : false
+  const placeLabel = placePath
+    ? (place?.kind === 'scratch' ? `scratch/${placePath.replace(/\/+$/, '').split('/').pop() ?? ''}` : placePath.replace(/\/+$/, '').split('/').pop() ?? placePath)
+    : activeRepoName
   return (
     <div className="flex flex-1 flex-col overflow-hidden min-h-0">
       <div className="relative flex-1 min-h-0 flex flex-col">
@@ -227,7 +238,20 @@ export function SessionContent({
         {/* Changes button — top-right corner, visible whenever the session has
             something to review: uncommitted files, commits on its branch, or
             an edit just made in this browser. */}
-        {showChangesButton && !diffPanelOpen && (
+        {/* A folder without git has nothing to review: say where the session
+            runs instead, and open Changes, which offers to make it a repo. */}
+        {notRepo && !diffPanelOpen && (
+          <button
+            className="absolute top-3 right-3 z-10 flex max-w-[60%] items-center gap-1.5 rounded-control border border-edge-strong bg-surface px-2.5 py-1 text-meta text-ink-muted transition-colors hover:text-ink"
+            onClick={onOpenDiffPanel}
+            title={`${placePath ?? 'This folder'} is not a git repository — open Changes to initialize git`}
+          >
+            {place?.kind === 'scratch' ? <IconPencil size={14} stroke={2} className="shrink-0" /> : <IconFolder size={14} stroke={2} className="shrink-0" />}
+            <span className="truncate font-mono">{placeLabel}</span>
+            <span className="shrink-0 text-ink-muted">· no git</span>
+          </button>
+        )}
+        {showChangesButton && !notRepo && !diffPanelOpen && (
           <button
             className="absolute top-3 right-3 z-10 flex items-center gap-1.5 rounded-control bg-primary-8 px-3 py-1.5 text-body font-medium text-on-primary backdrop-blur-sm transition-colors hover:bg-primary-7"
             onClick={onOpenDiffPanel}
@@ -322,12 +346,12 @@ export function SessionContent({
         sessionProvider={sessionProvider}
         onProviderChange={onProviderChange}
         isMobile={isMobile}
-        showWorktreeToggle={!hasUserMessages}
+        showWorktreeToggle={!hasUserMessages && !notRepo}
         useWorktree={useWorktree}
         onWorktreeChange={onWorktreeChange}
         currentPermissionMode={currentPermissionMode}
         onPermissionModeChange={onPermissionModeChange}
-        onMoveToWorktree={moveToWorktree}
+        onMoveToWorktree={notRepo ? undefined : moveToWorktree}
         worktreePath={worktreePath}
         joeName={joe ? joeName : undefined}
         lockedReason={joeControls ? `${joeName} is coordinating this session — take back control to message the agent.` : undefined}

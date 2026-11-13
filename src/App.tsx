@@ -39,7 +39,7 @@ import { deriveActivityLabel } from './lib/deriveActivityLabel'
 import { emitWorkflowEvent } from './lib/workflowEvents'
 import { setAgentHealth, getAgentHealth, resolveDefaultProvider } from './lib/agentHealth'
 import { useAgentHealth } from './hooks/useAgentHealth'
-import { getQueueMessages, getAgentName, listArchivedSessions, type ArchivedSessionInfo, cloneRepo, createScratch, uploadAndBuildMessage } from './lib/ccApi'
+import { getQueueMessages, getAgentName, listArchivedSessions, type ArchivedSessionInfo, cloneRepo, createScratch, gitInit, uploadAndBuildMessage } from './lib/ccApi'
 import { SettingsView } from './components/settings/SettingsView'
 import { LeftSidebar } from './components/LeftSidebar'
 import { MobileTopBar } from './components/MobileTopBar'
@@ -1241,6 +1241,8 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
             sendPromptResponse={sendPromptResponse}
             activeTentativeCount={activeTentativeCount}
             activeRepoName={activeRepo?.name ?? activeWorkingDir?.split('/').pop() ?? 'this repo'}
+            place={activeSession?.place}
+            placePath={activeSession ? activeSession.groupDir ?? activeSession.workingDir : undefined}
             onExecuteTentative={() => handleExecuteTentative(activeSessionId)}
             onDiscardTentative={() => handleDiscardTentative(activeSessionId)}
             inputBarRef={inputBarRef}
@@ -1322,6 +1324,11 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
           sessionId={activeSessionId}
           defaultView={activeSession?.worktreePath ? 'branch' : 'all'}
           isMobile={isMobile}
+          notRepo={activeSession?.place ? !activeSession.place.git : false}
+          onInitGit={settings.token && activeSessionId ? async () => {
+            await gitInit(settings.token, activeSessionId)
+            await refreshSessions()
+          } : undefined}
         />
       )}
 

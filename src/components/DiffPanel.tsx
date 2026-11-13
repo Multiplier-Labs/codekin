@@ -20,7 +20,7 @@ import { PrStatusCard } from './diff/PrStatusCard'
 import { DiffToolbar } from './diff/DiffToolbar'
 import { DiffFileTree } from './diff/DiffFileTree'
 import { DiffFileCard } from './diff/DiffFileCard'
-import { DiffEmpty, DiffError, DiffLoading } from './diff/DiffStates'
+import { DiffEmpty, DiffError, DiffLoading, DiffNotRepo } from './diff/DiffStates'
 import { DiscardConfirm } from './diff/DiscardConfirm'
 import { groupOrder } from './diff/diffFiles'
 import { getPref, setPref } from '../lib/prefs'
@@ -55,13 +55,17 @@ interface DiffPanelProps {
   defaultView: DiffView
   /** Phone/touch: full-screen sheet with a file switcher instead of the pinned list. */
   isMobile?: boolean
+  /** The session's folder is not a git repository: nothing is requested, and git init is offered. */
+  notRepo?: boolean
+  /** Make the session's folder a git repository. */
+  onInitGit?: () => Promise<void>
 }
 
 function matchesFilter(file: DiffFile, query: string): boolean {
   return file.path.toLowerCase().includes(query) || !!file.oldPath?.toLowerCase().includes(query)
 }
 
-export function DiffPanel({ isOpen, onClose, send, onHandleMessage, onHandleToolDone, onHandleTurnDone, sessionId, defaultView, isMobile = false }: DiffPanelProps) {
+export function DiffPanel({ isOpen, onClose, send, onHandleMessage, onHandleToolDone, onHandleTurnDone, sessionId, defaultView, isMobile = false, notRepo = false, onInitGit }: DiffPanelProps) {
   const [width, setWidth] = useState(() => {
     const stored = getPref('diffPanelWidth')
     return stored ? Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, stored)) : DEFAULT_WIDTH
@@ -71,8 +75,9 @@ export function DiffPanel({ isOpen, onClose, send, onHandleMessage, onHandleTool
     return stored ? Math.max(MIN_LIST_HEIGHT, Math.min(MAX_LIST_HEIGHT, stored)) : DEFAULT_LIST_HEIGHT
   })
 
-  const diff = useDiff({ send, isOpen, sessionId, defaultView })
-  const pr = usePrStatus({ send, isOpen, sessionId })
+  // A folder without git has nothing to diff and no PR; don't ask the server.
+  const diff = useDiff({ send, isOpen: isOpen && !notRepo, sessionId, defaultView })
+  const pr = usePrStatus({ send, isOpen: isOpen && !notRepo, sessionId })
   const { handleMessage: diffHandleMessage, handleTurnDone: diffTurnDone, refresh: refreshDiff, changeScope } = diff
   const { handleMessage: prHandleMessage, refresh: refreshPr } = pr
   const review = useReviewComments({ send, isOpen, sessionId })
@@ -371,7 +376,9 @@ export function DiffPanel({ isOpen, onClose, send, onHandleMessage, onHandleTool
   )
 
   let fileArea: React.ReactNode
-  if (diff.error) {
+  if (notRepo) {
+    fileArea = <DiffNotRepo onInitGit={onInitGit} />
+  } else if (diff.error) {
     fileArea = <div className="min-h-0 flex-1 overflow-y-auto"><DiffError message={diff.error} onRetry={diff.refresh} /></div>
   } else if (!hasFiles) {
     fileArea = diff.loading
