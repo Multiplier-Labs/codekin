@@ -314,6 +314,18 @@ describe('SessionPersistence.restoreFromDisk', () => {
     expect(written[0].reviewComments[0]).not.toHaveProperty('stale')
   })
 
+  it('round-trips attached folders and pending place notes', () => {
+    seed([{
+      id: 's1', name: 'A', workingDir: '/some/repo', created: '2026-11-13T00:00:00Z', claudeSessionId: null, outputHistory: [],
+      addDirs: ['/home/u/notes'], pendingPlaceNotes: ['<codekin-place-attached>…</codekin-place-attached>'],
+    }])
+    const sessions = restoreQuietly()
+    expect(sessions.get('s1')!.addDirs).toEqual(['/home/u/notes'])
+    new SessionPersistence(sessions).persistToDisk()
+    const written = JSON.parse(readFileSync(SESSIONS_FILE, 'utf-8'))
+    expect(written[0]).toMatchObject({ addDirs: ['/home/u/notes'], pendingPlaceNotes: ['<codekin-place-attached>…</codekin-place-attached>'] })
+  })
+
   it('handles malformed JSON without throwing', () => {
     writeFileSync(SESSIONS_FILE, 'not json {')
 

@@ -238,6 +238,19 @@ export interface CodexProcessOptions {
   extraEnv?: Record<string, string>
   /** Permission mode — mapped to Codex's approvalPolicy + sandbox. */
   permissionMode?: PermissionMode
+  /** Folders attached to the session: writable beside the working directory in workspace-write mode. */
+  addDirs?: string[]
+}
+
+/**
+ * Config override that makes attached folders writable in workspace-write
+ * mode. Only this key is overridden, so the user's own sandbox settings (such
+ * as network access) stay as configured. Paths are TOML basic strings, which
+ * accept JSON string escapes. Exported for tests.
+ */
+export function writableRootsArgs(dirs: readonly string[]): string[] {
+  if (!dirs.length) return []
+  return ['-c', `sandbox_workspace_write.writable_roots=[${dirs.map(d => JSON.stringify(d)).join(',')}]`]
 }
 
 /** Map Codekin's permission mode to Codex approvalPolicy + sandbox values. */
@@ -272,6 +285,7 @@ export class CodexProcess extends EventEmitter<ClaudeProcessEvents> implements C
   private effort?: string
   private extraEnv: Record<string, string>
   private permissionMode?: PermissionMode
+  private addDirs: string[]
 
   private startupTimer: ReturnType<typeof setTimeout> | null = null
   private killTimer: ReturnType<typeof setTimeout> | null = null
@@ -308,6 +322,7 @@ export class CodexProcess extends EventEmitter<ClaudeProcessEvents> implements C
     this.effort = opts?.effort
     this.extraEnv = opts?.extraEnv || {}
     this.permissionMode = opts?.permissionMode
+    this.addDirs = opts?.addDirs ?? []
   }
 
   /** Spawn `codex app-server` and run the initialize → thread/start handshake. */
@@ -321,7 +336,7 @@ export class CodexProcess extends EventEmitter<ClaudeProcessEvents> implements C
     }
 
     this.alive = true
-    this.proc = spawn(CODEX_BINARY, ['app-server'], {
+    this.proc = spawn(CODEX_BINARY, ['app-server', ...writableRootsArgs(this.addDirs)], {
       cwd: this.workingDir,
       env: buildHarnessEnv(this.extraEnv),
       stdio: ['pipe', 'pipe', 'pipe'],

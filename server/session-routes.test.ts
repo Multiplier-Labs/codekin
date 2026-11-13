@@ -280,6 +280,33 @@ describe('createSessionRouter', () => {
     })
   })
 
+  describe('attached folders', () => {
+    it('attaches through the session manager and maps its errors', async () => {
+      const attachDir = vi.fn((_id: string, p: unknown) => p === 'bad'
+        ? { ok: false, status: 400, error: 'Not a folder' }
+        : { ok: true, attached: [p] })
+      sessions = fakeSessions({ attachDir })
+      server = await startApp(createSessionRouter(verifyToken, extractToken, sessions))
+      const unauth = await fetch(`${server.baseUrl}/api/sessions/s1/attached`, { method: 'POST', body: '{}' })
+      expect(unauth.status).toBe(401)
+      const ok = await fetch(`${server.baseUrl}/api/sessions/s1/attached`, { method: 'POST', headers: auth(), body: JSON.stringify({ path: '/home/u/x' }) })
+      expect(ok.status).toBe(200)
+      expect(await ok.json()).toEqual({ attached: ['/home/u/x'] })
+      expect(attachDir).toHaveBeenCalledWith('s1', '/home/u/x')
+      const bad = await fetch(`${server.baseUrl}/api/sessions/s1/attached`, { method: 'POST', headers: auth(), body: JSON.stringify({ path: 'bad' }) })
+      expect(bad.status).toBe(400)
+    })
+
+    it('detaches by the path in the query', async () => {
+      const detachDir = vi.fn(() => ({ ok: true, attached: [] }))
+      sessions = fakeSessions({ detachDir })
+      server = await startApp(createSessionRouter(verifyToken, extractToken, sessions))
+      const res = await fetch(`${server.baseUrl}/api/sessions/s1/attached?path=${encodeURIComponent('/home/u/x')}`, { method: 'DELETE', headers: auth() })
+      expect(res.status).toBe(200)
+      expect(detachDir).toHaveBeenCalledWith('s1', '/home/u/x')
+    })
+  })
+
   describe('GET /api/browse-dirs', () => {
     beforeEach(async () => {
       sessions = fakeSessions()

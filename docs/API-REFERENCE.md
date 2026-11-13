@@ -278,6 +278,19 @@ Run `git init` in a session's folder. The session keeps running; its `place` bec
 
 **Response:** `{ "place": { "kind": "folder", "git": true } }`; `404` unknown session, `409` already a repository, inside one, or an org folder, `403` folder outside the allowed roots, `500` when `git init` fails.
 
+### `POST /api/sessions/:id/attached`
+
+Attach a folder to a running session, beside the folder it runs in. The session's own place, sidebar group and "always allow" rules don't change. The agent is told about the folder in a note prefixed to the next message. Claude gets it as `--add-dir` and Codex as a writable root; both restart between turns and keep the conversation. Grok and OpenCode reach the folder through their approval prompt. Reads in an attached folder are auto-approved like reads in the session's own folder. To attach a repository that isn't cloned yet, clone it first (`POST /api/clone`). For an org, prepare its folder first (`POST /api/orgs/:owner/folder`).
+
+**Request body:** `{ "path": "/home/user/notes" }`. The path must be an existing folder under the home directory or the repositories root. It can't be the session's folder, or inside or around it, or overlap a folder already attached. A session can have at most 10 attached folders.
+**Response:** `{ "attached": ["/home/user/notes"] }` (realpaths). `400` invalid path, `404` unknown session. Session info lists them as `attached: [{ "path", "place" }]`.
+
+### `DELETE /api/sessions/:id/attached?path=<path>`
+
+Detach a folder (the `path` as the session lists it). The agent is told to stop using it.
+
+**Response:** `{ "attached": [] }`. `404` unknown session or folder not attached.
+
 ### `GET /api/settings/repos-path`
 
 Get the configured repos discovery path (empty string = server default).

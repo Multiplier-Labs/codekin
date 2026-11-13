@@ -125,7 +125,8 @@ export interface Session {
   permissionMode?: PermissionMode
   /** Additional tools to pre-approve via --allowedTools (e.g. 'Bash(curl:*)', 'WebFetch'). */
   allowedTools?: string[]
-  /** Extra directories to grant Claude access to via --add-dir. */
+  /** Folders attached beside the primary place (realpaths; see attached-places.ts).
+   *  Claude gets them as --add-dir, Codex as writable roots. */
   addDirs?: string[]
   /** Number of auto-restarts since last cooldown reset. */
   restartCount: number
@@ -168,12 +169,12 @@ export interface Session {
   /** Timestamp of last user input, used to detect stale retries. */
   _lastUserInputAt?: number
   /**
-   * An effort change arrived while a turn was running on a harness that only
-   * takes effort at spawn time (Claude). `effort` already holds the new level;
-   * the restart that applies it waits for the turn's result instead of
-   * killing the turn.
+   * A config change that needs a restart (effort on Claude, attached folders
+   * on Claude or Codex) arrived while a turn was running. The session already
+   * holds the new config; the restart that applies it waits for the turn's
+   * result instead of killing the turn.
    */
-  _effortRestartPending?: boolean
+  _configRestartPending?: boolean
   /** Transient API error retry state for the current turn. */
   _apiRetry: {
     /** Number of consecutive retries so far. */
@@ -212,6 +213,8 @@ export interface Session {
   /** Org session: the manifest (see org-manifest.ts) awaiting injection into
    *  the first user message. Persisted like pendingHandoff. */
   pendingOrgManifest?: string
+  /** Attach/detach notes awaiting injection into the next user message. Persisted. */
+  pendingPlaceNotes?: string[]
   /** Plan mode state machine — owns the enter/review/approve lifecycle. */
   planManager: PlanManager
   /** Unified process lifecycle coordinator — serializes start/stop/restart
@@ -259,6 +262,8 @@ export interface SessionInfo {
   lastTurnAt?: string
   /** Where the session runs: scratch folder, plain folder, or repository; derived, never stored. */
   place?: SessionPlace
+  /** Folders attached beside the primary place, each with its own place. */
+  attached?: Array<{ path: string; place: SessionPlace }>
   source: 'manual' | 'webhook' | 'workflow' | 'stepflow' | 'orchestrator' | 'agent'
   provider?: CodingProvider
   /** Model pinned to the session, if any — the sidebar row names it in its tooltip. */

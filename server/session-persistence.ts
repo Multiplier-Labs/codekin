@@ -49,6 +49,10 @@ export interface PersistedSession {
   pendingHandoff?: import('./handoff-manager.js').Handoff
   /** Org manifest awaiting injection into the first message. */
   pendingOrgManifest?: string
+  /** Folders attached beside the primary place. */
+  addDirs?: string[]
+  /** Attach/detach notes awaiting injection into the next message. */
+  pendingPlaceNotes?: string[]
 }
 
 export class SessionPersistence {
@@ -90,6 +94,8 @@ export class SessionPersistence {
       outputHistory: s.outputHistory,
       pendingHandoff: s.pendingHandoff,
       pendingOrgManifest: s.pendingOrgManifest,
+      addDirs: s.addDirs,
+      pendingPlaceNotes: s.pendingPlaceNotes,
     }))
 
     try {
@@ -168,6 +174,8 @@ export class SessionPersistence {
           claudeSessionId: s.claudeSessionId ?? null,
           pendingHandoff: s.pendingHandoff,
           pendingOrgManifest: s.pendingOrgManifest,
+          addDirs: s.addDirs,
+          pendingPlaceNotes: s.pendingPlaceNotes,
           restartCount: 0,
           lastRestartAt: null,
           _isStarting: false,

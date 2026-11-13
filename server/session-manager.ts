@@ -45,6 +45,8 @@ import {
 import { ProcessCoordinator } from './process-coordinator.js'
 import { inspectWorktree, prepareWorktree, removeWorktree, type WorktreeResult } from './worktree-ops.js'
 import { describePlace } from './places.js'
+import { buildPlaceNote, describeAttached, validateAttachPath } from './attached-places.js'
+import { takesDirsAtSpawn } from './harness-registry.js'
 import { discardOrgChanges, getOrgChangeSummary, getOrgDiff } from './org-diff.js'
 
 /** Max messages retained in a session's output history buffer. */
@@ -907,6 +909,7 @@ export class SessionManager {
       provider: s.provider,
       model: s.model,
       place: describePlace(s.groupDir ?? s.workingDir),
+      ...(s.addDirs?.length ? { attached: describeAttached(s.addDirs) } : {}),
     }
   }
 
@@ -1472,6 +1475,13 @@ export class SessionManager {
         messageToSend = context + '\n\n' + data
       }
     }
+    // Attach/detach notes since the last message (see attached-places.ts).
+    const placeNotes = session.pendingPlaceNotes
+    if (placeNotes?.length) {
+      delete session.pendingPlaceNotes
+      this.persistToDiskDebounced()
+      messageToSend = placeNotes.join('\n\n') + '\n\n' + messageToSend
+    }
     if (orgManifest) messageToSend = orgManifest + '\n\n' + messageToSend
 
     // Track turn count; retry naming on subsequent interactions if still unnamed
@@ -1607,7 +1617,7 @@ export class SessionManager {
       void session.coordinator.requestReconfigure(() => {
         session.model = newModel
         session.effort = newEffort
-        session._effortRestartPending = false
+        session._configRestartPending = false
         this.persistToDiskDebounced()
       })
     }
@@ -1633,7 +1643,7 @@ export class SessionManager {
       this.persistToDiskDebounced()
     } else if (session.isProcessing) {
       session.effort = newEffort
-      session._effortRestartPending = true
+      session._configRestartPending = true
       this.persistToDiskDebounced()
     } else {
       this.restartForEffort(session, newEffort)
@@ -1641,12 +1651,55 @@ export class SessionManager {
     return true
   }
 
+  /**
+   * Attach a folder beside the session's primary place (attached-places.ts).
+   * Harnesses that take extra folders at spawn restart between turns.
+   */
+  attachDir(sessionId: string, rawPath: unknown): { ok: true; attached: string[] } | { ok: false; status: number; error: string } {
+    const session = this.sessions.get(sessionId)
+    if (!session) return { ok: false, status: 404, error: 'Session not found' }
+    const roots = [session.groupDir ?? session.workingDir, session.workingDir, ...(session.worktreePath ? [session.worktreePath] : [])]
+    const checked = validateAttachPath(rawPath, roots, session.addDirs ?? [])
+    if (!checked.ok) return { ok: false, status: 400, error: checked.error }
+    const note = buildPlaceNote({
+      action: 'attached', path: checked.path, sessionId: session.id,
+      worktrees: session.executionMode === 'isolated', branchPrefix: this.getWorktreeBranchPrefix(),
+    })
+    return { ok: true, attached: this.applyAttached(session, [...(session.addDirs ?? []), checked.path], note, `Attached ${checked.path}`) }
+  }
+
+  /** Detach a folder attached with attachDir(). */
+  detachDir(sessionId: string, rawPath: unknown): { ok: true; attached: string[] } | { ok: false; status: number; error: string } {
+    const session = this.sessions.get(sessionId)
+    if (!session) return { ok: false, status: 404, error: 'Session not found' }
+    if (typeof rawPath !== 'string') return { ok: false, status: 400, error: 'path must be a string' }
+    const dirs = session.addDirs ?? []
+    if (!dirs.includes(rawPath)) return { ok: false, status: 404, error: 'That folder is not attached to this session' }
+    const note = buildPlaceNote({ action: 'detached', path: rawPath, sessionId: session.id, worktrees: false, branchPrefix: '' })
+    return { ok: true, attached: this.applyAttached(session, dirs.filter(d => d !== rawPath), note, `Detached ${rawPath}`) }
+  }
+
+  private applyAttached(session: Session, dirs: string[], note: string, text: string): string[] {
+    session.addDirs = dirs.length ? dirs : undefined
+    session.pendingPlaceNotes = [...(session.pendingPlaceNotes ?? []), note]
+    this.persistToDiskDebounced()
+    this.broadcastAndHistory(session, { type: 'system_message', subtype: 'notification', text })
+    this._globalBroadcast?.({ type: 'sessions_updated' })
+    // Claude and Codex take extra folders at spawn: restart, keeping the
+    // conversation, but never mid-turn (the restart waits for the result).
+    if (takesDirsAtSpawn(session.provider) && session.claudeProcess?.isAlive()) {
+      if (session.isProcessing) session._configRestartPending = true
+      else this.restartForEffort(session, session.effort)
+    }
+    return dirs
+  }
+
   /** Restart the CLI on `effort` (applied between the stop and the start). */
   private restartForEffort(session: Session, effort: string | undefined): void {
-    session._effortRestartPending = false
+    session._configRestartPending = false
     void session.coordinator.requestReconfigure(() => {
       session.effort = effort
-      session._effortRestartPending = false
+      session._configRestartPending = false
       this.persistToDiskDebounced()
     })
   }
@@ -1656,9 +1709,9 @@ export class SessionManager {
    * A process that already exited will pick the level up on its next spawn.
    */
   private applyPendingEffort(session: Session): void {
-    if (!session._effortRestartPending) return
+    if (!session._configRestartPending) return
     if (!session.claudeProcess?.isAlive()) {
-      session._effortRestartPending = false
+      session._configRestartPending = false
       return
     }
     this.restartForEffort(session, session.effort)

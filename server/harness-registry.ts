@@ -190,6 +190,7 @@ const codex: HarnessDefinition = {
       effort: session.effort,
       extraEnv: ctx.extraEnv,
       permissionMode: session.permissionMode,
+      addDirs: session.addDirs,
     })
   },
 }
@@ -234,6 +235,15 @@ const grok: HarnessDefinition = {
 export const HARNESSES: readonly HarnessDefinition[] = [claude, opencode, codex, grok]
 
 /** Resolve a provider to its definition. Claude is the persisted-data fallback. */
+/**
+ * Harnesses told about attached folders at spawn (Claude `--add-dir`, Codex
+ * writable roots), so attaching restarts them. Grok and OpenCode go through
+ * their approval prompt instead.
+ */
+export function takesDirsAtSpawn(provider: CodingProvider | undefined): boolean {
+  return (provider ?? 'claude') === 'claude' || provider === 'codex'
+}
+
 export function getHarness(provider: CodingProvider | undefined): HarnessDefinition {
   return HARNESSES.find((h) => h.id === provider) ?? claude
 }

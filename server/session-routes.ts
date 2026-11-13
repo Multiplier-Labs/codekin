@@ -544,6 +544,25 @@ export function createSessionRouter(
 
   // Turn a session's folder into a git repository. The user's click is the
   // consent (as with cloning); the agent keeps running in the same directory.
+  // Attach a folder beside the session's own (see attached-places.ts). The
+  // client resolves repos (clone) and orgs (org folder) to folders first.
+  router.post('/api/sessions/:id/attached', (req: Request<Record<string, string>, unknown, { path?: unknown }>, res) => {
+    const token = extractToken(req)
+    if (!verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' })
+    const result = sessions.attachDir(req.params.id, req.body?.path)
+    if (!result.ok) return res.status(result.status).json({ error: result.error })
+    res.json({ attached: result.attached })
+  })
+
+  // Detach one; the path is the one the session lists (`?path=`).
+  router.delete('/api/sessions/:id/attached', (req, res) => {
+    const token = extractToken(req)
+    if (!verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' })
+    const result = sessions.detachDir(req.params.id, req.query.path)
+    if (!result.ok) return res.status(result.status).json({ error: result.error })
+    res.json({ attached: result.attached })
+  })
+
   router.post('/api/sessions/:id/git-init', async (req, res) => {
     const token = extractToken(req)
     if (!verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' })

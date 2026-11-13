@@ -3105,7 +3105,7 @@ describe('SessionManager', () => {
       expect(reconfigSpy).toHaveBeenCalledOnce()
       reconfigSpy.mock.calls[0][0]()
       expect(s.effort).toBe('max')
-      expect(s._effortRestartPending).toBe(false)
+      expect(s._configRestartPending).toBe(false)
     })
 
     it('drops a deferred effort restart when the process has already exited', () => {
@@ -3122,7 +3122,7 @@ describe('SessionManager', () => {
       // The next spawn reads session.effort anyway.
       expect(reconfigSpy).not.toHaveBeenCalled()
       expect(s.effort).toBe('high')
-      expect(s._effortRestartPending).toBe(false)
+      expect(s._configRestartPending).toBe(false)
     })
 
     it('is a no-op when the effort is unchanged', () => {
