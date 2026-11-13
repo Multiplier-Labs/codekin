@@ -1,208 +1,32 @@
 /**
- * Sidebar button with a dropdown for creating new sessions.
- *
- * One menu, two steps: pick a repo, then pick a provider. Remote (uncloned)
- * repos are cloned on-demand before the session starts. Dismisses on
- * click-outside or Escape.
- *
- * The popover hangs from the button's right edge and grows leftward. The
- * sidebar can be narrower than the popover (it resizes down to 160px), so
- * on open — and on window resize — it is measured and nudged right just
- * enough to stay inside the viewport.
+ * The sidebar's New button: opens the new-session composer (/new), where the
+ * user types first and picks where the session runs from a chip beside the
+ * prompt. Shown as current while the composer is up.
  */
 
-import { useState, useRef, useEffect, useLayoutEffect } from 'react'
-import { IconPlus, IconChevronLeft } from '@tabler/icons-react'
-import type { Repo, CodingProvider } from '../types'
-import { PROVIDERS } from '../types'
-import type { ApiRepo, RepoGroup } from '../hooks/useRepos'
-import { cloneRepo } from '../lib/ccApi'
-import { providerAvailability } from '../lib/agentHealth'
-import { useAgentHealth } from '../hooks/useAgentHealth'
-import { RepoList } from './RepoList'
-
-/** Minimum gap kept between the popover and the viewport edge. */
-const VIEWPORT_GUTTER = 8
+import { IconPlus } from '@tabler/icons-react'
 
 interface Props {
-  groups: RepoGroup[]
-  token?: string
-  onOpen: (repo: Repo, provider?: CodingProvider) => void
-  /**
-   * Open the new-session composer instead. When set, the button navigates
-   * there and the repo popover is not used.
-   */
-  onNewSession?: () => void
+  onNewSession: () => void
   /** The composer is the current screen (marks the button aria-current). */
   current?: boolean
 }
 
-export function NewSessionButton({ groups, token, onOpen, onNewSession, current = false }: Props) {
-  const health = useAgentHealth()
-  const [open, setOpen] = useState(false)
-  const [cloning, setCloning] = useState<string | null>(null)
-  const [cloneError, setCloneError] = useState<string | null>(null)
-  /** Second step — set once a repo is chosen. */
-  const [pendingRepo, setPendingRepo] = useState<Repo | null>(null)
-  const containerRef = useRef<HTMLDivElement>(null)
-  const popupRef = useRef<HTMLDivElement>(null)
-  /** How far the popover is pushed right so its left edge stays on screen. */
-  const [shiftRight, setShiftRight] = useState(0)
-
-  // Keep the popover inside the viewport. Measured before paint so it never
-  // flashes off-screen; re-measured when the window resizes.
-  useLayoutEffect(() => {
-    if (!open) return
-    function place() {
-      const anchor = containerRef.current
-      const popup = popupRef.current
-      if (!anchor || !popup) return
-      const anchorRight = anchor.getBoundingClientRect().right
-      const overflowLeft = VIEWPORT_GUTTER - (anchorRight - popup.offsetWidth)
-      setShiftRight(Math.max(0, overflowLeft))
-    }
-    place()
-    window.addEventListener('resize', place)
-    return () => { window.removeEventListener('resize', place) }
-  }, [open])
-
-  // Reset to step one whenever the menu closes
-  useEffect(() => {
-    if (!open) {
-      /* eslint-disable react-hooks/set-state-in-effect -- reset transient step state on close */
-      setPendingRepo(null)
-      setCloneError(null)
-      /* eslint-enable react-hooks/set-state-in-effect */
-    }
-  }, [open])
-
-  // Close on Escape or click outside
-  useEffect(() => {
-    if (!open) return
-
-    function handleKeyDown(e: KeyboardEvent) {
-      if (e.key === 'Escape') setOpen(false)
-    }
-    function handleClickOutside(e: MouseEvent) {
-      const target = e.target as Node
-      if (containerRef.current && !containerRef.current.contains(target) &&
-          popupRef.current && !popupRef.current.contains(target)) {
-        setOpen(false)
-      }
-    }
-
-    document.addEventListener('keydown', handleKeyDown)
-    document.addEventListener('mousedown', handleClickOutside)
-    return () => {
-      document.removeEventListener('keydown', handleKeyDown)
-      document.removeEventListener('mousedown', handleClickOutside)
-    }
-  }, [open])
-
-  async function handleSelect(repo: ApiRepo) {
-    if (cloning) return
-    if (!repo.cloned) {
-      setCloning(repo.id)
-      setCloneError(null)
-      try {
-        const path = await cloneRepo(token, repo.owner, repo.name)
-        repo.cloned = true
-        // The server may point at an existing checkout rather than a fresh clone.
-        if (path) { repo.path = path; repo.workingDir = path }
-      } catch (err) {
-        // Say why. A clone can fail for reasons only the machine knows (no
-        // access, disk, relay policy); silently returning to the list reads
-        // as the click not registering.
-        setCloneError(err instanceof Error ? err.message : 'Clone failed')
-        setCloning(null)
-        return
-      }
-      setCloning(null)
-    }
-
-    // Step two — which provider runs in it
-    setPendingRepo(repo)
-  }
-
+export function NewSessionButton({ onNewSession, current = false }: Props) {
   return (
-    <div ref={containerRef} className="relative h-full flex items-center">
+    <div className="relative h-full flex items-center">
       {/* Labelled, not a bare glyph — this is the only new-session affordance
           in the sidebar, so it says what it does. Height comes from --row-h
           so it is a real target on touch rather than a fixed 26px pill. */}
       <button
-        onClick={() => { if (onNewSession) onNewSession(); else setOpen(!open) }}
-        aria-expanded={onNewSession ? undefined : open}
-        aria-current={onNewSession && current ? 'page' : undefined}
-        className={`app-new-session-btn density-row flex items-center gap-1.5 rounded-control bg-surface-raised px-2.5 text-body text-ink transition-colors hover:bg-edge ${open || (onNewSession && current) ? 'bg-edge' : ''}`}
+        onClick={onNewSession}
+        aria-current={current ? 'page' : undefined}
+        className={`app-new-session-btn density-row flex items-center gap-1.5 rounded-control bg-surface-raised px-2.5 text-body text-ink transition-colors hover:bg-edge ${current ? 'bg-edge' : ''}`}
         title="New session"
       >
         <IconPlus size={14} stroke={2.5} className="flex-shrink-0" />
         <span>New</span>
       </button>
-
-      {open && !onNewSession && (
-        <div
-          ref={popupRef}
-          style={{ right: -shiftRight, maxWidth: `calc(100vw - ${2 * VIEWPORT_GUTTER}px)` }}
-          className="absolute top-full z-50 mt-1.5 w-72 rounded-floating border border-edge-strong bg-surface-raised shadow-floating"
-        >
-          {pendingRepo ? (
-            <>
-              <div className="flex items-center gap-1.5 px-3 pt-3 pb-1">
-                <button
-                  onClick={() => setPendingRepo(null)}
-                  className="rounded-control p-0.5 text-ink-muted transition-colors hover:bg-edge hover:text-ink"
-                  title="Back to repositories"
-                >
-                  <IconChevronLeft size={14} stroke={2} />
-                </button>
-                <div className="min-w-0">
-                  <h3 className="truncate text-body font-medium text-ink">{pendingRepo.name}</h3>
-                  <p className="text-body text-ink-faint">Choose a provider</p>
-                </div>
-              </div>
-              <div className="px-2 pb-2">
-                {PROVIDERS.map(p => {
-                  const { available, hint } = providerAvailability(health, p.id)
-                  return (
-                    <button
-                      key={p.id}
-                      disabled={!available}
-                      onClick={() => { setOpen(false); onOpen(pendingRepo, p.id) }}
-                      className={`density-row flex w-full items-center gap-2 rounded-control px-2 text-left text-body transition-colors ${
-                        available ? 'text-ink hover:bg-edge' : 'cursor-not-allowed text-ink-faint'
-                      }`}
-                      title={hint ?? p.description}
-                    >
-                      <span>{p.label}</span>
-                      {hint && <span className="truncate text-meta text-ink-faint">{available ? hint : 'not installed'}</span>}
-                    </button>
-                  )
-                })}
-              </div>
-            </>
-          ) : (
-            <>
-              <div className="px-3 pt-3 pb-1">
-                <h3 className="text-body font-medium text-ink">New session</h3>
-                <p className="mt-0.5 text-body text-ink-faint">Choose a repository to work on</p>
-              </div>
-              <div className="px-2 pb-2">
-                <RepoList
-                  groups={groups}
-                  onSelect={handleSelect}
-                  cloningId={cloning}
-                  maxHeight="240px"
-                  autoFocus
-                />
-                {cloneError && (
-                  <div className="mt-1 rounded-control bg-error-10/50 px-2 py-1.5 text-meta text-error-4">{cloneError}</div>
-                )}
-              </div>
-            </>
-          )}
-        </div>
-      )}
     </div>
   )
 }

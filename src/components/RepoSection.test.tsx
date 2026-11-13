@@ -82,15 +82,15 @@ function props(overrides: Partial<RepoSectionProps> = {}): RepoSectionProps {
 
 describe('RepoSection', () => {
   it('offers "New session" for a repo that is not the active one', () => {
-    const onNewSession = vi.fn()
-    const container = render(<RepoSection {...props({ isActive: false, onNewSession })} />)
+    const onNewSessionHere = vi.fn()
+    const container = render(<RepoSection {...props({ isActive: false, onNewSessionHere })} />)
     // Expand the collapsed section, then the row is present.
     click(container.querySelector<HTMLButtonElement>('button[aria-expanded="false"]')!)
     expect(findButton(container, 'New session')).toBeTruthy()
   })
 
   it('reveals the row by hovering the section, via the shared reveal contract', () => {
-    const container = render(<RepoSection {...props({ onNewSession: vi.fn() })} />)
+    const container = render(<RepoSection {...props({ onNewSessionHere: vi.fn() })} />)
     expect(container.querySelector('.section-reveal')).toBeTruthy()
     expect(findButton(container, 'New session').className).toContain('section-reveal-target')
   })
@@ -98,7 +98,7 @@ describe('RepoSection', () => {
   it('does not hide the row with an unconditional opacity utility', () => {
     // Hiding is gated behind `@media (hover: hover)` in the stylesheet, so a
     // touch device never gets a control it cannot reach.
-    const container = render(<RepoSection {...props({ onNewSession: vi.fn() })} />)
+    const container = render(<RepoSection {...props({ onNewSessionHere: vi.fn() })} />)
     expect(findButton(container, 'New session').className).not.toContain('opacity-0')
   })
 
@@ -183,14 +183,6 @@ describe('RepoSection', () => {
     expect(glyph.parentElement).toBe(container.querySelector('[title$="session"]')!.parentElement)
   })
 
-  it('creates the session with the provider chosen from the menu', () => {
-    const onNewSession = vi.fn()
-    const container = render(<RepoSection {...props({ onNewSession })} />)
-    click(findButton(container, 'New session'))
-    click(findButton(container, 'Claude'))
-    expect(onNewSession).toHaveBeenCalledWith('claude')
-  })
-
   it('ages a row from its last turn, not its creation', () => {
     const old = new Date(Date.now() - 3 * 86_400_000).toISOString()
     const recent = new Date(Date.now() - 5 * 60_000).toISOString()
@@ -229,16 +221,14 @@ describe('RepoSection places', () => {
     expect(c.querySelector('[aria-expanded]')!.textContent).toBe('codekin')
   })
 
-  it('opens the composer for this place instead of a provider menu', () => {
+  it('opens the composer for this place', () => {
     const onNewSessionHere = vi.fn()
-    const onNewSession = vi.fn()
-    const c = render(<RepoSection {...props({ onNewSessionHere, onNewSession })} />)
+    const c = render(<RepoSection {...props({ onNewSessionHere })} />)
     const btn = c.querySelector('[aria-label="New session in codekin"]') as HTMLButtonElement
     expect(btn).not.toBeNull()
     expect(btn.hasAttribute('aria-haspopup')).toBe(false)
     click(btn)
     expect(onNewSessionHere).toHaveBeenCalledTimes(1)
-    expect(onNewSession).not.toHaveBeenCalled()
   })
 
   it('offers only closing sessions on the Scratch group', () => {

@@ -16,12 +16,10 @@ import {
   IconPlus, IconShieldCheck, IconArchive, IconFileText,
   IconRobot, IconSparkles, IconPencil, IconGitBranch, IconRobotFace, IconTrash, IconShare, IconHeartbeat, IconHandStop,
 } from '@tabler/icons-react'
-import type { Session, CodingProvider, PlaceKind } from '../types'
+import type { Session, PlaceKind } from '../types'
 import { placeTag } from '../lib/places'
 import { PROVIDERS } from '../types'
 import { RowMenu, type RowMenuItem } from './RowMenu'
-import { providerAvailability } from '../lib/agentHealth'
-import { useAgentHealth } from '../hooks/useAgentHealth'
 import type { RepoDrawerTab } from './RepoDrawer'
 import { indicatorText, type RepoMaintenance } from '../lib/maintenanceApi'
 import { effectiveOwner } from '../lib/joeApi'
@@ -151,9 +149,7 @@ export interface RepoSectionProps {
   onSelectSession: (id: string) => void
   onDeleteSession: (id: string) => void
   onRenameSession: (id: string, name: string) => void
-  /** Start a session in this repo — the hover-revealed row under its sessions. */
-  onNewSession?: (provider?: CodingProvider) => void
-  /** Open the new-session composer preset to this group's place. Replaces the provider menu when set. */
+  /** Open the new-session composer preset to this group's place — the hover-revealed row under its sessions. */
   onNewSessionHere?: () => void
   onSelectRepo: (workingDir: string) => void
   onDeleteRepo: (workingDir: string) => void
@@ -186,7 +182,6 @@ export function RepoSection({
   onSelectSession,
   onDeleteSession,
   onRenameSession,
-  onNewSession,
   onNewSessionHere,
   onSelectRepo,
   onDeleteRepo,
@@ -199,7 +194,6 @@ export function RepoSection({
   onTakeBack,
   agentName = 'Joe',
 }: RepoSectionProps) {
-  const health = useAgentHealth()
   const [expanded, setExpanded] = useState(true)
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null)
   const [editValue, setEditValue] = useState('')
@@ -407,7 +401,7 @@ export function RepoSection({
           {/* New session in this repo. Revealed by hovering the section, on the
               same terms as a row's overflow menu: visible on touch, while
               focused, and while its own provider menu is open. */}
-          {onNewSessionHere ? (
+          {onNewSessionHere && (
             <button
               type="button"
               onClick={onNewSessionHere}
@@ -419,25 +413,6 @@ export function RepoSection({
               </span>
               <span className="truncate">New session</span>
             </button>
-          ) : onNewSession && (
-            <RowMenu
-              label="New session in this repo"
-              className="section-reveal-target"
-              triggerClassName="density-row flex w-full items-center gap-1.5 rounded-control pl-6 pr-2.5 text-left text-body text-ink-muted transition-colors hover:bg-surface-raised hover:text-ink aria-expanded:bg-surface-raised aria-expanded:text-ink"
-              trigger={
-                <>
-                  <span className="inline-flex w-3 flex-shrink-0 items-center justify-center">
-                    <IconPlus size={12} stroke={2} />
-                  </span>
-                  <span className="truncate">New session</span>
-                </>
-              }
-              items={PROVIDERS.filter(p => providerAvailability(health, p.id).available).map(p => ({
-                label: p.label,
-                title: providerAvailability(health, p.id).hint ?? p.description,
-                onSelect: () => { onNewSession(p.id) },
-              }))}
-            />
           )}
         </div>
       )}

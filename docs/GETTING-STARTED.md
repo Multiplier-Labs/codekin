@@ -41,10 +41,14 @@ Open the URL printed by the installer on the **same computer**. It looks like `h
 
 ## 3. Start your first session
 
-1. On the landing page, check **Environment**. At least one agent should be ready. The GitHub CLI is optional.
-2. Choose a repository. Codekin finds local Git checkouts under `~/repos`, including `~/repos/project` and `~/repos/owner/project`. If your checkouts are elsewhere, set **Repositories Path** below the repository list or in **Settings → Sessions** to the directory containing them. You can also clone a repository into `~/repos` yourself.
-3. If you have installed and signed in to [GitHub CLI](https://cli.github.com/) (`gh auth login`) on the Codekin computer, Codekin can list your GitHub repositories and clone one when you select it.
-4. Use **New** in the sidebar, select the repository, then choose an available provider. Send your first message in the session that opens. Selecting a repository directly can reopen an existing session; for a new session it uses the current default provider.
+1. The landing page asks *What are we working on?*. Under the composer, check **Environment**: at least one agent should be ready. The GitHub CLI is optional.
+2. Type your first message. The chip next to the attach button says where the session will run. On first use it is a **Scratch folder**: an empty folder Codekin creates under `~/codekin/scratch` when you send. You don't need a repository; you can turn the folder into one later or never.
+3. To work somewhere else, click the place chip:
+   - **Choose a folder on this machine…**, or type a path such as `~/Documents/site`. Any folder under your home directory or the repositories root works, whether or not it uses git.
+   - A repository. Codekin finds local Git checkouts under `~/repos`, including `~/repos/project` and `~/repos/owner/project`. If your checkouts are elsewhere, set **Repositories Path** in **Settings → Sessions**. If you have installed and signed in to [GitHub CLI](https://cli.github.com/) (`gh auth login`) on the Codekin computer, your GitHub repositories are listed too, and one that isn't on the computer yet is cloned when you send.
+4. Pick the agent and permission mode with the chips next to the place chip. For a git repository, the **Worktree** control decides whether the session gets its own worktree. Press Enter to start.
+
+**New** in the sidebar always opens this composer. A group's **New session** row opens it preset to that group's folder. Scratch folders are never deleted automatically; change where they go in **Settings → Sessions → Scratch folder location** (or with the `SCRATCH_ROOT` environment variable).
 
 ## Common first-run problems
 

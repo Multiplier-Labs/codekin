@@ -30,7 +30,6 @@ export function SessionPreferences({ token, autoWorktree, onAutoWorktreeChange, 
   const [queueMessages, setQueueMessages] = useState(false)
   const [scratchRoot, setScratchRoot] = useState('')
   const [scratchEffective, setScratchEffective] = useState('')
-  const composer = usePref('newSessionComposer') === true
 
   useEffect(() => {
     if (!token) return
@@ -149,20 +148,6 @@ export function SessionPreferences({ token, autoWorktree, onAutoWorktreeChange, 
 
       <Block title="New sessions">
         <Rows>
-          <Row
-            label="Start from a blank composer (preview)"
-            htmlFor="settings-new-session-composer"
-            description="New opens an empty composer: type first, then choose where the session runs: a scratch folder, any folder, or a repository."
-            control={
-              <input
-                id="settings-new-session-composer"
-                type="checkbox"
-                checked={composer}
-                onChange={e => { setPref('newSessionComposer', e.target.checked) }}
-                className={checkbox}
-              />
-            }
-          />
           <Row
             label="Scratch folder location"
             description={<>Scratch sessions each get a new folder here. They are never deleted automatically. Leave empty for the default{scratchEffective && !scratchRoot ? <> (<code className="font-mono">{scratchEffective}</code>)</> : null}.</>}

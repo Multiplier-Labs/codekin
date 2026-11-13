@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Start a session without a repository.** **New** opens an empty composer, *What are we working on?*: type first, then send. The chip beside the prompt says where the session runs: a new **scratch folder** (the default on first use), **any folder** under your home directory or the repositories root, git or not, or a **repository**, cloned when you send if it isn't on the machine yet. Agent, model, permission mode and worktree sit in the same toolbar; on a phone they fold into one Options sheet. A failed send keeps your draft (#857–#863).
+- Sessions in a folder without git run in place and say so (`no git`). **Changes** offers **Initialize git here**, which makes the folder a repository without restarting the session (#862).
+- The sidebar groups scratch sessions under **Scratch** and tags each group `scratch`, `folder`, `git folder` or `repo`; a group's **New session** opens the composer for that folder (#861).
+- Scratch folders go to `~/codekin/scratch` by default and are never deleted automatically. Change the location in **Settings → Sessions → Scratch folder location** or with `SCRATCH_ROOT` (#857, #860).
 - Reasoning effort for Grok sessions. The effort picker now lists the levels each Grok model advertises (Grok 4.7: low, medium, high, extra high). A change takes effect on the next turn without restarting the session.
 
 ## [0.11.4] - 2026-11-09

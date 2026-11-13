@@ -64,8 +64,6 @@ export interface Prefs {
   notifyTurnFinished: boolean
   /** Places new sessions were started in, newest first (see lib/places). */
   recentPlaces: DraftPlace[]
-  /** New opens the composer-first new-session screen (rollout flag; unset = off). */
-  newSessionComposer: boolean
 }
 
 export type PrefKey = keyof Prefs

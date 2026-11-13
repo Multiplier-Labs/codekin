@@ -72,6 +72,7 @@ Key server environment variables (see `server/config.ts` for the full list):
 | `CORS_ORIGIN` | `http://localhost:5173` | Allowed CORS origin (must be set in production) |
 | `AUTH_TOKEN` | — | Shared auth token for WebSocket and REST API |
 | `REPOS_ROOT` | `~/repos` | Root directory for cloned repositories |
+| `SCRATCH_ROOT` | `~/codekin/scratch` | Where scratch folders for new sessions are created; must be under the home directory or `REPOS_ROOT`. The Settings value wins |
 | `DATA_DIR` | `~/.codekin` | Codekin data directory |
 | `TRUST_PROXY` | `false` | Trust `X-Forwarded-For` headers (set when behind a reverse proxy) |
 | `CODEKIN_AGENT_NAME` | `Joe` | Display name for the orchestrator agent |
