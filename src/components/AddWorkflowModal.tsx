@@ -282,7 +282,7 @@ function StepConfigure({
             </span>
             <p className="text-body text-ink-muted mt-1">
               {form.kind === 'pr-review'
-                ? 'Each PR will be reviewed automatically when opened, updated, or reopened. No schedule needed.'
+                ? "Each PR in this repo is reviewed when it is opened, updated or reopened, with the agent, model and prompt you choose here. Pausing or deleting this automation stops the reviews. No schedule needed."
                 : 'Each commit will be reviewed automatically. No schedule needed.'}
             </p>
           </div>

@@ -33,6 +33,7 @@ import { buildPrompt } from './webhook-prompt.js'
 import { createWorkspace, cleanupWorkspace } from './webhook-workspace.js'
 import { WebhookHandlerBase } from './webhook-handler-base.js'
 import { resolveRepoGroupDir } from './config.js'
+import { resolvePrReviewAutomation, type PrReviewSettings } from './pr-review-automation.js'
 
 /** How long an event can stay in 'processing' before the watchdog marks it as error. */
 const PROCESSING_TIMEOUT_MS = 5 * 60 * 1000
@@ -504,6 +505,16 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
       }
     }
 
+    // --- PR Review automation: does this repo want reviews, and how? ---
+    const decision = resolvePrReviewAutomation(payload.repository.full_name)
+    if (decision.kind === 'skip') {
+      return {
+        statusCode: 200,
+        body: { accepted: false, eventId, status: 'filtered', filterReason: decision.reason },
+      }
+    }
+    const settings = decision.kind === 'review' ? decision.settings : undefined
+
     // --- Deduplication ---
     const headSha = pr.head?.sha ?? ''
     const idempotencyKey = computePrIdempotencyKey(
@@ -558,7 +569,7 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
       try {
         this.signalPublisher({
           kind: 'pr-review',
-          payload: { payload, webhookEvent, sessionId } as unknown as Record<string, unknown>,
+          payload: { payload, webhookEvent, sessionId, settings } as unknown as Record<string, unknown>,
           dedupeKey: `pr-review::${idempotencyKey}`,
           ttlMs: 60 * 60 * 1000,
         })
@@ -568,7 +579,7 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
       }
     }
     if (!queued) {
-      this.processPrReviewAsync(payload, webhookEvent, sessionId).catch(err => {
+      this.processPrReviewAsync(payload, webhookEvent, sessionId, settings).catch(err => {
         console.error('[webhook] PR review async processing error:', err)
         this.updateEventStatus(eventId, 'error', String(err))
       })
@@ -587,10 +598,11 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
    * failure before any session exists) propagates so the queue retries it.
    */
   async processQueuedPrReview(raw: Record<string, unknown>): Promise<void> {
-    const { payload, webhookEvent, sessionId } = raw as unknown as {
+    const { payload, webhookEvent, sessionId, settings } = raw as unknown as {
       payload: PullRequestPayload
       webhookEvent: WebhookEvent
       sessionId: string
+      settings?: PrReviewSettings
     }
     if (!payload || !webhookEvent || !sessionId) {
       // Malformed signal — acking (returning) is correct; retrying can't fix it.
@@ -600,7 +612,7 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
     if (this.sessions.get(sessionId)) return
 
     try {
-      await this.processPrReviewAsync(payload, webhookEvent, sessionId)
+      await this.processPrReviewAsync(payload, webhookEvent, sessionId, settings)
     } catch (err) {
       console.error('[webhook] Queued PR review processing error:', err)
       this.updateEventStatus(webhookEvent.id, 'error', String(err))
@@ -660,6 +672,7 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
     payload: PullRequestPayload,
     event: WebhookEvent,
     sessionId: string,
+    settings?: PrReviewSettings,
   ): Promise<void> {
     const pr = payload.pull_request
     const repo = payload.repository.full_name
@@ -737,9 +750,13 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
       id: sessionId,
       groupDir,
       allowedTools: ['Bash(git:*)', 'Bash(gh:*)'],
+      // The repo's PR Review automation picks the agent and model; without
+      // one (before any automation exists) the defaults apply.
+      ...(settings?.model ? { model: settings.model } : {}),
+      ...(settings?.provider ? { provider: settings.provider } : {}),
     })
 
-    console.log(`[webhook] PR review session created: ${sessionName} (${sessionId})`)
+    console.log(`[webhook] PR review session created: ${sessionName} (${sessionId})${settings ? ` for automation ${settings.automationId}` : ''}`)
     this.updateEventStatus(event.id, 'session_created')
 
     // Broadcast
@@ -747,7 +764,7 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
     if (updatedEvent) this.broadcastWebhookEvent(updatedEvent)
 
     // --- Build and send prompt ---
-    const prompt = buildPrReviewPrompt(prContext, workspacePath)
+    const prompt = buildPrReviewPrompt(prContext, workspacePath, settings?.customPrompt ? { customPrompt: settings.customPrompt } : undefined)
     this.sessions.sendInput(sessionId, prompt)
 
     console.log(`[webhook] PR review prompt sent to session ${sessionId}`)

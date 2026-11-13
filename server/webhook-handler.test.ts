@@ -47,6 +47,10 @@ vi.mock('./webhook-pr-prompt.js', () => ({
   buildPrReviewPrompt: vi.fn(() => 'test pr review prompt'),
 }))
 
+vi.mock('./pr-review-automation.js', () => ({
+  resolvePrReviewAutomation: vi.fn(() => ({ kind: 'legacy' })),
+}))
+
 vi.mock('./webhook-pr-cache.js', () => ({
   loadPrCache: vi.fn(async () => null),
   ensureCacheDir: vi.fn(async () => {}),
@@ -61,6 +65,8 @@ vi.mock('./webhook-workspace.js', () => ({
 
 import { WebhookHandler } from './webhook-handler.js'
 import { createWorkspace } from './webhook-workspace.js'
+import { resolvePrReviewAutomation } from './pr-review-automation.js'
+import { buildPrReviewPrompt } from './webhook-pr-prompt.js'
 import type { FullWebhookConfig } from './webhook-config.js'
 
 const SECRET = 'test-secret-123'
@@ -411,6 +417,56 @@ describe('WebhookHandler', () => {
         sessionId: 's-1',
       })
       expect(sessions.create).not.toHaveBeenCalled()
+    })
+
+    it('filters the PR when the repo has no PR Review automation that wants it', async () => {
+      await handler.checkHealth()
+      const publish = vi.fn()
+      handler.setSignalPublisher(publish)
+      vi.mocked(resolvePrReviewAutomation).mockReturnValueOnce({ kind: 'skip', reason: 'The PR Review automation for acme/widget is paused' })
+
+      const body = makePrBody()
+      const result = await handler.handleWebhook(body, makeHeaders(body, { event: 'pull_request' }))
+
+      expect(resolvePrReviewAutomation).toHaveBeenCalledWith('acme/widget')
+      expect(result.statusCode).toBe(200)
+      expect(result.body).toMatchObject({ accepted: false, status: 'filtered', filterReason: 'The PR Review automation for acme/widget is paused' })
+      expect(publish).not.toHaveBeenCalled()
+    })
+
+    it("carries the automation's agent, model and prompt into the queued review", async () => {
+      await handler.checkHealth()
+      const publish = vi.fn()
+      handler.setSignalPublisher(publish)
+      const settings = { automationId: 'widget-pr-review', model: 'gpt-6', provider: 'codex' as const, customPrompt: 'Focus on SQL.' }
+      vi.mocked(resolvePrReviewAutomation).mockReturnValueOnce({ kind: 'review', settings })
+
+      const body = makePrBody()
+      const result = await handler.handleWebhook(body, makeHeaders(body, { event: 'pull_request' }))
+      expect(result.statusCode).toBe(202)
+      const queued = (publish.mock.calls[0][0] as { payload: Record<string, unknown> }).payload
+      expect(queued.settings).toEqual(settings)
+
+      vi.mocked(sessions.get).mockReturnValue(undefined)
+      await handler.processQueuedPrReview(queued)
+      expect(sessions.create).toHaveBeenCalledWith(
+        expect.stringContaining('PR-7'),
+        '/tmp/workspace',
+        expect.objectContaining({ source: 'webhook', model: 'gpt-6', provider: 'codex' }),
+      )
+      expect(buildPrReviewPrompt).toHaveBeenCalledWith(expect.anything(), '/tmp/workspace', { customPrompt: 'Focus on SQL.' })
+    })
+
+    it('uses the default agent and model without an automation (legacy)', async () => {
+      vi.mocked(sessions.get).mockReturnValue(undefined)
+      await handler.processQueuedPrReview({
+        payload: JSON.parse(makePrBody().toString()),
+        webhookEvent: { id: 'e2' },
+        sessionId: 's-2',
+      })
+      const opts = vi.mocked(sessions.create).mock.calls[0][2] as Record<string, unknown>
+      expect(opts).not.toHaveProperty('model')
+      expect(opts).not.toHaveProperty('provider')
     })
 
     it('processQueuedPrReview drops malformed signals without throwing', async () => {

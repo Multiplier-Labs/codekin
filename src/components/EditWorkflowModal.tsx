@@ -141,7 +141,7 @@ export function EditWorkflowModal({ token, repo, onClose, onSave }: Props) {
                   </span>
                   <p className="text-meta text-ink-muted mt-0.5">
                     {form.kind === 'pr-review'
-                      ? 'Runs automatically when PRs are opened or updated.'
+                      ? 'Runs when PRs are opened or updated, with the agent, model and prompt below. Pause it to stop reviews.'
                       : 'Runs automatically on each commit.'}
                   </p>
                 </div>
