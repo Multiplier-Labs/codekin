@@ -1,5 +1,5 @@
 /**
- * Tests for createWebhookRouter — webhook + stepflow management endpoints.
+ * Tests for createWebhookRouter — webhook management endpoints.
  *
  * Verifies auth on every route, the listing/lookup happy paths, and 404
  * handling when an event id does not exist.  Handlers are stubbed via
@@ -13,7 +13,6 @@ import type { AddressInfo } from 'net'
 import type { Server } from 'http'
 import { createWebhookRouter } from './webhook-routes.js'
 import type { WebhookHandler } from './webhook-handler.js'
-import type { StepflowHandler } from './stepflow-handler.js'
 
 const TOKEN = 'good-token'
 const verifyToken = (t: string | undefined) => t === TOKEN
@@ -56,26 +55,13 @@ function makeWebhookHandler(): WebhookHandler {
   } as unknown as WebhookHandler
 }
 
-function makeStepflowHandler(): StepflowHandler {
-  return {
-    getEvents: vi.fn(() => [
-      { id: 'sf-1', kind: 'pr-build', status: 'queued' },
-    ]),
-    getEvent: vi.fn((id: string) =>
-      id === 'sf-1' ? { id: 'sf-1', kind: 'pr-build', status: 'queued' } : undefined,
-    ),
-  } as unknown as StepflowHandler
-}
-
 describe('createWebhookRouter', () => {
   let server: { baseUrl: string; close: () => Promise<void> }
   let webhookHandler: WebhookHandler
-  let stepflowHandler: StepflowHandler
 
   beforeEach(async () => {
     webhookHandler = makeWebhookHandler()
-    stepflowHandler = makeStepflowHandler()
-    const router = createWebhookRouter(verifyToken, extractToken, webhookHandler, stepflowHandler)
+    const router = createWebhookRouter(verifyToken, extractToken, webhookHandler)
     server = await startApp(router)
   })
 
@@ -145,48 +131,6 @@ describe('createWebhookRouter', () => {
       expect(res.status).toBe(200)
       const body = await res.json()
       expect(body.config).toEqual({ enabled: true, secret: 'redacted' })
-    })
-  })
-
-  // -------------------------------------------------------------------------
-  // /api/stepflow/events
-  // -------------------------------------------------------------------------
-
-  describe('GET /api/stepflow/events', () => {
-    it('returns 401 without auth', async () => {
-      const res = await fetch(`${server.baseUrl}/api/stepflow/events`)
-      expect(res.status).toBe(401)
-    })
-
-    it('returns the list of stepflow events with auth', async () => {
-      const res = await fetch(`${server.baseUrl}/api/stepflow/events`, { headers: auth() })
-      expect(res.status).toBe(200)
-      const body = await res.json()
-      expect(body.events).toHaveLength(1)
-      expect(body.events[0].id).toBe('sf-1')
-    })
-  })
-
-  // -------------------------------------------------------------------------
-  // /api/stepflow/events/:id
-  // -------------------------------------------------------------------------
-
-  describe('GET /api/stepflow/events/:id', () => {
-    it('returns 401 without auth', async () => {
-      const res = await fetch(`${server.baseUrl}/api/stepflow/events/sf-1`)
-      expect(res.status).toBe(401)
-    })
-
-    it('returns the stepflow event for a known id', async () => {
-      const res = await fetch(`${server.baseUrl}/api/stepflow/events/sf-1`, { headers: auth() })
-      expect(res.status).toBe(200)
-      const body = await res.json()
-      expect(body.event.id).toBe('sf-1')
-    })
-
-    it('returns 404 for an unknown stepflow id', async () => {
-      const res = await fetch(`${server.baseUrl}/api/stepflow/events/missing`, { headers: auth() })
-      expect(res.status).toBe(404)
     })
   })
 

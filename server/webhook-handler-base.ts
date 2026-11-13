@@ -1,5 +1,5 @@
 /**
- * Abstract base class for webhook handlers (GitHub, Stepflow, etc.).
+ * Abstract base class for webhook handlers (currently GitHub).
  *
  * Encapsulates the infrastructure that is identical across all webhook-style
  * handlers:
@@ -9,8 +9,8 @@
  *   - Graceful shutdown of the watchdog interval
  *
  * Subclasses provide:
- *   - The concrete event type (WebhookEvent, StepflowEvent, …)
- *   - The concrete status type (WebhookEventStatus, StepflowEventStatus, …)
+ *   - The concrete event type (e.g. WebhookEvent)
+ *   - The concrete status type (e.g. WebhookEventStatus)
  *   - All domain-specific logic (signature verification, async processing, etc.)
  */
 
@@ -33,7 +33,7 @@ export abstract class WebhookHandlerBase<
   private maxEventHistory: number
 
   /**
-   * @param logPrefix    Label used in watchdog console output, e.g. `'webhook'` or `'stepflow'`.
+   * @param logPrefix    Label used in watchdog console output, e.g. `'webhook'`.
    * @param timeoutMs    How long an event may remain in `'processing'` before
    *                     the watchdog marks it as `'error'`.
    * @param maxEventHistory  Maximum number of events stored in the ring buffer.

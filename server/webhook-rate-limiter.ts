@@ -16,16 +16,6 @@ import { jsonParse } from './json-parse.js'
  * ```typescript
  * app.post('/api/webhooks/github', express.raw(...), createWebhookRateLimiter(), ...)
  * ```
- *
- * Example — Stepflow webhook, rate-limited by workflow kind:
- * ```typescript
- * app.post(
- *   '/api/webhooks/stepflow',
- *   express.raw(...),
- *   createWebhookRateLimiter(30, body => (body as any)?.event?.kind),
- *   ...
- * )
- * ```
  */
 export function createWebhookRateLimiter(
   maxPerMinute = 30,

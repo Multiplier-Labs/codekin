@@ -34,7 +34,7 @@ export function redactSecrets(input: string): string {
 /**
  * Verify an HMAC-SHA256 signature over a payload.
  * Comparison uses timingSafeEqual to resist timing oracle attacks.
- * Signature format: `sha256=<hex>` (GitHub/Stepflow convention).
+ * Signature format: `sha256=<hex>` (GitHub convention).
  *
  * Returns false if the signature or expected lengths differ,
  * preventing timing leaks from the comparison itself.

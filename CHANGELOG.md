@@ -17,6 +17,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Keep this work?** Once a scratch session's folder holds something, a callout under the transcript offers **Move to a folder…**, **Make it a git repo** and **Publish to GitHub…**. Moving puts the folder, under the same name, into a folder you choose, and the session continues there. Claude and Codex keep the same conversation; Grok and OpenCode start a new one that gets a summary of the old one with your next message. Publishing commits everything and creates a private or public repository under one of your GitHub accounts or organizations with the machine's `gh` login, then pushes. **Not now** hides it for that session. Scratch folders are still never deleted.
 - Reasoning effort for Grok sessions. The effort picker now lists the levels each Grok model advertises (Grok 4.7: low, medium, high, extra high). A change takes effect on the next turn without restarting the session.
 
+### Removed
+- The Stepflow webhook integration (`POST /api/webhooks/stepflow`, `GET /api/stepflow/events*`, `STEPFLOW_WEBHOOK_*`) and the standalone `workflows/` package. It was off by default and had no UI; scheduled and event-driven automations use the built-in workflow engine and are unaffected. Archived sessions with source `stepflow` still load.
+
 ### Fixed
 - Org sessions follow the repositories folder set in Settings, so they open where the repo list and cloning put that owner's clones, instead of always under `REPOS_ROOT`.
 - The first org session on a machine with no repositories folder yet creates it instead of failing.

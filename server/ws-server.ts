@@ -6,7 +6,6 @@
  * - REST API for session CRUD, health checks, tool approval, and hook endpoints
  * - File upload, repo listing, and clone endpoints (merged from upload-server)
  * - GitHub webhook endpoint for automated CI/CD event handling
- * - Stepflow webhook endpoint for workflow-orchestrated Claude sessions
  * - Token-based authentication (via AUTH_TOKEN env var or --auth-file)
  *
  * Single-process server on PORT (default 32352), behind nginx reverse proxy at /cc.
@@ -28,7 +27,6 @@ import { handleWsMessage } from './ws-message-handler.js'
 import { loadWebhookConfig } from './webhook-config.js'
 import { WebhookHandler } from './webhook-handler.js'
 import { createWebhookRateLimiter } from './webhook-rate-limiter.js'
-import { StepflowHandler, loadStepflowConfig } from './stepflow-handler.js'
 import { initWorkflowEngine, getWorkflowEngine, shutdownWorkflowEngine, type WorkflowEvent } from './workflow-engine.js'
 import { initRepoActivityIndex, shutdownRepoActivityIndex } from './repo-activity.js'
 import { initDeploymentMonitor, shutdownDeploymentMonitor } from './deployment-monitor.js'
@@ -206,22 +204,6 @@ if (webhookConfig.enabled) {
   console.log('[webhook] Webhook processing disabled (GITHUB_WEBHOOK_ENABLED != true)')
 }
 
-// Stepflow webhook handler
-// Receives claude.session.requested events from Stepflow WebhookEventTransport.
-// See stepflow-handler.ts and stepflow-types.ts for integration details.
-const stepflowConfig = loadStepflowConfig()
-const stepflowHandler = new StepflowHandler(stepflowConfig, sessions)
-
-if (stepflowConfig.enabled) {
-  if (!stepflowConfig.secret) {
-    console.error('[stepflow] FATAL: STEPFLOW_WEBHOOK_SECRET not set — refusing to start without webhook secret')
-    process.exit(1)
-  }
-  console.log('[stepflow] Stepflow webhook integration enabled')
-} else {
-  console.log('[stepflow] Stepflow webhook integration disabled (STEPFLOW_WEBHOOK_ENABLED != true)')
-}
-
 // Commit event handler — instantiated after workflow engine init.
 // Wrapped in an object so the router closure captures a live reference.
 const commitEventState: { handler: CommitEventHandler | undefined } = { handler: undefined }
@@ -250,7 +232,7 @@ if (FRONTEND_DIST && existsSync(FRONTEND_DIST)) {
   })
 }
 
-// Both webhook endpoints use raw body for HMAC verification — register BEFORE express.json().
+// The webhook endpoint uses a raw body for HMAC verification — register BEFORE express.json().
 // express.raw() must run before any rate limiter so req.body is a Buffer.
 const githubRateLimiter = createWebhookRateLimiter()
 app.post(
@@ -269,29 +251,6 @@ app.post(
       signature: req.headers['x-hub-signature-256'] as string || '',
     })
 
-    res.status(result.statusCode).json(result.body)
-  },
-)
-
-// Stepflow webhook endpoint.
-// Stepflow signs with X-Webhook-Signature (HMAC-SHA256, format: sha256=<hex>).
-// Rate-limited per workflow kind; no gh CLI health check needed.
-const stepflowRateLimiter = createWebhookRateLimiter(
-  30,
-  (body) => (body as { event?: { kind?: string } } | undefined)?.event?.kind,
-)
-app.post(
-  '/api/webhooks/stepflow',
-  express.raw({ type: 'application/json', limit: '1mb' }),
-  stepflowRateLimiter,
-  async (req, res) => {
-    const rawBody = req.body as Buffer
-    if (!Buffer.isBuffer(rawBody) || rawBody.length === 0) {
-      return res.status(400).json({ error: 'Empty or non-JSON body' })
-    }
-
-    const signature = req.headers['x-webhook-signature'] as string || ''
-    const result = await stepflowHandler.handleWebhook(rawBody, signature)
     res.status(result.statusCode).json(result.body)
   },
 )
@@ -381,7 +340,7 @@ configureScratchRoot(sessions.archive.getSetting('scratch_root', ''))
 // Org folders sit under the same repositories root the repo list and cloning use.
 configureReposPath(sessions.archive.getSetting('repos_path', ''))
 app.use(createSessionRouter(verifyToken, extractToken, sessions, verifyTokenOrSessionToken))
-app.use(createWebhookRouter(verifyToken, extractToken, webhookHandler, stepflowHandler))
+app.use(createWebhookRouter(verifyToken, extractToken, webhookHandler))
 app.use(createWebhookSetupRouter(verifyToken, extractToken, () => loadWebhookConfig()))
 app.use(createUploadRouter(verifyToken, extractToken, () => sessions.archive.getSetting('repos_path', '')))
 app.use(createDocsRouter(verifyToken, extractToken))
@@ -1050,7 +1009,6 @@ async function gracefulShutdown(signal: string): Promise<void> {
   loopStore.close()
   commitEventState.handler?.shutdown()
   webhookHandler.shutdown()
-  stepflowHandler.shutdown()
   await sessions.shutdown()
   stopOpenCodeServer()
   wss.close()
