@@ -20,6 +20,7 @@ import { useSyncExternalStore } from 'react'
 import type { CodingProvider, PermissionMode } from '../types'
 import type { ThemeId } from '../themes/registry'
 import { getPrefs, putPrefs } from './ccApi'
+import type { DraftPlace } from './places'
 
 export interface Prefs {
   theme: ThemeId
@@ -61,6 +62,10 @@ export interface Prefs {
   notifyNeedsInput: boolean
   /** Count finished turns as needing you too (unset = on). */
   notifyTurnFinished: boolean
+  /** Places new sessions were started in, newest first (see lib/places). */
+  recentPlaces: DraftPlace[]
+  /** New opens the composer-first new-session screen (rollout flag; unset = off). */
+  newSessionComposer: boolean
 }
 
 export type PrefKey = keyof Prefs

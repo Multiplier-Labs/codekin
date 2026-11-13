@@ -6,7 +6,7 @@
  * This module stays the single facade components and hooks import from.
  */
 
-import type { Session, WsServerMessage, CodingProvider } from '../types'
+import type { Session, SessionPlace, WsServerMessage, CodingProvider } from '../types'
 import { transport } from './transport'
 import { enableRelayWebhook, fetchRelayWebhook } from './relayWebhook'
 
@@ -486,7 +486,20 @@ export async function setAgentName(token: string, name: string): Promise<string>
 }
 
 /** Browse directories at a given path (for folder picker). */
-export async function browseDirs(token: string, path?: string): Promise<{ path: string; dirs: string[] }> {
+/** One folder listing from /api/browse-dirs. The git fields are absent on older servers. */
+export interface DirListing {
+  path: string
+  dirs: string[]
+  /** Subfolders that are git work trees. */
+  gitDirs?: string[]
+  /** `path` itself is a git work tree. */
+  git?: boolean
+  /** Roots every session folder must sit inside. */
+  roots?: string[]
+  home?: string
+}
+
+export async function browseDirs(token: string, path?: string): Promise<DirListing> {
   const q = path ? `?path=${encodeURIComponent(path)}` : ''
   const res = await transport.authFetch(`/api/browse-dirs${q}`, {
     headers: { Authorization: `Bearer ${token}` },
@@ -495,7 +508,56 @@ export async function browseDirs(token: string, path?: string): Promise<{ path: 
     const data = await errorBody(res, 'Failed to browse directory')
     throw new Error(data.error ?? `Failed to browse: ${res.status}`)
   }
-  return jsonBody<{ path: string; dirs: string[] }>(res)
+  return jsonBody<DirListing>(res)
+}
+
+/** Create a new, empty scratch folder for a session; returns its absolute path. */
+export async function createScratch(token: string): Promise<string> {
+  const res = await transport.authFetch(`/api/scratch`, {
+    method: 'POST',
+    headers: headers(token),
+  })
+  if (!res.ok) {
+    const data = await errorBody(res, 'Could not create a scratch folder')
+    throw new Error(data.error ?? `Could not create a scratch folder: ${res.status}`)
+  }
+  return (await jsonBody<{ path: string }>(res)).path
+}
+
+/** The configured scratch root (`path`, empty = default) and the one in effect. */
+export async function getScratchRoot(token: string): Promise<{ path: string; effective: string }> {
+  const res = await transport.authFetch(`/api/settings/scratch-root`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (!res.ok) throw new Error(`Failed to get scratch folder: ${res.status}`)
+  return jsonBody<{ path: string; effective: string }>(res)
+}
+
+/** Set the scratch root. Empty string resets it to the default. */
+export async function setScratchRoot(token: string, path: string): Promise<{ path: string; effective: string }> {
+  const res = await transport.authFetch(`/api/settings/scratch-root`, {
+    method: 'PUT',
+    headers: headers(token),
+    body: JSON.stringify({ path }),
+  })
+  if (!res.ok) {
+    const data = await errorBody(res, 'Failed to save scratch folder')
+    throw new Error(data.error ?? `Failed to save scratch folder: ${res.status}`)
+  }
+  return jsonBody<{ path: string; effective: string }>(res)
+}
+
+/** Run `git init` in a session's folder; returns the session's new place. */
+export async function gitInit(token: string, sessionId: string): Promise<SessionPlace> {
+  const res = await transport.authFetch(`/api/sessions/${encodeURIComponent(sessionId)}/git-init`, {
+    method: 'POST',
+    headers: headers(token),
+  })
+  if (!res.ok) {
+    const data = await errorBody(res, 'git init failed')
+    throw new Error(data.error ?? `git init failed: ${res.status}`)
+  }
+  return (await jsonBody<{ place: SessionPlace }>(res)).place
 }
 
 let nativeFolderPickerAvailable: Promise<boolean> | null = null

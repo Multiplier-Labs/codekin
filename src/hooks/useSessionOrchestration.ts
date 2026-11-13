@@ -21,7 +21,7 @@ export interface UseSessionOrchestrationParams {
   joinSession: (sessionId: string) => void
   leaveSession: () => void
   clearMessages: () => void
-  wsCreateSession: (name: string, workingDir: string, useWorktree?: boolean, permissionMode?: PermissionMode, provider?: import('../types').CodingProvider) => void
+  wsCreateSession: (name: string, workingDir: string, useWorktree?: boolean, permissionMode?: PermissionMode, provider?: import('../types').CodingProvider, explicit?: import('./useChatSocket').CreateSessionModel) => void
   /** Close a session from the sidebar. Archives it: the process stops and the
    *  session is hidden, but its worktree, branch and transcript are kept. */
   closeSession: (sessionId: string) => Promise<void>

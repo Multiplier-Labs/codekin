@@ -9,7 +9,8 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { IconFolder, IconFolderOpen, IconChevronRight, IconArrowUp, IconX } from '@tabler/icons-react'
-import { browseDirs, getNativeFolderPickerAvailable, pickFolderNative } from '../lib/ccApi'
+import { getNativeFolderPickerAvailable, pickFolderNative } from '../lib/ccApi'
+import { useDirBrowser, childDir } from '../hooks/useDirBrowser'
 
 interface Props {
   value: string
@@ -30,10 +31,13 @@ export function FolderPicker({ value, token, placeholder = '~/repos (default)', 
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [browserOpen, setBrowserOpen] = useState(false)
-  const [browsePath, setBrowsePath] = useState<string | null>(null)
-  const [dirs, setDirs] = useState<string[]>([])
-  const [browseLoading, setBrowseLoading] = useState(false)
-  const [browseError, setBrowseError] = useState<string | null>(null)
+  const browser = useDirBrowser(token)
+  const browsePath = browser.path
+  const dirs = browser.dirs
+  const [nativeLoading, setNativeLoading] = useState(false)
+  const [nativeError, setNativeError] = useState<string | null>(null)
+  const browseLoading = browser.loading || nativeLoading
+  const browseError = nativeError ?? browser.error
   const [nativeAvailable, setNativeAvailable] = useState(false)
   const dropdownRef = useRef<HTMLDivElement>(null)
 
@@ -77,24 +81,14 @@ export function FolderPicker({ value, token, placeholder = '~/repos (default)', 
 
   async function browse(dirPath?: string) {
     if (!token) return
-    setBrowseLoading(true)
-    setBrowseError(null)
-    try {
-      const result = await browseDirs(token, dirPath)
-      setBrowsePath(result.path)
-      setDirs(result.dirs)
-      setBrowserOpen(true)
-    } catch (err) {
-      setBrowseError(err instanceof Error ? err.message : 'Failed to browse directory')
-    } finally {
-      setBrowseLoading(false)
-    }
+    setNativeError(null)
+    if (await browser.open(dirPath)) setBrowserOpen(true)
   }
 
   async function pickNative() {
     if (!token) return
-    setBrowseLoading(true)
-    setBrowseError(null)
+    setNativeLoading(true)
+    setNativeError(null)
     try {
       const picked = await pickFolderNative(token, path || undefined)
       if (picked) {
@@ -103,9 +97,9 @@ export function FolderPicker({ value, token, placeholder = '~/repos (default)', 
         await save(picked)
       }
     } catch (err) {
-      setBrowseError(err instanceof Error ? err.message : 'Failed to open folder dialog')
+      setNativeError(err instanceof Error ? err.message : 'Failed to open folder dialog')
     } finally {
-      setBrowseLoading(false)
+      setNativeLoading(false)
     }
   }
 
@@ -116,14 +110,12 @@ export function FolderPicker({ value, token, placeholder = '~/repos (default)', 
   }
 
   function navigateUp() {
-    if (!browsePath) return
-    const parent = browsePath.replace(/\/[^/]+\/?$/, '') || '/'
-    void browse(parent)
+    void browser.up()
   }
 
   function selectDir(dir: string) {
-    const newPath = browsePath === '/' ? `/${dir}` : `${browsePath}/${dir}`
-    void browse(newPath)
+    if (!browsePath) return
+    void browse(childDir(browsePath, dir))
   }
 
   function pickCurrentDir() {
