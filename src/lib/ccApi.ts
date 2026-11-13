@@ -9,29 +9,20 @@
 import type { Session, SessionPlace, WsServerMessage, CodingProvider } from '../types'
 import { transport } from './transport'
 import { enableRelayWebhook, fetchRelayWebhook } from './relayWebhook'
+import { failure, readJson, request, send, type RequestOptions, type SendOptions } from './request'
 
 /**
- * Type-safe wrapper around Response.json().
- * Centralises the single unavoidable `any` → `T` assertion so call-sites stay clean.
+ * Codekin server call through `transport.authFetch`, so an expired hosting
+ * session (Authelia locally, the control plane when hosted) redirects to
+ * login and rejects with `Error('Session expired')`.
  */
-async function jsonBody<T>(res: Response): Promise<T> {
-  // eslint-disable-next-line @typescript-eslint/no-unsafe-return
-  return await res.json()
+function api<T = unknown>(path: string, opts: RequestOptions): Promise<T> {
+  return request<T>(path, { authFetch: true, ...opts })
 }
 
-/**
- * Extract a JSON error body from a failed response, falling back to a default message.
- */
-async function errorBody(res: Response, fallback: string): Promise<{ error?: string }> {
-  return await jsonBody<{ error?: string }>(res).catch(() => ({ error: fallback }))
-}
-
-/** Build standard JSON + Bearer auth headers for REST calls. */
-function headers(token: string): HeadersInit {
-  return {
-    'Content-Type': 'application/json',
-    Authorization: `Bearer ${token}`,
-  }
+/** Same as {@link api}, returning the raw Response for call sites with their own status handling. */
+function apiSend(path: string, opts: SendOptions): Promise<Response> {
+  return send(path, { authFetch: true, ...opts })
 }
 
 /** Redirect to the hosting environment's login flow when the session has expired. */
@@ -49,70 +40,42 @@ export function checkAuthSession(): Promise<boolean> {
 
 /** Validate an auth token against the server. Returns true if valid. */
 export async function verifyToken(token: string): Promise<boolean> {
-  const res = await transport.authFetch(`/auth-verify`, {
-    method: 'POST',
-    headers: headers(token),
-  })
+  const res = await apiSend(`/auth-verify`, { method: 'POST', token, jsonHeader: true })
   if (!res.ok) return false
-  const data = await jsonBody<{ valid?: boolean }>(res)
+  const data = await readJson<{ valid?: boolean }>(res)
   return data.valid === true
 }
 
 /** Fetch all sessions from the server. */
 export async function listSessions(token: string): Promise<Session[]> {
-  const res = await transport.authFetch(`/api/sessions/list`, {
-    headers: { Authorization: `Bearer ${token}` },
-  })
-  if (!res.ok) throw new Error(`Failed to list sessions: ${res.status}`)
-  const data = await jsonBody<{ sessions?: Session[] }>(res)
+  const data = await api<{ sessions?: Session[] }>(`/api/sessions/list`, { token, error: 'Failed to list sessions' })
   return data.sessions ?? []
 }
 
 /** Rename a session. */
 export async function renameSession(token: string, sessionId: string, name: string): Promise<void> {
-  const res = await transport.authFetch(`/api/sessions/${sessionId}/rename`, {
-    method: 'PATCH',
-    headers: headers(token),
-    body: JSON.stringify({ name }),
-  })
-  if (!res.ok) throw new Error(`Failed to rename session: ${res.status}`)
+  await api(`/api/sessions/${sessionId}/rename`, { method: 'PATCH', token, body: { name }, parse: 'none', error: 'Failed to rename session' })
 }
 
 /** Delete a session by ID. Kills any running Claude process. */
 export async function deleteSession(token: string, sessionId: string): Promise<void> {
-  const res = await transport.authFetch(`/api/sessions/${sessionId}`, {
-    method: 'DELETE',
-    headers: { Authorization: `Bearer ${token}` },
-  })
-  if (!res.ok) throw new Error(`Failed to delete session: ${res.status}`)
+  await api(`/api/sessions/${sessionId}`, { method: 'DELETE', token, parse: 'none', error: 'Failed to delete session' })
 }
 
 /** List archived sessions — resumable, with their worktrees kept. */
 export async function listArchivedLiveSessions(token: string): Promise<Session[]> {
-  const res = await transport.authFetch(`/api/sessions/list?archived=1`, {
-    headers: { Authorization: `Bearer ${token}` },
-  })
-  if (!res.ok) throw new Error(`Failed to list archived sessions: ${res.status}`)
-  const data = await jsonBody<{ sessions?: Session[] }>(res)
+  const data = await api<{ sessions?: Session[] }>(`/api/sessions/list?archived=1`, { token, error: 'Failed to list archived sessions' })
   return data.sessions ?? []
 }
 
 /** Archive a session: stop it and hide it, keeping its worktree and branch. */
 export async function archiveSession(token: string, sessionId: string): Promise<void> {
-  const res = await transport.authFetch(`/api/sessions/${sessionId}/archive`, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${token}` },
-  })
-  if (!res.ok) throw new Error(`Failed to archive session: ${res.status}`)
+  await api(`/api/sessions/${sessionId}/archive`, { method: 'POST', token, parse: 'none', error: 'Failed to archive session' })
 }
 
 /** Return an archived session to the active list. */
 export async function resumeSession(token: string, sessionId: string): Promise<void> {
-  const res = await transport.authFetch(`/api/sessions/${sessionId}/resume`, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${token}` },
-  })
-  if (!res.ok) throw new Error(`Failed to resume session: ${res.status}`)
+  await api(`/api/sessions/${sessionId}/resume`, { method: 'POST', token, parse: 'none', error: 'Failed to resume session' })
 }
 
 /** What removing an archived session's working files would affect. */
@@ -128,54 +91,33 @@ export interface WorktreeRemovalPreflight {
   blockers: string[]
 }
 
-export async function getRemovalPreflight(token: string, sessionId: string): Promise<WorktreeRemovalPreflight> {
-  const res = await transport.authFetch(`/api/sessions/${sessionId}/removal-preflight`, {
-    headers: { Authorization: `Bearer ${token}` },
-  })
-  if (!res.ok) throw new Error(`Failed to check working files: ${res.status}`)
-  return jsonBody<WorktreeRemovalPreflight>(res)
+export function getRemovalPreflight(token: string, sessionId: string): Promise<WorktreeRemovalPreflight> {
+  return api<WorktreeRemovalPreflight>(`/api/sessions/${sessionId}/removal-preflight`, { token, error: 'Failed to check working files' })
 }
 
 /** Remove an archived session's working files. The server re-checks and refuses unsafe removals. */
 export async function removeSessionWorktree(token: string, sessionId: string): Promise<{ removed: boolean; error?: string }> {
-  const res = await transport.authFetch(`/api/sessions/${sessionId}/remove-worktree`, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${token}` },
-  })
+  const res = await apiSend(`/api/sessions/${sessionId}/remove-worktree`, { method: 'POST', token })
   if (res.ok) return { removed: true }
-  const body = await jsonBody<{ error?: string }>(res).catch(() => ({ error: undefined }))
+  const body = await readJson<{ error?: string }>(res).catch(() => ({ error: undefined }))
   return { removed: false, error: body.error ?? `Failed to remove working files: ${res.status}` }
 }
 
 /** Read Joe's saved harness without starting an agent process. */
-export async function getOrchestratorStatus(token: string): Promise<{ provider: CodingProvider | null; agentName?: string }> {
-  const res = await transport.authFetch('/api/orchestrator/status', { headers: headers(token) })
-  if (!res.ok) throw new Error(`Failed to load orchestrator: ${res.status}`)
-  return jsonBody<{ provider: CodingProvider | null; agentName?: string }>(res)
+export function getOrchestratorStatus(token: string): Promise<{ provider: CodingProvider | null; agentName?: string }> {
+  return api('/api/orchestrator/status', { token, jsonHeader: true, error: 'Failed to load orchestrator' })
 }
 
 /** Ensure the orchestrator session is running and return its session ID. */
-export async function startOrchestrator(token: string, provider?: CodingProvider): Promise<{ sessionId: string; status: string; agentName?: string }> {
-  const res = await transport.authFetch(`/api/orchestrator/start`, {
-    method: 'POST',
-    headers: headers(token),
-    body: JSON.stringify(provider ? { provider } : {}),
-  })
-  if (!res.ok) throw new Error(`Failed to start orchestrator: ${res.status}`)
-  return jsonBody<{ sessionId: string; status: string; agentName?: string }>(res)
+export function startOrchestrator(token: string, provider?: CodingProvider): Promise<{ sessionId: string; status: string; agentName?: string }> {
+  return api(`/api/orchestrator/start`, { method: 'POST', token, body: provider ? { provider } : {}, error: 'Failed to start orchestrator' })
 }
 
 /** Upload a file via the server. Returns the server-side file path. */
 export async function uploadFile(token: string, file: File): Promise<string> {
   const form = new FormData()
   form.append('file', file)
-  const res = await transport.authFetch(`/api/upload`, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${token}` },
-    body: form,
-  })
-  if (!res.ok) throw new Error(`Upload failed: ${res.status}`)
-  const data = await jsonBody<{ path: string }>(res)
+  const data = await api<{ path: string }>(`/api/upload`, { method: 'POST', token, rawBody: form, error: 'Upload failed' })
   return data.path
 }
 
@@ -202,13 +144,9 @@ export interface RepoApprovals {
 }
 
 /** Fetch the auto-approval rules for a repo (by workingDir path). */
-export async function getRepoApprovals(token: string, workingDir: string): Promise<RepoApprovals> {
+export function getRepoApprovals(token: string, workingDir: string): Promise<RepoApprovals> {
   const params = new URLSearchParams({ path: workingDir })
-  const res = await transport.authFetch(`/api/approvals?${params}`, {
-    headers: { Authorization: `Bearer ${token}` },
-  })
-  if (!res.ok) throw new Error(`Failed to fetch approvals: ${res.status}`)
-  return jsonBody<RepoApprovals>(res)
+  return api<RepoApprovals>(`/api/approvals?${params}`, { token, error: 'Failed to fetch approvals' })
 }
 
 /** One repo's rules, as returned by the machine-wide listing. */
@@ -223,11 +161,9 @@ export interface RepoApprovalsEntry extends RepoApprovals {
  * hosted relay's frame limit and drops the whole connection.
  */
 export async function getAllRepoApprovals(token: string, workingDirs: string[]): Promise<RepoApprovalsEntry[]> {
-  const res = await transport.authFetch('/api/approvals/all', {
-    headers: { Authorization: `Bearer ${token}` },
-  })
-  if (res.ok) return (await jsonBody<{ repos: RepoApprovalsEntry[] }>(res)).repos
-  if (res.status !== 404) throw new Error(`Failed to fetch approvals: ${res.status}`)
+  const res = await apiSend('/api/approvals/all', { token })
+  if (res.ok) return (await readJson<{ repos: RepoApprovalsEntry[] }>(res)).repos
+  if (res.status !== 404) throw await failure(res, { error: 'Failed to fetch approvals' })
 
   const CONCURRENCY = 4
   const results: RepoApprovalsEntry[] = []
@@ -252,12 +188,7 @@ export async function removeRepoApproval(
   opts: { tool?: string; command?: string },
 ): Promise<void> {
   const params = new URLSearchParams({ path: workingDir })
-  const res = await transport.authFetch(`/api/approvals?${params}`, {
-    method: 'DELETE',
-    headers: headers(token),
-    body: JSON.stringify(opts),
-  })
-  if (!res.ok) throw new Error(`Failed to remove approval: ${res.status}`)
+  await api(`/api/approvals?${params}`, { method: 'DELETE', token, body: opts, parse: 'none', error: 'Failed to remove approval' })
 }
 
 /** Bulk remove multiple auto-approval rules in a single request. */
@@ -267,12 +198,7 @@ export async function bulkRemoveRepoApprovals(
   items: Array<{ tool?: string; command?: string }>,
 ): Promise<void> {
   const params = new URLSearchParams({ path: workingDir })
-  const res = await transport.authFetch(`/api/approvals?${params}`, {
-    method: 'DELETE',
-    headers: headers(token),
-    body: JSON.stringify({ items }),
-  })
-  if (!res.ok) throw new Error(`Failed to bulk remove approvals: ${res.status}`)
+  await api(`/api/approvals?${params}`, { method: 'DELETE', token, body: { items }, parse: 'none', error: 'Failed to bulk remove approvals' })
 }
 
 // ---------------------------------------------------------------------------
@@ -301,99 +227,48 @@ export async function listArchivedSessions(token: string, workingDir?: string): 
   const params = new URLSearchParams()
   if (workingDir) params.set('workingDir', workingDir)
   const qs = params.toString()
-  const res = await transport.authFetch(`/api/sessions/archived${qs ? `?${qs}` : ''}`, {
-    headers: { Authorization: `Bearer ${token}` },
-  })
-  if (!res.ok) throw new Error(`Failed to list archived sessions: ${res.status}`)
-  const data = await jsonBody<{ sessions?: ArchivedSessionInfo[] }>(res)
+  const data = await api<{ sessions?: ArchivedSessionInfo[] }>(`/api/sessions/archived${qs ? `?${qs}` : ''}`, { token, error: 'Failed to list archived sessions' })
   return data.sessions ?? []
 }
 
 /** Fetch a single archived session with full chat history. */
-export async function getArchivedSession(token: string, sessionId: string): Promise<ArchivedSessionFull> {
-  const res = await transport.authFetch(`/api/sessions/archived/${sessionId}`, {
-    headers: { Authorization: `Bearer ${token}` },
-  })
-  if (!res.ok) throw new Error(`Failed to get archived session: ${res.status}`)
-  return jsonBody<ArchivedSessionFull>(res)
+export function getArchivedSession(token: string, sessionId: string): Promise<ArchivedSessionFull> {
+  return api<ArchivedSessionFull>(`/api/sessions/archived/${sessionId}`, { token, error: 'Failed to get archived session' })
 }
 
 /** Delete an archived session permanently. */
 export async function deleteArchivedSession(token: string, sessionId: string): Promise<void> {
-  const res = await transport.authFetch(`/api/sessions/archived/${sessionId}`, {
-    method: 'DELETE',
-    headers: { Authorization: `Bearer ${token}` },
-  })
-  if (!res.ok) throw new Error(`Failed to delete archived session: ${res.status}`)
+  await api(`/api/sessions/archived/${sessionId}`, { method: 'DELETE', token, parse: 'none', error: 'Failed to delete archived session' })
 }
 
 /** Get the session retention period in days. */
 export async function getRetentionDays(token: string): Promise<number> {
-  const res = await transport.authFetch(`/api/settings/retention`, {
-    headers: { Authorization: `Bearer ${token}` },
-  })
-  if (!res.ok) throw new Error(`Failed to get retention settings: ${res.status}`)
-  const data = await jsonBody<{ days: number }>(res)
-  return data.days
+  return (await api<{ days: number }>(`/api/settings/retention`, { token, error: 'Failed to get retention settings' })).days
 }
 
 /** Set the session retention period in days. */
 export async function setRetentionDays(token: string, days: number): Promise<number> {
-  const res = await transport.authFetch(`/api/settings/retention`, {
-    method: 'PUT',
-    headers: headers(token),
-    body: JSON.stringify({ days }),
-  })
-  if (!res.ok) throw new Error(`Failed to update retention settings: ${res.status}`)
-  const data = await jsonBody<{ days: number }>(res)
-  return data.days
+  return (await api<{ days: number }>(`/api/settings/retention`, { method: 'PUT', token, body: { days }, error: 'Failed to update retention settings' })).days
 }
 
 /** Get the configured repos path (empty string means server default). */
 export async function getReposPath(token: string): Promise<string> {
-  const res = await transport.authFetch(`/api/settings/repos-path`, {
-    headers: { Authorization: `Bearer ${token}` },
-  })
-  if (!res.ok) throw new Error(`Failed to get repos path: ${res.status}`)
-  const data = await jsonBody<{ path: string }>(res)
-  return data.path
+  return (await api<{ path: string }>(`/api/settings/repos-path`, { token, error: 'Failed to get repos path' })).path
 }
 
 /** Set the repos path. Empty string resets to server default. */
 export async function setReposPath(token: string, path: string): Promise<string> {
-  const res = await transport.authFetch(`/api/settings/repos-path`, {
-    method: 'PUT',
-    headers: headers(token),
-    body: JSON.stringify({ path }),
-  })
-  if (!res.ok) {
-    const data = await errorBody(res, 'Failed to save repos path')
-    throw new Error(data.error ?? `Failed to set repos path: ${res.status}`)
-  }
-  const data = await jsonBody<{ path: string }>(res)
-  return data.path
+  return (await api<{ path: string }>(`/api/settings/repos-path`, { method: 'PUT', token, body: { path }, serverMessage: ['error'], unreadable: 'Failed to save repos path', error: 'Failed to set repos path' })).path
 }
 
 /** Get the queue messages setting. */
 export async function getQueueMessages(token: string): Promise<boolean> {
-  const res = await transport.authFetch(`/api/settings/queue-messages`, {
-    headers: { Authorization: `Bearer ${token}` },
-  })
-  if (!res.ok) throw new Error(`Failed to get queue messages setting: ${res.status}`)
-  const data = await jsonBody<{ enabled: boolean }>(res)
-  return data.enabled
+  return (await api<{ enabled: boolean }>(`/api/settings/queue-messages`, { token, error: 'Failed to get queue messages setting' })).enabled
 }
 
 /** Set the queue messages setting. */
 export async function setQueueMessages(token: string, enabled: boolean): Promise<boolean> {
-  const res = await transport.authFetch(`/api/settings/queue-messages`, {
-    method: 'PUT',
-    headers: headers(token),
-    body: JSON.stringify({ enabled }),
-  })
-  if (!res.ok) throw new Error(`Failed to update queue messages setting: ${res.status}`)
-  const data = await jsonBody<{ enabled: boolean }>(res)
-  return data.enabled
+  return (await api<{ enabled: boolean }>(`/api/settings/queue-messages`, { method: 'PUT', token, body: { enabled }, error: 'Failed to update queue messages setting' })).enabled
 }
 
 /**
@@ -401,73 +276,35 @@ export async function setQueueMessages(token: string, enabled: boolean): Promise
  * endpoint (404), so the caller can fall back instead of treating it as empty.
  */
 export async function getPrefs(token: string): Promise<Record<string, unknown> | null> {
-  const res = await transport.authFetch(`/api/settings/prefs`, {
-    headers: { Authorization: `Bearer ${token}` },
-  })
+  const res = await apiSend(`/api/settings/prefs`, { token })
   if (res.status === 404) return null
-  if (!res.ok) throw new Error(`Failed to get preferences: ${res.status}`)
-  const data = await jsonBody<{ prefs: Record<string, unknown> }>(res)
-  return data.prefs
+  if (!res.ok) throw await failure(res, { error: 'Failed to get preferences' })
+  return (await readJson<{ prefs: Record<string, unknown> }>(res)).prefs
 }
 
 /** Merge a partial update into the UI preferences; null values remove keys. */
 export async function putPrefs(token: string, patch: Record<string, unknown>): Promise<void> {
-  const res = await transport.authFetch(`/api/settings/prefs`, {
-    method: 'PUT',
-    headers: headers(token),
-    body: JSON.stringify({ patch }),
-  })
-  if (!res.ok) throw new Error(`Failed to save preferences: ${res.status}`)
+  await api(`/api/settings/prefs`, { method: 'PUT', token, body: { patch }, parse: 'none', error: 'Failed to save preferences' })
 }
 
 /** Get the worktree branch prefix setting. */
 export async function getWorktreePrefix(token: string): Promise<string> {
-  const res = await transport.authFetch(`/api/settings/worktree-prefix`, {
-    headers: { Authorization: `Bearer ${token}` },
-  })
-  if (!res.ok) throw new Error(`Failed to get worktree prefix: ${res.status}`)
-  const data = await jsonBody<{ prefix: string }>(res)
-  return data.prefix
+  return (await api<{ prefix: string }>(`/api/settings/worktree-prefix`, { token, error: 'Failed to get worktree prefix' })).prefix
 }
 
 /** Set the worktree branch prefix. */
 export async function setWorktreePrefix(token: string, prefix: string): Promise<string> {
-  const res = await transport.authFetch(`/api/settings/worktree-prefix`, {
-    method: 'PUT',
-    headers: headers(token),
-    body: JSON.stringify({ prefix }),
-  })
-  if (!res.ok) {
-    const data = await errorBody(res, 'Failed to save worktree prefix')
-    throw new Error(data.error ?? `Failed to set worktree prefix: ${res.status}`)
-  }
-  const data = await jsonBody<{ prefix: string }>(res)
-  return data.prefix
+  return (await api<{ prefix: string }>(`/api/settings/worktree-prefix`, { method: 'PUT', token, body: { prefix }, serverMessage: ['error'], unreadable: 'Failed to save worktree prefix', error: 'Failed to set worktree prefix' })).prefix
 }
 
 /** Get the agent display name. */
 export async function getAgentName(token: string): Promise<string> {
-  const res = await transport.authFetch(`/api/settings/agent-name`, {
-    headers: { Authorization: `Bearer ${token}` },
-  })
-  if (!res.ok) throw new Error(`Failed to get agent name: ${res.status}`)
-  const data = await jsonBody<{ name: string }>(res)
-  return data.name
+  return (await api<{ name: string }>(`/api/settings/agent-name`, { token, error: 'Failed to get agent name' })).name
 }
 
 /** Set the agent display name. */
 export async function setAgentName(token: string, name: string): Promise<string> {
-  const res = await transport.authFetch(`/api/settings/agent-name`, {
-    method: 'PUT',
-    headers: headers(token),
-    body: JSON.stringify({ name }),
-  })
-  if (!res.ok) {
-    const data = await errorBody(res, 'Failed to save agent name')
-    throw new Error(data.error ?? `Failed to set agent name: ${res.status}`)
-  }
-  const data = await jsonBody<{ name: string }>(res)
-  return data.name
+  return (await api<{ name: string }>(`/api/settings/agent-name`, { method: 'PUT', token, body: { name }, serverMessage: ['error'], unreadable: 'Failed to save agent name', error: 'Failed to set agent name' })).name
 }
 
 /** Browse directories at a given path (for folder picker). */
@@ -486,135 +323,76 @@ export interface DirListing {
   home?: string
 }
 
-export async function browseDirs(token: string, path?: string): Promise<DirListing> {
+export function browseDirs(token: string, path?: string): Promise<DirListing> {
   const q = path ? `?path=${encodeURIComponent(path)}` : ''
-  const res = await transport.authFetch(`/api/browse-dirs${q}`, {
-    headers: { Authorization: `Bearer ${token}` },
-  })
-  if (!res.ok) {
-    const data = await errorBody(res, 'Failed to browse directory')
-    throw new Error(data.error ?? `Failed to browse: ${res.status}`)
-  }
-  return jsonBody<DirListing>(res)
+  return api<DirListing>(`/api/browse-dirs${q}`, { token, serverMessage: ['error'], unreadable: 'Failed to browse directory', error: 'Failed to browse' })
 }
 
 /** Create a new, empty scratch folder for a session; returns its absolute path. */
 export async function createScratch(token: string): Promise<string> {
-  const res = await transport.authFetch(`/api/scratch`, {
-    method: 'POST',
-    headers: headers(token),
-  })
-  if (!res.ok) {
-    const data = await errorBody(res, 'Could not create a scratch folder')
-    throw new Error(data.error ?? `Could not create a scratch folder: ${res.status}`)
-  }
-  return (await jsonBody<{ path: string }>(res)).path
+  const message = 'Could not create a scratch folder'
+  return (await api<{ path: string }>(`/api/scratch`, { method: 'POST', token, jsonHeader: true, serverMessage: ['error'], unreadable: message, error: message })).path
 }
 
 /** The folder an org session runs in (`<repos root>/<owner>`), created on first use. */
 export async function orgFolder(token: string, owner: string): Promise<string> {
-  const res = await transport.authFetch(`/api/orgs/${encodeURIComponent(owner)}/folder`, {
-    method: 'POST',
-    headers: headers(token),
-  })
-  if (!res.ok) {
-    const data = await errorBody(res, `Could not prepare the folder for ${owner}`)
-    throw new Error(data.error ?? `Could not prepare the folder for ${owner}: ${res.status}`)
-  }
-  return (await jsonBody<{ path: string }>(res)).path
+  const message = `Could not prepare the folder for ${owner}`
+  return (await api<{ path: string }>(`/api/orgs/${encodeURIComponent(owner)}/folder`, {
+    method: 'POST', token, jsonHeader: true, serverMessage: ['error'], unreadable: message, error: message,
+  })).path
 }
 
 /** The configured scratch root (`path`, empty = default) and the one in effect. */
-export async function getScratchRoot(token: string): Promise<{ path: string; effective: string }> {
-  const res = await transport.authFetch(`/api/settings/scratch-root`, {
-    headers: { Authorization: `Bearer ${token}` },
-  })
-  if (!res.ok) throw new Error(`Failed to get scratch folder: ${res.status}`)
-  return jsonBody<{ path: string; effective: string }>(res)
+export function getScratchRoot(token: string): Promise<{ path: string; effective: string }> {
+  return api(`/api/settings/scratch-root`, { token, error: 'Failed to get scratch folder' })
 }
 
 /** Set the scratch root. Empty string resets it to the default. */
-export async function setScratchRoot(token: string, path: string): Promise<{ path: string; effective: string }> {
-  const res = await transport.authFetch(`/api/settings/scratch-root`, {
-    method: 'PUT',
-    headers: headers(token),
-    body: JSON.stringify({ path }),
-  })
-  if (!res.ok) {
-    const data = await errorBody(res, 'Failed to save scratch folder')
-    throw new Error(data.error ?? `Failed to save scratch folder: ${res.status}`)
-  }
-  return jsonBody<{ path: string; effective: string }>(res)
+export function setScratchRoot(token: string, path: string): Promise<{ path: string; effective: string }> {
+  const message = 'Failed to save scratch folder'
+  return api(`/api/settings/scratch-root`, { method: 'PUT', token, body: { path }, serverMessage: ['error'], unreadable: message, error: message })
 }
 
 /** Attach a folder to a running session; returns the attached folders (realpaths). */
 export async function attachFolder(token: string, sessionId: string, path: string): Promise<string[]> {
-  const res = await transport.authFetch(`/api/sessions/${encodeURIComponent(sessionId)}/attached`, {
-    method: 'POST',
-    headers: headers(token),
-    body: JSON.stringify({ path }),
-  })
-  if (!res.ok) {
-    const data = await errorBody(res, 'Could not attach the folder')
-    throw new Error(data.error ?? `Could not attach the folder: ${res.status}`)
-  }
-  return (await jsonBody<{ attached: string[] }>(res)).attached
+  const message = 'Could not attach the folder'
+  return (await api<{ attached: string[] }>(`/api/sessions/${encodeURIComponent(sessionId)}/attached`, {
+    method: 'POST', token, body: { path }, serverMessage: ['error'], unreadable: message, error: message,
+  })).attached
 }
 
 /** Detach a folder attached with attachFolder(). */
 export async function detachFolder(token: string, sessionId: string, path: string): Promise<string[]> {
-  const res = await transport.authFetch(`/api/sessions/${encodeURIComponent(sessionId)}/attached?path=${encodeURIComponent(path)}`, {
-    method: 'DELETE',
-    headers: headers(token),
-  })
-  if (!res.ok) {
-    const data = await errorBody(res, 'Could not detach the folder')
-    throw new Error(data.error ?? `Could not detach the folder: ${res.status}`)
-  }
-  return (await jsonBody<{ attached: string[] }>(res)).attached
+  const message = 'Could not detach the folder'
+  return (await api<{ attached: string[] }>(`/api/sessions/${encodeURIComponent(sessionId)}/attached?path=${encodeURIComponent(path)}`, {
+    method: 'DELETE', token, jsonHeader: true, serverMessage: ['error'], unreadable: message, error: message,
+  })).attached
 }
 
 /** Move a scratch session's folder into `parent`; returns the new path. */
-export async function moveSessionFolder(token: string, sessionId: string, parent: string): Promise<{ path: string; place: SessionPlace }> {
-  const res = await transport.authFetch(`/api/sessions/${encodeURIComponent(sessionId)}/move`, {
-    method: 'POST',
-    headers: headers(token),
-    body: JSON.stringify({ parent }),
+export function moveSessionFolder(token: string, sessionId: string, parent: string): Promise<{ path: string; place: SessionPlace }> {
+  const message = 'Could not move the folder'
+  return api(`/api/sessions/${encodeURIComponent(sessionId)}/move`, {
+    method: 'POST', token, body: { parent }, serverMessage: ['error'], unreadable: message, error: message,
   })
-  if (!res.ok) {
-    const data = await errorBody(res, 'Could not move the folder')
-    throw new Error(data.error ?? `Could not move the folder: ${res.status}`)
-  }
-  return jsonBody<{ path: string; place: SessionPlace }>(res)
 }
 
 /** Publish a session's folder to GitHub (commit everything, gh repo create --push). */
-export async function publishToGitHub(
+export function publishToGitHub(
   token: string, sessionId: string, choice: { owner: string; name: string; visibility: 'private' | 'public' },
 ): Promise<{ url: string; place: SessionPlace }> {
-  const res = await transport.authFetch(`/api/sessions/${encodeURIComponent(sessionId)}/publish`, {
-    method: 'POST',
-    headers: headers(token),
-    body: JSON.stringify(choice),
+  const message = 'Publishing failed'
+  return api(`/api/sessions/${encodeURIComponent(sessionId)}/publish`, {
+    method: 'POST', token, body: choice, serverMessage: ['error'], unreadable: message, error: message,
   })
-  if (!res.ok) {
-    const data = await errorBody(res, 'Publishing failed')
-    throw new Error(data.error ?? `Publishing failed: ${res.status}`)
-  }
-  return jsonBody<{ url: string; place: SessionPlace }>(res)
 }
 
 /** Run `git init` in a session's folder; returns the session's new place. */
 export async function gitInit(token: string, sessionId: string): Promise<SessionPlace> {
-  const res = await transport.authFetch(`/api/sessions/${encodeURIComponent(sessionId)}/git-init`, {
-    method: 'POST',
-    headers: headers(token),
-  })
-  if (!res.ok) {
-    const data = await errorBody(res, 'git init failed')
-    throw new Error(data.error ?? `git init failed: ${res.status}`)
-  }
-  return (await jsonBody<{ place: SessionPlace }>(res)).place
+  const message = 'git init failed'
+  return (await api<{ place: SessionPlace }>(`/api/sessions/${encodeURIComponent(sessionId)}/git-init`, {
+    method: 'POST', token, jsonHeader: true, serverMessage: ['error'], unreadable: message, error: message,
+  })).place
 }
 
 let nativeFolderPickerAvailable: Promise<boolean> | null = null
@@ -625,13 +403,11 @@ let nativeFolderPickerAvailable: Promise<boolean> | null = null
  * failure — the hosted relay, an older server — counts as unavailable.
  */
 export function getNativeFolderPickerAvailable(token: string): Promise<boolean> {
-  nativeFolderPickerAvailable ??= transport.authFetch(`/api/native/folder-picker`, {
-    headers: { Authorization: `Bearer ${token}` },
-  })
+  nativeFolderPickerAvailable ??= apiSend(`/api/native/folder-picker`, { token })
     .then(async res => {
       // A stale token is not an answer — ask again next time.
       if (res.status === 401) nativeFolderPickerAvailable = null
-      return res.ok && (await jsonBody<{ available?: boolean }>(res)).available === true
+      return res.ok && (await readJson<{ available?: boolean }>(res)).available === true
     })
     .catch(() => {
       nativeFolderPickerAvailable = null
@@ -642,16 +418,10 @@ export function getNativeFolderPickerAvailable(token: string): Promise<boolean> 
 
 /** Open the native macOS folder dialog; resolves with the chosen path, or null if cancelled. */
 export async function pickFolderNative(token: string, defaultPath?: string): Promise<string | null> {
-  const res = await transport.authFetch(`/api/native/pick-folder`, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify(defaultPath ? { defaultPath } : {}),
+  const message = 'Failed to open folder dialog'
+  const data = await api<{ path?: string; cancelled?: boolean }>(`/api/native/pick-folder`, {
+    method: 'POST', token, body: defaultPath ? { defaultPath } : {}, serverMessage: ['error'], unreadable: message, error: message,
   })
-  if (!res.ok) {
-    const data = await errorBody(res, 'Failed to open folder dialog')
-    throw new Error(data.error ?? `Failed to open folder dialog: ${res.status}`)
-  }
-  const data = await jsonBody<{ path?: string; cancelled?: boolean }>(res)
   return data.path ?? null
 }
 
@@ -664,22 +434,13 @@ export interface WebhookConfigInfo {
 
 /** Fetch the webhook configuration from the server. */
 export async function getWebhookConfig(token: string): Promise<WebhookConfigInfo> {
-  const res = await transport.authFetch(`/api/webhooks/config`, {
-    headers: { Authorization: `Bearer ${token}` },
-  })
-  if (!res.ok) throw new Error(`Failed to get webhook config: ${res.status}`)
-  const data = await jsonBody<{ config: WebhookConfigInfo }>(res)
-  return data.config
+  return (await api<{ config: WebhookConfigInfo }>(`/api/webhooks/config`, { token, error: 'Failed to get webhook config' })).config
 }
 
 /** Fetch recent webhook events. */
 export async function getWebhookEvents(token: string): Promise<Array<{ id: string; repo: string; branch: string; workflow: string; conclusion: string; status: string; receivedAt: string }>> {
-  const res = await transport.authFetch(`/api/webhooks/events`, {
-    headers: { Authorization: `Bearer ${token}` },
-  })
-  if (!res.ok) throw new Error(`Failed to get webhook events: ${res.status}`)
   type Event = { id: string; repo: string; branch: string; workflow: string; conclusion: string; status: string; receivedAt: string }
-  const data = await jsonBody<{ events?: Event[] }>(res)
+  const data = await api<{ events?: Event[] }>(`/api/webhooks/events`, { token, error: 'Failed to get webhook events' })
   return data.events ?? []
 }
 
@@ -736,29 +497,21 @@ export async function resolveWebhookEndpointUrl(): Promise<string> {
  * error message on failure.
  */
 export async function cloneRepo(token: string | undefined, owner: string, name: string): Promise<string | null> {
-  const cloneHeaders: Record<string, string> = { 'Content-Type': 'application/json' }
-  if (token) cloneHeaders['Authorization'] = `Bearer ${token}`
-  const res = await transport.fetch('/api/clone', {
-    method: 'POST',
-    headers: cloneHeaders,
-    body: JSON.stringify({ owner, name }),
-  })
+  const res = await send('/api/clone', { method: 'POST', token, body: { owner, name } })
   if (!res.ok) {
-    const data = await jsonBody<{ error?: string }>(res)
+    const data = await readJson<{ error?: string }>(res)
     throw new Error(data.error || 'Clone failed')
   }
-  const data = await jsonBody<{ path?: unknown }>(res).catch(() => ({ path: undefined }))
+  const data = await readJson<{ path?: unknown }>(res).catch(() => ({ path: undefined }))
   return typeof data.path === 'string' && data.path ? data.path : null
 }
 
 /** Fetch orchestrator dashboard stats. Returns null on any failure — stats are optional. */
 export async function getOrchestratorDashboard<T>(token: string): Promise<T | null> {
   try {
-    const res = await transport.fetch('/api/orchestrator/dashboard', {
-      headers: { Authorization: `Bearer ${token}` },
-    })
+    const res = await send('/api/orchestrator/dashboard', { token })
     if (!res.ok) return null
-    const data = await jsonBody<{ stats: T }>(res)
+    const data = await readJson<{ stats: T }>(res)
     return data.stats
   } catch {
     return null
@@ -774,14 +527,9 @@ export async function fetchOpenCodeModels(
   defaults: Record<string, string>
 }> {
   const params = workingDir ? `?workingDir=${encodeURIComponent(workingDir)}` : ''
-  const res = await transport.fetch(`/api/opencode/models${params}`, {
-    headers: { Authorization: `Bearer ${token}` },
-  })
+  const res = await send(`/api/opencode/models${params}`, { token })
   if (!res.ok) return { models: [], defaults: {} }
-  return jsonBody<{
-    models: Array<{ id: string; name: string; providerID: string; providerName: string }>
-    defaults: Record<string, string>
-  }>(res)
+  return readJson(res)
 }
 
 /** Fetch available models from the Codex CLI (via short-lived app-server). */
@@ -790,13 +538,9 @@ export async function fetchCodexModels(
 ): Promise<{
   models: Array<{ id: string; name: string; description?: string; isDefault?: boolean; efforts?: { id: string; description?: string }[]; defaultEffort?: string }>
 }> {
-  const res = await transport.fetch(`/api/codex/models`, {
-    headers: { Authorization: `Bearer ${token}` },
-  })
+  const res = await send(`/api/codex/models`, { token })
   if (!res.ok) return { models: [] }
-  return jsonBody<{
-    models: Array<{ id: string; name: string; description?: string; isDefault?: boolean }>
-  }>(res)
+  return readJson(res)
 }
 
 /** A model from /api/grok/models (also carries per-model reasoning efforts). */
@@ -813,11 +557,9 @@ export interface GrokModelEntry {
 export async function fetchGrokModels(
   token: string,
 ): Promise<{ models: GrokModelEntry[] }> {
-  const res = await transport.fetch(`/api/grok/models`, {
-    headers: { Authorization: `Bearer ${token}` },
-  })
+  const res = await send(`/api/grok/models`, { token })
   if (!res.ok) return { models: [] }
-  return jsonBody<{ models: GrokModelEntry[] }>(res)
+  return readJson<{ models: GrokModelEntry[] }>(res)
 }
 
 /** Fetch the OpenCode command list (slash commands / skills / MCP prompts). */
@@ -826,11 +568,9 @@ export async function fetchOpenCodeCommands(
   workingDir?: string,
 ): Promise<Array<{ name: string; description?: string; source?: 'command' | 'mcp' | 'skill' }>> {
   const params = workingDir ? `?workingDir=${encodeURIComponent(workingDir)}` : ''
-  const res = await transport.fetch(`/api/opencode/commands${params}`, {
-    headers: { Authorization: `Bearer ${token}` },
-  })
+  const res = await send(`/api/opencode/commands${params}`, { token })
   if (!res.ok) return []
-  const data = await jsonBody<{ commands?: Array<{ name: string; description?: string; source?: 'command' | 'mcp' | 'skill' }> }>(res)
+  const data = await readJson<{ commands?: Array<{ name: string; description?: string; source?: 'command' | 'mcp' | 'skill' }> }>(res)
   return data.commands ?? []
 }
 
@@ -838,11 +578,9 @@ export async function fetchOpenCodeCommands(
 export async function fetchClaudeModels(
   token: string,
 ): Promise<Array<{ id: string; label: string }>> {
-  const res = await transport.fetch(`/api/claude/models`, {
-    headers: { Authorization: `Bearer ${token}` },
-  })
+  const res = await send(`/api/claude/models`, { token })
   if (!res.ok) return []
-  const data = await jsonBody<{ models: Array<{ id: string; label: string }> }>(res)
+  const data = await readJson<{ models?: Array<{ id: string; label: string }> }>(res)
   return data.models ?? []
 }
 
@@ -868,17 +606,13 @@ export interface HealthCheckResult {
 }
 
 /** Run the integration health check for a specific repo. */
-export async function getIntegrationHealth(
+export function getIntegrationHealth(
   token: string,
   repo: string,
   webhookUrl: string,
 ): Promise<HealthCheckResult> {
   const params = new URLSearchParams({ repo, webhookUrl })
-  const res = await transport.authFetch(`/api/integrations/github/pr-review/health?${params}`, {
-    headers: { Authorization: `Bearer ${token}` },
-  })
-  if (!res.ok) throw new Error(`Health check failed: ${res.status}`)
-  return jsonBody<HealthCheckResult>(res)
+  return api<HealthCheckResult>(`/api/integrations/github/pr-review/health?${params}`, { token, error: 'Health check failed' })
 }
 
 /** Preview for webhook setup (what would be created/changed). */
@@ -890,54 +624,36 @@ export interface SetupPreview {
 }
 
 /** Preview what the webhook setup would do. */
-export async function previewWebhookSetup(
+export function previewWebhookSetup(
   token: string,
   repo: string,
   webhookUrl: string,
 ): Promise<{ preview: SetupPreview; secretGenerated: boolean }> {
-  const res = await transport.authFetch(`/api/integrations/github/pr-review/setup`, {
-    method: 'POST',
-    headers: headers(token),
-    body: JSON.stringify({ repo, webhookUrl, dryRun: true }),
+  return api(`/api/integrations/github/pr-review/setup`, {
+    method: 'POST', token, body: { repo, webhookUrl, dryRun: true }, error: 'Setup preview failed',
   })
-  if (!res.ok) throw new Error(`Setup preview failed: ${res.status}`)
-  return jsonBody<{ preview: SetupPreview; secretGenerated: boolean }>(res)
 }
 
 /** Apply webhook setup (create or update webhook on GitHub). */
-export async function applyWebhookSetup(
+export function applyWebhookSetup(
   token: string,
   repo: string,
   webhookUrl: string,
 ): Promise<{ preview: SetupPreview; secretGenerated: boolean; webhook?: unknown }> {
-  const res = await transport.authFetch(`/api/integrations/github/pr-review/setup`, {
-    method: 'POST',
-    headers: headers(token),
-    body: JSON.stringify({ repo, webhookUrl }),
+  return api(`/api/integrations/github/pr-review/setup`, {
+    method: 'POST', token, body: { repo, webhookUrl }, serverMessage: ['error'], unreadable: 'Setup failed', error: 'Setup failed',
   })
-  if (!res.ok) {
-    const data = await errorBody(res, 'Setup failed')
-    throw new Error(data.error ?? `Setup failed: ${res.status}`)
-  }
-  return jsonBody<{ preview: SetupPreview; secretGenerated: boolean; webhook?: unknown }>(res)
 }
 
 /** Send a test ping to the webhook and check delivery. */
-export async function testWebhookDelivery(
+export function testWebhookDelivery(
   token: string,
   repo: string,
   webhookUrl: string,
 ): Promise<{ success: boolean; message: string; delivery?: { id: number; statusCode: number; event: string } }> {
-  const res = await transport.authFetch(`/api/integrations/github/pr-review/test`, {
-    method: 'POST',
-    headers: headers(token),
-    body: JSON.stringify({ repo, webhookUrl }),
+  return api(`/api/integrations/github/pr-review/test`, {
+    method: 'POST', token, body: { repo, webhookUrl }, serverMessage: ['error'], unreadable: 'Test failed', error: 'Test failed',
   })
-  if (!res.ok) {
-    const data = await errorBody(res, 'Test failed')
-    throw new Error(data.error ?? `Test failed: ${res.status}`)
-  }
-  return jsonBody<{ success: boolean; message: string; delivery?: { id: number; statusCode: number; event: string } }>(res)
 }
 
 // ---------------------------------------------------------------------------
@@ -962,43 +678,28 @@ export type RelayPairingState =
   | { state: 'complete'; relayUrl: string; machineId: string; ownerLogin: string | null }
   | { state: 'denied' | 'expired' | 'failed'; relayUrl: string; detail?: string }
 
-export async function getRelayStatus(token: string): Promise<RelayStatus> {
-  const res = await transport.authFetch('/api/relay/status', { headers: headers(token) })
-  if (!res.ok) throw new Error(`Failed to get relay status: ${res.status}`)
-  return jsonBody<RelayStatus>(res)
+export function getRelayStatus(token: string): Promise<RelayStatus> {
+  return api<RelayStatus>('/api/relay/status', { token, jsonHeader: true, error: 'Failed to get relay status' })
 }
 
-export async function getRelayPairing(token: string): Promise<RelayPairingState> {
-  const res = await transport.authFetch('/api/relay/pair', { headers: headers(token) })
-  if (!res.ok) throw new Error(`Failed to get pairing state: ${res.status}`)
-  return jsonBody<RelayPairingState>(res)
+export function getRelayPairing(token: string): Promise<RelayPairingState> {
+  return api<RelayPairingState>('/api/relay/pair', { token, jsonHeader: true, error: 'Failed to get pairing state' })
 }
 
 /** Start pairing; resolves with the code to approve. Rejects with the server's message. */
-export async function startRelayPairing(token: string, relayUrl?: string): Promise<RelayPairingState> {
-  const res = await transport.authFetch('/api/relay/pair', {
-    method: 'POST',
-    headers: headers(token),
-    body: JSON.stringify(relayUrl ? { relayUrl } : {}),
+export function startRelayPairing(token: string, relayUrl?: string): Promise<RelayPairingState> {
+  return api<RelayPairingState>('/api/relay/pair', {
+    method: 'POST', token, body: relayUrl ? { relayUrl } : {}, serverMessage: ['message', 'error'], error: 'Pairing failed',
   })
-  if (!res.ok) {
-    const body = await jsonBody<{ message?: string; error?: string }>(res).catch(() => ({ message: undefined, error: undefined }))
-    throw new Error(body.message ?? body.error ?? `Pairing failed: ${res.status}`)
-  }
-  return jsonBody<RelayPairingState>(res)
 }
 
-export async function cancelRelayPairing(token: string): Promise<RelayPairingState> {
-  const res = await transport.authFetch('/api/relay/pair', { method: 'DELETE', headers: headers(token) })
-  if (!res.ok) throw new Error(`Failed to cancel pairing: ${res.status}`)
-  return jsonBody<RelayPairingState>(res)
+export function cancelRelayPairing(token: string): Promise<RelayPairingState> {
+  return api<RelayPairingState>('/api/relay/pair', { method: 'DELETE', token, jsonHeader: true, error: 'Failed to cancel pairing' })
 }
 
 /** Remove this machine's local relay credential. */
-export async function unpairRelay(token: string): Promise<{ removed: boolean }> {
-  const res = await transport.authFetch('/api/relay/unpair', { method: 'POST', headers: headers(token) })
-  if (!res.ok) throw new Error(`Failed to unpair: ${res.status}`)
-  return jsonBody<{ removed: boolean }>(res)
+export function unpairRelay(token: string): Promise<{ removed: boolean }> {
+  return api('/api/relay/unpair', { method: 'POST', token, jsonHeader: true, error: 'Failed to unpair' })
 }
 
 // ---------------------------------------------------------------------------
@@ -1038,10 +739,8 @@ export interface RelayDevices {
   error?: string
 }
 
-export async function getRelayDevices(token: string): Promise<RelayDevices> {
-  const res = await transport.authFetch('/api/relay/devices', { headers: headers(token) })
-  if (!res.ok) throw new Error(`Failed to get devices: ${res.status}`)
-  return jsonBody<RelayDevices>(res)
+export function getRelayDevices(token: string): Promise<RelayDevices> {
+  return api<RelayDevices>('/api/relay/devices', { token, jsonHeader: true, error: 'Failed to get devices' })
 }
 
 /** Confirm the browser showing `code`. Rejects with the server's message (e.g. no such code). */
@@ -1055,10 +754,8 @@ export async function approveRelayDevice(token: string, code: string): Promise<
   | { keyId: string; label: string; confirmCode: string | null; policyRaised?: boolean; waiting?: undefined }
   | { waiting: { expiresAt: string } }
 > {
-  const res = await transport.authFetch('/api/relay/devices/approve', {
-    method: 'POST', headers: headers(token), body: JSON.stringify({ code }),
-  })
-  const body = await jsonBody<{
+  const res = await apiSend('/api/relay/devices/approve', { method: 'POST', token, body: { code } })
+  const body = await readJson<{
     added?: { keyId: string; label: string; confirmCode: string | null; policyRaised?: boolean }
     waiting?: { expiresAt: string }
     message?: string
@@ -1073,36 +770,30 @@ export async function approveRelayDevice(token: string, code: string): Promise<
  * Only here, on the computer itself, can it be lowered.
  */
 export async function setRelayDevicePolicy(token: string, policy: 'off' | 'warn' | 'required'): Promise<void> {
-  const res = await transport.authFetch('/api/relay/devices/policy', {
-    method: 'PUT', headers: headers(token), body: JSON.stringify({ policy }),
+  await api('/api/relay/devices/policy', {
+    method: 'PUT', token, body: { policy }, parse: 'none', serverMessage: ['message', 'error'], error: 'Failed to change the policy',
   })
-  if (!res.ok) {
-    const body = await jsonBody<{ message?: string; error?: string }>(res).catch(() => ({ message: undefined, error: undefined }))
-    throw new Error(body.message ?? body.error ?? `Failed to change the policy: ${res.status}`)
-  }
 }
 
 /** Whether an enrolled passkey may add a browser without a code typed here. */
 export async function setRelayLocalConfirmationOnly(token: string, value: boolean): Promise<void> {
-  const res = await transport.authFetch('/api/relay/devices/settings', {
-    method: 'PUT', headers: headers(token), body: JSON.stringify({ localConfirmationOnly: value }),
+  await api('/api/relay/devices/settings', {
+    method: 'PUT', token, body: { localConfirmationOnly: value }, parse: 'none', error: 'Failed to change the setting',
   })
-  if (!res.ok) throw new Error(`Failed to change the setting: ${res.status}`)
 }
 
 /** Turn down a browser waiting to be confirmed. */
 export async function rejectRelayEnrolment(token: string, enrolId: string): Promise<void> {
-  const res = await transport.authFetch(`/api/relay/devices/pending/${encodeURIComponent(enrolId)}`, { method: 'DELETE', headers: headers(token) })
-  if (!res.ok) throw new Error(`Failed to turn the request down: ${res.status}`)
+  await api(`/api/relay/devices/pending/${encodeURIComponent(enrolId)}`, {
+    method: 'DELETE', token, jsonHeader: true, parse: 'none', error: 'Failed to turn the request down',
+  })
 }
 
 /** Remove a device from this machine's list. Rejects with the server's message. */
 export async function revokeRelayDevice(token: string, keyId: string): Promise<void> {
-  const res = await transport.authFetch(`/api/relay/devices/${encodeURIComponent(keyId)}`, { method: 'DELETE', headers: headers(token) })
-  if (!res.ok) {
-    const body = await jsonBody<{ message?: string }>(res).catch(() => ({ message: undefined }))
-    throw new Error(body.message ?? `Failed to remove device: ${res.status}`)
-  }
+  await api(`/api/relay/devices/${encodeURIComponent(keyId)}`, {
+    method: 'DELETE', token, jsonHeader: true, parse: 'none', serverMessage: ['message'], error: 'Failed to remove device',
+  })
 }
 
 /** One line of the machine's intent log (GET /api/relay/intents). */
@@ -1125,14 +816,12 @@ export async function getRelayIntents(token: string, filter: { limit?: number; k
   if (filter.limit) params.set('limit', String(filter.limit))
   if (filter.keyId) params.set('keyId', filter.keyId)
   if (filter.verdict) params.set('verdict', filter.verdict)
-  const res = await transport.authFetch(`/api/relay/intents?${params.toString()}`, { headers: headers(token) })
-  if (!res.ok) throw new Error(`Failed to read the activity log: ${res.status}`)
-  return (await jsonBody<{ entries: RelayIntentEntry[] }>(res)).entries
+  return (await api<{ entries: RelayIntentEntry[] }>(`/api/relay/intents?${params.toString()}`, {
+    token, jsonHeader: true, error: 'Failed to read the activity log',
+  })).entries
 }
 
 /** Check the intent log's hash chain. */
-export async function verifyRelayIntents(token: string): Promise<{ ok: boolean; entries: number; problem?: { line: number; reason: string } }> {
-  const res = await transport.authFetch('/api/relay/intents/verify', { headers: headers(token) })
-  if (!res.ok) throw new Error(`Failed to check the activity log: ${res.status}`)
-  return jsonBody(res)
+export function verifyRelayIntents(token: string): Promise<{ ok: boolean; entries: number; problem?: { line: number; reason: string } }> {
+  return api('/api/relay/intents/verify', { token, jsonHeader: true, error: 'Failed to check the activity log' })
 }

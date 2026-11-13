@@ -3,7 +3,7 @@
  * mirrors server/maintenance-service.ts.
  */
 
-import { transport } from './transport'
+import { joeRequest } from './request'
 
 export type PlanState = 'off' | 'enabled' | 'paused'
 export type CoverageHealth = 'healthy' | 'starting' | 'degraded' | 'unavailable'
@@ -73,25 +73,8 @@ export const POLICY_LABELS: Record<ResponsePolicy, { label: string; description:
 
 const BASE = '/api/orchestrator/maintenance'
 
-async function call<T>(token: string, path: string, init: { method?: string; body?: unknown } = {}): Promise<T> {
-  const res = await transport.fetch(`${BASE}${path}`, {
-    method: init.method ?? 'GET',
-    headers: {
-      Authorization: `Bearer ${token}`,
-      ...(init.body !== undefined ? { 'Content-Type': 'application/json' } : {}),
-    },
-    body: init.body !== undefined ? JSON.stringify(init.body) : undefined,
-  })
-  if (!res.ok) {
-    let message = `Request failed (${res.status})`
-    try {
-      const body = (await res.json()) as { error?: string }
-      if (body.error) message = body.error
-    } catch { /* keep the status message */ }
-    throw new Error(message)
-  }
-  return (await res.json()) as T
-}
+const call = <T>(token: string, path: string, init?: { method?: string; body?: unknown }): Promise<T> =>
+  joeRequest<T>(token, `${BASE}${path}`, init)
 
 export async function listMaintenance(token: string): Promise<RepoMaintenance[]> {
   return (await call<{ repos: RepoMaintenance[] }>(token, '')).repos

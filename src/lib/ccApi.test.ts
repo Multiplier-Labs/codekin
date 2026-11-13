@@ -30,6 +30,10 @@ import {
   getAgentName,
   setAgentName,
   cloneRepo,
+  createScratch,
+  startRelayPairing,
+  revokeRelayDevice,
+  removeSessionWorktree,
 } from './ccApi'
 
 const mockFetch = vi.fn()
@@ -1045,5 +1049,45 @@ describe('setAgentName', () => {
       json: () => Promise.reject(new Error('not json')),
     } as Response)
     await expect(setAgentName('tok', 'x')).rejects.toThrow('Failed to save agent name')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Error messages of call sites moved onto the shared request helper
+// ---------------------------------------------------------------------------
+
+describe('error messages (shared request helper)', () => {
+  it('createScratch: server error, else its own message with or without the status', async () => {
+    mockFetch.mockResolvedValue(jsonResponse({ error: 'Disk full' }, 500))
+    await expect(createScratch('tok')).rejects.toThrow(new Error('Disk full'))
+    mockFetch.mockResolvedValue(jsonResponse({}, 500))
+    await expect(createScratch('tok')).rejects.toThrow(new Error('Could not create a scratch folder: 500'))
+    mockFetch.mockResolvedValue(plainResponse(502))
+    await expect(createScratch('tok')).rejects.toThrow(new Error('Could not create a scratch folder'))
+  })
+
+  it('startRelayPairing prefers `message`, then `error`, then the status', async () => {
+    mockFetch.mockResolvedValue(jsonResponse({ message: 'Relay unreachable', error: 'relay_down' }, 502))
+    await expect(startRelayPairing('tok')).rejects.toThrow(new Error('Relay unreachable'))
+    mockFetch.mockResolvedValue(jsonResponse({ error: 'relay_down' }, 400))
+    await expect(startRelayPairing('tok')).rejects.toThrow(new Error('relay_down'))
+    mockFetch.mockResolvedValue(plainResponse(502))
+    await expect(startRelayPairing('tok')).rejects.toThrow(new Error('Pairing failed: 502'))
+  })
+
+  it('revokeRelayDevice reads only `message`', async () => {
+    mockFetch.mockResolvedValue(jsonResponse({ error: 'ignored' }, 404))
+    await expect(revokeRelayDevice('tok', 'k1')).rejects.toThrow(new Error('Failed to remove device: 404'))
+    expect(mockFetch).toHaveBeenCalledWith('/cc/api/relay/devices/k1', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer tok' },
+    })
+  })
+
+  it('removeSessionWorktree resolves with the error instead of throwing', async () => {
+    mockFetch.mockResolvedValue(jsonResponse({ error: 'Uncommitted changes' }, 409))
+    expect(await removeSessionWorktree('tok', 's1')).toEqual({ removed: false, error: 'Uncommitted changes' })
+    mockFetch.mockResolvedValue(jsonResponse({}, 500))
+    expect(await removeSessionWorktree('tok', 's1')).toEqual({ removed: false, error: 'Failed to remove working files: 500' })
   })
 })

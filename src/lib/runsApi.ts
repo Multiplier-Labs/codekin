@@ -5,7 +5,7 @@
  * whichever engine (workflow or loop) produced it.
  */
 
-import { transport } from './transport'
+import { request } from './request'
 
 export type UnifiedRunStatus =
   | 'queued'
@@ -46,10 +46,8 @@ export async function listUnifiedRuns(
   if (opts?.engine) params.set('engine', opts.engine)
   if (opts?.status) params.set('status', opts.status)
   const qs = params.toString()
-  const res = await transport.fetch(`/api/runs${qs ? `?${qs}` : ''}`, {
-    headers: { Authorization: `Bearer ${token}` },
+  const body = await request<{ runs: UnifiedRun[] }>(`/api/runs${qs ? `?${qs}` : ''}`, {
+    token, error: status => `Failed to load runs (${status})`,
   })
-  if (!res.ok) throw new Error(`Failed to load runs (${res.status})`)
-  const body = (await res.json()) as { runs: UnifiedRun[] }
   return body.runs
 }

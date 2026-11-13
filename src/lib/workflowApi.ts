@@ -4,20 +4,13 @@
  * All calls go through the active transport at /api/workflows/ with Bearer token auth.
  */
 
-import { transport } from './transport'
+import { request, type RequestOptions } from './request'
 
 const BASE = '/api/workflows'
 
-/** Type-safe wrapper around Response.json() to avoid `any` leakage. */
-async function fetchJson<T>(res: Response): Promise<T> {
-  return res.json() as Promise<T>
-}
-
-function headers(token: string): HeadersInit {
-  return {
-    'Content-Type': 'application/json',
-    Authorization: `Bearer ${token}`,
-  }
+/** A /api/workflows call. Every workflows request sends the JSON content type and the Bearer token. */
+function workflows<T = unknown>(token: string, path: string, opts: Omit<RequestOptions, 'token'>): Promise<T> {
+  return request<T>(`${BASE}${path}`, { token, jsonHeader: true, ...opts })
 }
 
 // ---------------------------------------------------------------------------
@@ -109,10 +102,7 @@ export async function listKinds(
   const params = new URLSearchParams()
   if (repoPath) params.set('repoPath', repoPath)
   const qs = params.toString()
-  const res = await transport.fetch(`${BASE}/kinds${qs ? `?${qs}` : ''}`, { headers: headers(token) })
-  if (!res.ok) throw new Error(`Failed to list kinds: ${res.status}`)
-  const data = await fetchJson<{ kinds: WorkflowKindInfo[] }>(res)
-  return data.kinds
+  return (await workflows<{ kinds: WorkflowKindInfo[] }>(token, `/kinds${qs ? `?${qs}` : ''}`, { error: 'Failed to list kinds' })).kinds
 }
 
 // ---------------------------------------------------------------------------
@@ -131,18 +121,12 @@ export async function listRuns(
   if (opts?.offset) params.set('offset', String(opts.offset))
 
   const qs = params.toString()
-  const res = await transport.fetch(`${BASE}/runs${qs ? `?${qs}` : ''}`, { headers: headers(token) })
-  if (!res.ok) throw new Error(`Failed to list runs: ${res.status}`)
-  const data = await fetchJson<{ runs: WorkflowRun[] }>(res)
-  return data.runs
+  return (await workflows<{ runs: WorkflowRun[] }>(token, `/runs${qs ? `?${qs}` : ''}`, { error: 'Failed to list runs' })).runs
 }
 
 /** Fetch a single run with its step details. */
 export async function getRun(token: string, runId: string): Promise<WorkflowRunWithSteps> {
-  const res = await transport.fetch(`${BASE}/runs/${runId}`, { headers: headers(token) })
-  if (!res.ok) throw new Error(`Failed to get run: ${res.status}`)
-  const data = await fetchJson<{ run: WorkflowRunWithSteps }>(res)
-  return data.run
+  return (await workflows<{ run: WorkflowRunWithSteps }>(token, `/runs/${runId}`, { error: 'Failed to get run' })).run
 }
 
 /** Manually trigger a new workflow run. Returns the created run. */
@@ -151,23 +135,12 @@ export async function triggerRun(
   kind: string,
   input: Record<string, unknown> = {}
 ): Promise<WorkflowRun> {
-  const res = await transport.fetch(`${BASE}/runs`, {
-    method: 'POST',
-    headers: headers(token),
-    body: JSON.stringify({ kind, input }),
-  })
-  if (!res.ok) throw new Error(`Failed to trigger run: ${res.status}`)
-  const data = await fetchJson<{ run: WorkflowRun }>(res)
-  return data.run
+  return (await workflows<{ run: WorkflowRun }>(token, `/runs`, { method: 'POST', body: { kind, input }, error: 'Failed to trigger run' })).run
 }
 
 /** Cancel a running or queued workflow run. */
 export async function cancelRun(token: string, runId: string): Promise<void> {
-  const res = await transport.fetch(`${BASE}/runs/${runId}/cancel`, {
-    method: 'POST',
-    headers: headers(token),
-  })
-  if (!res.ok) throw new Error(`Failed to cancel run: ${res.status}`)
+  await workflows(token, `/runs/${runId}/cancel`, { method: 'POST', parse: 'none', error: 'Failed to cancel run' })
 }
 
 // ---------------------------------------------------------------------------
@@ -176,10 +149,7 @@ export async function cancelRun(token: string, runId: string): Promise<void> {
 
 /** Fetch all cron schedules. */
 export async function listSchedules(token: string): Promise<CronSchedule[]> {
-  const res = await transport.fetch(`${BASE}/schedules`, { headers: headers(token) })
-  if (!res.ok) throw new Error(`Failed to list schedules: ${res.status}`)
-  const data = await fetchJson<{ schedules: CronSchedule[] }>(res)
-  return data.schedules
+  return (await workflows<{ schedules: CronSchedule[] }>(token, `/schedules`, { error: 'Failed to list schedules' })).schedules
 }
 
 export interface TriggerLedgerEntry {
@@ -199,10 +169,7 @@ export async function listTriggerLedger(token: string, opts?: { scheduleId?: str
   if (opts?.scheduleId) params.set('scheduleId', opts.scheduleId)
   if (opts?.limit) params.set('limit', String(opts.limit))
   const qs = params.toString()
-  const res = await transport.fetch(`${BASE}/trigger-ledger${qs ? `?${qs}` : ''}`, { headers: headers(token) })
-  if (!res.ok) throw new Error(`Failed to list trigger ledger: ${res.status}`)
-  const data = await fetchJson<{ entries: TriggerLedgerEntry[] }>(res)
-  return data.entries
+  return (await workflows<{ entries: TriggerLedgerEntry[] }>(token, `/trigger-ledger${qs ? `?${qs}` : ''}`, { error: 'Failed to list trigger ledger' })).entries
 }
 
 export type ActivityTier = 'active' | 'cooling' | 'dormant'
@@ -221,21 +188,12 @@ export interface RepoActivity {
 
 /** Fetch activity tiers for configured review repos. */
 export async function listRepoActivity(token: string): Promise<RepoActivity[]> {
-  const res = await transport.fetch(`${BASE}/repo-activity`, { headers: headers(token) })
-  if (!res.ok) throw new Error(`Failed to list repo activity: ${res.status}`)
-  const data = await fetchJson<{ repos: RepoActivity[] }>(res)
-  return data.repos
+  return (await workflows<{ repos: RepoActivity[] }>(token, `/repo-activity`, { error: 'Failed to list repo activity' })).repos
 }
 
 /** Manually trigger a scheduled workflow, creating a new run. */
 export async function triggerSchedule(token: string, id: string): Promise<WorkflowRun> {
-  const res = await transport.fetch(`${BASE}/schedules/${id}/trigger`, {
-    method: 'POST',
-    headers: headers(token),
-  })
-  if (!res.ok) throw new Error(`Failed to trigger schedule: ${res.status}`)
-  const data = await fetchJson<{ run: WorkflowRun }>(res)
-  return data.run
+  return (await workflows<{ run: WorkflowRun }>(token, `/schedules/${id}/trigger`, { method: 'POST', error: 'Failed to trigger schedule' })).run
 }
 
 // ---------------------------------------------------------------------------
@@ -244,10 +202,7 @@ export async function triggerSchedule(token: string, id: string): Promise<Workfl
 
 /** Fetch the current workflow configuration (repo list and settings). */
 export async function getConfig(token: string): Promise<WorkflowConfig> {
-  const res = await transport.fetch(`${BASE}/config`, { headers: headers(token) })
-  if (!res.ok) throw new Error(`Failed to get config: ${res.status}`)
-  const data = await fetchJson<{ config: WorkflowConfig }>(res)
-  return data.config
+  return (await workflows<{ config: WorkflowConfig }>(token, `/config`, { error: 'Failed to get config' })).config
 }
 
 export interface WebhookSetupResult {
@@ -268,25 +223,15 @@ export async function addRepoConfig(
   webhookUrl?: string,
 ): Promise<AddRepoResult> {
   const body = webhookUrl ? { ...repo, webhookUrl } : repo
-  const res = await transport.fetch(`${BASE}/config/repos`, {
-    method: 'POST',
-    headers: headers(token),
-    body: JSON.stringify(body),
+  const data = await workflows<{ config: WorkflowConfig; webhookSetup?: WebhookSetupResult }>(token, `/config/repos`, {
+    method: 'POST', body, error: 'Failed to add repo config',
   })
-  if (!res.ok) throw new Error(`Failed to add repo config: ${res.status}`)
-  const data = await fetchJson<{ config: WorkflowConfig; webhookSetup?: WebhookSetupResult }>(res)
   return { config: data.config, webhookSetup: data.webhookSetup }
 }
 
 /** Remove a repo from the workflow configuration. Returns the updated config. */
 export async function removeRepoConfig(token: string, id: string): Promise<WorkflowConfig> {
-  const res = await transport.fetch(`${BASE}/config/repos/${id}`, {
-    method: 'DELETE',
-    headers: headers(token),
-  })
-  if (!res.ok) throw new Error(`Failed to remove repo config: ${res.status}`)
-  const data = await fetchJson<{ config: WorkflowConfig }>(res)
-  return data.config
+  return (await workflows<{ config: WorkflowConfig }>(token, `/config/repos/${id}`, { method: 'DELETE', error: 'Failed to remove repo config' })).config
 }
 
 /** Partially update a repo's workflow configuration. Returns the updated config. */
@@ -295,12 +240,7 @@ export async function patchRepoConfig(
   id: string,
   patch: Partial<ReviewRepoConfig>
 ): Promise<WorkflowConfig> {
-  const res = await transport.fetch(`${BASE}/config/repos/${id}`, {
-    method: 'PATCH',
-    headers: headers(token),
-    body: JSON.stringify(patch),
-  })
-  if (!res.ok) throw new Error(`Failed to update repo config: ${res.status}`)
-  const data = await fetchJson<{ config: WorkflowConfig }>(res)
-  return data.config
+  return (await workflows<{ config: WorkflowConfig }>(token, `/config/repos/${id}`, {
+    method: 'PATCH', body: patch, error: 'Failed to update repo config',
+  })).config
 }
