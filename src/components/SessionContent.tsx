@@ -54,6 +54,8 @@ export interface SessionContentProps {
   onDiscardTentative: () => void
   inputBarRef: RefObject<InputBarHandle | null>
   onSendInput: (text: string, files?: File[]) => void
+  /** Stop the agent's current turn (Ctrl+C in the composer while it works). */
+  onInterrupt: () => void
   pendingFiles: File[]
   onAddFiles: (files: File[]) => void
   onRemoveFile: (index: number) => void
@@ -128,6 +130,7 @@ export function SessionContent({
   onDiscardTentative,
   inputBarRef,
   onSendInput,
+  onInterrupt,
   pendingFiles,
   onAddFiles,
   onRemoveFile,
@@ -337,6 +340,7 @@ export function SessionContent({
         key={activeSessionId ?? 'no-session'}
         ref={inputBarRef}
         onSendInput={onSendInput}
+        onInterrupt={isProcessing ? onInterrupt : undefined}
         isWaiting={!!activePrompt}
         disabled={disabled || isProviderDisabled}
         placeholder={claudeDisabled ? 'Claude Code is disabled' : isOpenCodeDisconnected ? 'OpenCode is not connected' : isCodexDisconnected ? 'Codex is not connected' : isGrokDisconnected ? 'Grok is not connected' : undefined}

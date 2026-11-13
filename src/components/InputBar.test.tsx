@@ -314,3 +314,53 @@ describe('InputBar effort picker', () => {
     expect(container.textContent).not.toContain('Cycle effort')
   })
 })
+
+describe('InputBar Ctrl+C', () => {
+  async function renderBar(props: Partial<Parameters<typeof InputBar>[0]> = {}) {
+    const onSendInput = vi.fn()
+    await act(async () => {
+      root.render(
+        <InputBar
+          onSendInput={onSendInput} isWaiting={false} disabled={false} onEscape={vi.fn()}
+          pendingFiles={[]} onAddFiles={vi.fn()} onRemoveFile={vi.fn()}
+          {...props}
+        />,
+      )
+    })
+    return onSendInput
+  }
+
+  function pressCtrlC(text: string, selection: [number, number]) {
+    const textarea = container.querySelector('textarea')!
+    const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!
+    setter.call(textarea, text)
+    textarea.setSelectionRange(selection[0], selection[1])
+    const event = new KeyboardEvent('keydown', { key: 'c', ctrlKey: true, bubbles: true, cancelable: true })
+    textarea.dispatchEvent(event)
+    return event
+  }
+
+  it('stops the turn while the agent works, without sending anything', async () => {
+    const onInterrupt = vi.fn()
+    const onSendInput = await renderBar({ onInterrupt })
+    const event = pressCtrlC('half a thought', [3, 3])
+    expect(onInterrupt).toHaveBeenCalledTimes(1)
+    expect(event.defaultPrevented).toBe(true)
+    expect(onSendInput).not.toHaveBeenCalled()
+  })
+
+  it('copies instead when text is selected', async () => {
+    const onInterrupt = vi.fn()
+    await renderBar({ onInterrupt })
+    const event = pressCtrlC('copy this', [0, 4])
+    expect(onInterrupt).not.toHaveBeenCalled()
+    expect(event.defaultPrevented).toBe(false)
+  })
+
+  it('is left to the browser when the agent is idle', async () => {
+    const onSendInput = await renderBar()
+    const event = pressCtrlC('', [0, 0])
+    expect(event.defaultPrevented).toBe(false)
+    expect(onSendInput).not.toHaveBeenCalled()
+  })
+})
