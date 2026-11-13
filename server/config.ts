@@ -92,7 +92,7 @@ export function resolveRepoPathInRoot(repoPath: string): string | null {
  * Resolve the canonical local repo directory used to group sessions in the
  * sidebar. Repos are cloned owner-namespaced (`REPOS_ROOT/owner/name`, see
  * `localRepoPath` in upload-routes), and manual sessions group under that same
- * path. Automated sessions (webhook, stepflow) must use the owner-namespaced
+ * path. Automated sessions (webhook) must use the owner-namespaced
  * path too — otherwise a flat `REPOS_ROOT/name` groupDir produces a second,
  * duplicate repo node in the sidebar. Falls back to the flat layout for older
  * flat clones that predate owner-namespacing.

@@ -1459,7 +1459,7 @@ let engineInstance: WorkflowEngine | null = null
 export function initWorkflowEngine(): WorkflowEngine {
   if (engineInstance) return engineInstance
   engineInstance = new WorkflowEngine()
-  console.log('[workflow] Stepflow engine initialized')
+  console.log('[workflow] Workflow engine initialized')
   return engineInstance
 }
 

@@ -553,26 +553,6 @@ Get webhook configuration.
 
 Raw GitHub webhook receiver. **No Bearer token** — uses HMAC signature verification via `x-hub-signature-256` header.
 
-### `POST /api/webhooks/stepflow`
-
-Raw Stepflow webhook receiver. **No Bearer token** — uses signature verification via `x-webhook-signature` header.
-
----
-
-## Stepflow
-
-### `GET /api/stepflow/events`
-
-List recent stepflow events.
-
-**Response:** `{ "events": StepflowEvent[] }`
-
-### `GET /api/stepflow/events/:id`
-
-Get a single stepflow event.
-
-**Response:** `{ "event": StepflowEvent }` or `404`
-
 ---
 
 ## Workflows
