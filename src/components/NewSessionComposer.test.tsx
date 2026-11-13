@@ -101,6 +101,12 @@ describe('NewSessionComposer', () => {
     expect(text()).toContain('Runs in ~/site, on a fresh worktree.')
   })
 
+  it('hides the worktree control for a folder inside a repository', () => {
+    render(props({ place: placeFromPath('/home/sam/site/src', true, '/home/sam', '/home/sam/site'), useWorktree: true }))
+    expect(text()).not.toMatch(/Worktree/)
+    expect(text()).toContain('inside ~/site, on the checked-out branch')
+  })
+
   it('shows progress instead of the hint, and errors inline', () => {
     render(props({ progress: 'Cloning acme-co/web-app…', error: 'Repository not found' }))
     expect(text()).toContain('Cloning acme-co/web-app…')

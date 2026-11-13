@@ -12,6 +12,10 @@
  * - `folder`: anything else; `git` says whether it is a work tree without a
  *   remote (shown as "git folder") or no repository at all.
  *
+ * A folder inside a repository (not its root) belongs to that repository:
+ * `git` is true and `inRepo` names the repository root. Such sessions run in
+ * place; worktrees are only made from a repository root.
+ *
  * Scratch folders live under one root (`~/codekin/scratch` by default,
  * overridable with SCRATCH_ROOT or the Settings value). The root must sit
  * inside the home directory or REPOS_ROOT — the same bounds every session
@@ -28,8 +32,10 @@ export type PlaceKind = 'scratch' | 'folder' | 'repo'
 
 export interface SessionPlace {
   kind: PlaceKind
-  /** The root is a git work tree (a `.git` directory or file is present). */
+  /** The root is in a git work tree: its own, or an enclosing repository's. */
   git: boolean
+  /** The enclosing repository's root, when the folder is inside one rather than its root. */
+  inRepo?: string
 }
 
 // ---------------------------------------------------------------------------
@@ -150,9 +156,13 @@ export function scratchName(pick: (n: number) => number = randomInt): string {
  * retried on collision; after that a numeric suffix guarantees progress.
  */
 export function createScratchDir(root: string = getScratchRoot(), pick?: (n: number) => number): string {
-  mkdirSync(root, { recursive: true })
+  // Check before writing anything: the default root, or one passed in, may
+  // resolve outside the allowed roots (e.g. ~/codekin is a symlink).
+  const checked = validateScratchRoot(root)
+  if (!checked.ok) throw new Error(`${checked.error}. Set a scratch folder in Settings.`)
+  mkdirSync(checked.path, { recursive: true })
   // Re-check after creation: a symlink planted along the way must not move the root out of bounds.
-  const realRoot = realpathSync(root)
+  const realRoot = realpathSync(checked.path)
   if (!isWithinRoots(realRoot)) throw new Error('Scratch folder is outside the allowed directories')
   for (let attempt = 0; attempt < 20; attempt++) {
     const base = scratchName(pick)
@@ -204,7 +214,10 @@ function hasOriginRemote(gitDir: string): boolean {
   return !!section && /^\s*url\s*=\s*\S/m.test(section[1])
 }
 
-/** True when `dir` is a git work tree (has a `.git` directory or file). Cheap: one stat. */
+/**
+ * True when `dir` is a repository root (has a `.git` directory or file). Cheap:
+ * one stat. A subfolder of a repository is not one; see {@link findWorkTreeRoot}.
+ */
 export function isGitWorkTree(dir: string): boolean {
   try {
     statSync(join(dir, '.git'))
@@ -214,14 +227,33 @@ export function isGitWorkTree(dir: string): boolean {
   }
 }
 
+/**
+ * The root of the work tree containing `dir`: `dir` itself or its nearest
+ * ancestor with a `.git` entry, as git would find it. Null outside any
+ * repository.
+ */
+export function findWorkTreeRoot(dir: string): string | null {
+  let current = resolve(dir)
+  for (;;) {
+    if (gitDirOf(current)) return current
+    const parent = dirname(current)
+    if (parent === current) return null
+    current = parent
+  }
+}
+
 /** Uncached place detection. Exported for tests. */
 export function detectPlace(root: string, scratchRoot: string = getScratchRoot()): SessionPlace {
+  // A scratch folder is a fresh, self-contained place: only its own `.git` counts.
   if (isWithinRoots(root, [scratchRoot])) {
     return { kind: 'scratch', git: isGitWorkTree(root) }
   }
-  const gitDir = gitDirOf(root)
-  if (!gitDir) return { kind: 'folder', git: false }
-  return { kind: hasOriginRemote(gitDir) ? 'repo' : 'folder', git: true }
+  const repoRoot = findWorkTreeRoot(root)
+  const gitDir = repoRoot && gitDirOf(repoRoot)
+  if (!repoRoot || !gitDir) return { kind: 'folder', git: false }
+  const place: SessionPlace = { kind: hasOriginRemote(gitDir) ? 'repo' : 'folder', git: true }
+  if (repoRoot !== resolve(root)) place.inRepo = repoRoot
+  return place
 }
 
 const PLACE_TTL_MS = 5_000

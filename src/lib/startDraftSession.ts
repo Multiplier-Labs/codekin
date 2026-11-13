@@ -93,7 +93,7 @@ export async function startDraftSession(draft: DraftSession, deps: DraftDeps): P
     deps.createSession(
       `hub:${baseName(place.path)}`,
       place.path,
-      place.git && draft.useWorktree,
+      place.git && !place.inRepo && draft.useWorktree,
       draft.permissionMode,
       draft.provider,
       {

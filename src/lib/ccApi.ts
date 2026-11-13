@@ -492,8 +492,10 @@ export interface DirListing {
   dirs: string[]
   /** Subfolders that are git work trees. */
   gitDirs?: string[]
-  /** `path` itself is a git work tree. */
+  /** `path` is in a git work tree: its own, or an enclosing repository's. */
   git?: boolean
+  /** Root of the work tree containing `path` (equal to `path` at a repository root). */
+  repoRoot?: string
   /** Roots every session folder must sit inside. */
   roots?: string[]
   home?: string

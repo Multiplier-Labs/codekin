@@ -121,6 +121,17 @@ describe('placeHint', () => {
     expect(placeHint(placeFromRepo(repo({ cloned: false })), true))
       .toBe('Clones acme-co/web-app into the repositories folder when you send.')
   })
+
+  it('a folder inside a repository runs in place, whatever the worktree preference', () => {
+    const nested = placeFromPath('/home/sam/site/src', true, HOME, '/home/sam/site')
+    expect(nested.inRepo).toBe('/home/sam/site')
+    expect(placeHint(nested, true, { home: HOME }))
+      .toBe('Runs in ~/site/src, inside ~/site, on the checked-out branch (no worktree in a subfolder).')
+    // At the repository root there is nothing to note.
+    expect(placeFromPath('/home/sam/site', true, HOME, '/home/sam/site').inRepo).toBeUndefined()
+    expect(placeFromSession({ workingDir: '/home/sam/site/src', place: { kind: 'repo', git: true, inRepo: '/home/sam/site' } }, HOME).inRepo)
+      .toBe('/home/sam/site')
+  })
 })
 
 describe('placeTag', () => {

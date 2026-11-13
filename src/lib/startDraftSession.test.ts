@@ -56,6 +56,12 @@ describe('startDraftSession', () => {
     expect(off.createSession.mock.calls[0][2]).toBe(false)
   })
 
+  it('runs a folder inside a repository in place, even with worktrees on', async () => {
+    const d = deps()
+    await startDraftSession(draft(placeFromPath(`${HOME}/site/src`, true, HOME, `${HOME}/site`)), d)
+    expect(d.createSession.mock.calls[0].slice(1, 3)).toEqual([`${HOME}/site/src`, false])
+  })
+
   it('clones a remote repo on send and reports progress', async () => {
     const d = deps()
     const started = await startDraftSession(draft(remote), d)

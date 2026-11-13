@@ -323,6 +323,17 @@ describe('createSessionRouter', () => {
         `${server.baseUrl}/api/browse-dirs?path=${encodeURIComponent(join(REPOS_DIR, 'ok', 'repo'))}`, { headers: auth() },
       )).json()
       expect(child.git).toBe(true)
+      expect(child.repoRoot).toBe(join(REPOS_DIR, 'ok', 'repo'))
+    })
+
+    it('reports a folder inside a repository as git, with the repository root', async () => {
+      mkdirSync(join(REPOS_DIR, 'ok', 'repo', '.git'), { recursive: true })
+      mkdirSync(join(REPOS_DIR, 'ok', 'repo', 'src'), { recursive: true })
+      const nested = await (await fetch(
+        `${server.baseUrl}/api/browse-dirs?path=${encodeURIComponent(join(REPOS_DIR, 'ok', 'repo', 'src'))}`, { headers: auth() },
+      )).json()
+      expect(nested.git).toBe(true)
+      expect(nested.repoRoot).toBe(join(REPOS_DIR, 'ok', 'repo'))
     })
   })
 
@@ -411,6 +422,19 @@ describe('createSessionRouter', () => {
       server = await startApp(createSessionRouter(verifyToken, extractToken, sessions))
       const res = await fetch(`${server.baseUrl}/api/sessions/s1/git-init`, { method: 'POST', headers: auth() })
       expect(res.status).toBe(409)
+    })
+
+    it('returns 409 for a folder inside an existing repository, without a nested init', async () => {
+      const repo = join(HOME_DIR, 'ok')
+      mkdirSync(join(repo, '.git'), { recursive: true })
+      const dir = join(repo, 'src')
+      mkdirSync(dir)
+      withSession(dir)
+      server = await startApp(createSessionRouter(verifyToken, extractToken, sessions))
+      const res = await fetch(`${server.baseUrl}/api/sessions/s1/git-init`, { method: 'POST', headers: auth() })
+      expect(res.status).toBe(409)
+      expect((await res.json()).error).toContain('inside a git repository')
+      expect(existsSync(join(dir, '.git'))).toBe(false)
     })
 
     it('refuses a session folder outside the allowed roots', async () => {

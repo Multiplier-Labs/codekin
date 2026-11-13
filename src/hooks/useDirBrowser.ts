@@ -16,8 +16,10 @@ export interface DirBrowser {
   dirs: string[]
   /** Subfolders that are git work trees. */
   gitDirs: ReadonlySet<string>
-  /** The listed folder itself is a git work tree. */
+  /** The listed folder is in a git work tree. */
   git: boolean
+  /** Root of the work tree containing the listed folder; null outside one. */
+  repoRoot: string | null
   /** Roots every session folder must sit inside (empty until known). */
   roots: string[]
   home: string | null
@@ -82,6 +84,7 @@ export function useDirBrowser(token: string | undefined): DirBrowser {
     dirs: listing?.dirs ?? [],
     gitDirs: new Set(listing?.gitDirs ?? []),
     git: listing?.git ?? false,
+    repoRoot: listing?.repoRoot ?? null,
     roots: listing?.roots ?? [],
     home: listing?.home ?? null,
     loading,

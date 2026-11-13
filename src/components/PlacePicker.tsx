@@ -118,7 +118,7 @@ export function PlacePicker({
   }, [pathQuery, browser.home, browser.path, openDir])
 
   const listing = browser.path !== null
-    ? { path: browser.path, dirs: browser.dirs, gitDirs: browser.gitDirs, git: browser.git }
+    ? { path: browser.path, dirs: browser.dirs, gitDirs: browser.gitDirs, git: browser.git, repoRoot: browser.repoRoot }
     : null
   const model = pickerModel(state, {
     groups, recent, showOrgPlaces, listing, roots: browser.roots, home: browser.home,
@@ -179,7 +179,7 @@ export function PlacePicker({
           // The dialog can return any folder; listing it checks the bounds and git state.
           const info = await openDir(picked)
           if (!info) { setActionError('That folder is outside your home and the repos root.'); return }
-          onPick(placeFromPath(info.path, info.git ?? false, info.home ?? browser.home))
+          onPick(placeFromPath(info.path, info.git ?? false, info.home ?? browser.home, info.repoRoot))
         } catch (err) {
           setActionError(err instanceof Error ? err.message : 'Could not open the folder dialog')
         } finally {

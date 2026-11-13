@@ -132,7 +132,8 @@ export function NewSessionComposer({
   /** Folder paths read as `~/…` once the home directory is known. */
   const labelOf = (p: DraftPlace) => p.kind === 'folder' && p.path ? tildify(p.path, homeDir) : p.label
   const recentChips = recent.filter(p => !samePlace(p, place) && p.kind !== 'org').slice(0, RECENT_CHIPS)
-  const showWorktree = place.git && place.kind !== 'org'
+  // Worktrees start from a repository root; a subfolder of one runs in place.
+  const showWorktree = place.git && place.kind !== 'org' && !place.inRepo
   const hint = progress ?? placeHint(place, useWorktree, { home: homeDir, scratchRoot: scratchDir })
 
   const placeChip = (

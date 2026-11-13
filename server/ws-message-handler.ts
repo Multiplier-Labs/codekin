@@ -120,7 +120,8 @@ export function handleWsMessage(msg: WsClientMessage, ctx: WsHandlerContext): vo
       // grouping/archive behavior stays consistent with the resolved directory.
       // A worktree needs a git repository. A folder that isn't one runs in
       // place; the worktree preference is a default, not a demand, and
-      // failing the create would strand the user's first message.
+      // failing the create would strand the user's first message. Only a
+      // repository root gets one; a subfolder of a repository runs in place.
       const useWorktree = !!msg.useWorktree && isGitWorkTree(resolvedDir)
       const session = sessions.create(msg.name, resolvedDir, { model, effort: validEffort(msg.effort, provider) ? msg.effort : undefined, permissionMode: msg.permissionMode, allowedTools: msg.allowedTools, provider: msg.provider, useWorktree })
       session.clients.add(ws)
