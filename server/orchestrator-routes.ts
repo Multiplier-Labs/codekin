@@ -11,7 +11,6 @@ import type { SessionManager } from './session-manager.js'
 import { getOrCreateOrchestratorId } from './orchestrator-manager.js'
 import { OrchestratorMemory } from './orchestrator-memory.js'
 import { OrchestratorChildManager } from './orchestrator-children.js'
-import type { OrchestratorMonitor } from './orchestrator-monitor.js'
 import type { RunStore } from './run-store.js'
 import { createSessionRouter } from './orchestrator-session-router.js'
 import { createMemoryRouter } from './orchestrator-memory-router.js'
@@ -32,7 +31,6 @@ export function createOrchestratorRouter(
   verifyToken: VerifyFn,
   extractToken: ExtractFn,
   sessions: SessionManager,
-  monitorRef?: { current: OrchestratorMonitor | null },
   verifyTokenOrSessionToken?: VerifySessionFn,
   injectedMemory?: OrchestratorMemory,
   injectedChildren?: OrchestratorChildManager,
@@ -68,11 +66,11 @@ export function createOrchestratorRouter(
   // Mount sub-routers. The Joe session routes go first: their paths are more
   // specific than the session router's /sessions/:id handlers.
   if (joeBridge) router.use(createJoeSessionRouter(verifyOrchestratorAuth, actorOf, joeBridge))
-  router.use(createSessionRouter(verifyOrchestratorAuth, sessions, memory, children, monitorRef, tasks))
+  router.use(createSessionRouter(verifyOrchestratorAuth, sessions, memory, children, tasks))
   if (tasks) router.use(createTaskRouter(verifyOrchestratorAuth, actorOf, tasks))
   if (automations) router.use(createAutomationRouter(verifyOrchestratorAuth, actorOf, automations))
   if (maintenance && automations) router.use(createMaintenanceRouter(verifyOrchestratorAuth, actorOf, maintenance, (repo) => automations.isValidRepo(repo)))
-  router.use(createMemoryRouter(verifyOrchestratorAuth, memory, monitorRef))
+  router.use(createMemoryRouter(verifyOrchestratorAuth, memory))
 
   return router
 }

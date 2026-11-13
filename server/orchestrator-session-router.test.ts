@@ -572,7 +572,7 @@ describe('createSessionRouter', () => {
         } as unknown as OrchestratorTaskService
         children = makeChildren()
         vi.mocked(children.spawn).mockResolvedValue({ id: 'child' } as never)
-        server = await startApp(createSessionRouter(() => true, makeSessions(), makeMemory(), children, undefined, tasks))
+        server = await startApp(createSessionRouter(() => true, makeSessions(), makeMemory(), children, tasks))
         const api = new CodekinApi({ baseUrl: server.baseUrl, token: 'test' })
 
         await api.spawnChild({ repo, task: 'do it', branchName: 'fix/it', taskId: 'task-1' })

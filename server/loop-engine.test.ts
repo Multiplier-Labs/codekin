@@ -550,6 +550,15 @@ describe('LoopEngine', () => {
     expect(engine.cancel(runId)).toBe(false)
   })
 
+  it('reportsPromptsFor covers an active run\'s maker, and only while the run is active', async () => {
+    const run = await engine.startRun(input(recipeFromYaml()))
+    const maker = store.getRun(run.id)!.makerSessionId!
+    expect(engine.reportsPromptsFor(maker)).toBe(true)
+    expect(engine.reportsPromptsFor('some-manual-session')).toBe(false)
+    engine.cancel(run.id)
+    expect(engine.reportsPromptsFor(maker)).toBe(false)
+  })
+
   it('session prompts surface as a state reason and event, deduped per request', async () => {
     const run = await engine.startRun(input(recipeFromYaml()))
     const maker = store.getRun(run.id)!.makerSessionId!

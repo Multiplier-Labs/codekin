@@ -5,7 +5,6 @@
 import { Router } from 'express'
 import type { Request } from 'express'
 import { OrchestratorMemory, type MemoryType, type TrustLevel } from './orchestrator-memory.js'
-import type { OrchestratorMonitor } from './orchestrator-monitor.js'
 
 // ---------------------------------------------------------------------------
 // Request body interfaces
@@ -34,10 +33,6 @@ interface TrustPinBody extends TrustActionBody {
   level: TrustLevel
 }
 
-interface NotificationMarkBody {
-  ids: string[]
-}
-
 // ---------------------------------------------------------------------------
 // Router factory
 // ---------------------------------------------------------------------------
@@ -45,7 +40,6 @@ interface NotificationMarkBody {
 export function createMemoryRouter(
   verifyOrchestratorAuth: (req: Request) => boolean,
   memory: OrchestratorMemory,
-  monitorRef?: { current: OrchestratorMonitor | null },
 ): Router {
   const router = Router()
 
@@ -174,33 +168,6 @@ export function createMemoryRouter(
     if (!verifyOrchestratorAuth(req)) return res.status(401).json({ error: 'Unauthorized' })
 
     memory.resetAllTrust()
-    res.json({ ok: true })
-  })
-
-  // -------------------------------------------------------------------------
-  // Notifications
-  // -------------------------------------------------------------------------
-
-  /** Get pending notifications from the monitor. */
-  router.get('/api/orchestrator/notifications', (req, res) => {
-    if (!verifyOrchestratorAuth(req)) return res.status(401).json({ error: 'Unauthorized' })
-
-    const monitor = monitorRef?.current
-    if (!monitor) return res.json({ notifications: [] })
-
-    const all = req.query.all === 'true'
-    res.json({ notifications: all ? monitor.getAll() : monitor.getPending() })
-  })
-
-  /** Mark notifications as delivered. */
-  router.post('/api/orchestrator/notifications/mark-delivered', (req: Request<Record<string, string>, unknown, NotificationMarkBody>, res) => {
-    if (!verifyOrchestratorAuth(req)) return res.status(401).json({ error: 'Unauthorized' })
-
-    const monitor = monitorRef?.current
-    if (!monitor) return res.json({ ok: true })
-
-    const { ids } = req.body
-    if (Array.isArray(ids)) monitor.markDelivered(ids)
     res.json({ ok: true })
   })
 

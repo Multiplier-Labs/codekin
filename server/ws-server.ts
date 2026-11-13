@@ -52,7 +52,7 @@ import { createRunsRouter } from './runs-routes.js'
 import { RunStore } from './run-store.js'
 import { TaskStore } from './task-store.js'
 import { OrchestratorTaskService } from './orchestrator-tasks.js'
-import { sendOrchestratorNotification } from './orchestrator-notify.js'
+import { sendOrchestratorNotification, notifySessionPrompt } from './orchestrator-notify.js'
 import { HARNESSES } from './harness-registry.js'
 import { CommitEventHandler } from './commit-event-handler.js'
 import { jsonParse } from './json-parse.js'
@@ -78,7 +78,7 @@ import { createRelayDevicesRouter } from './relay/devices-local-routes.js'
 import { resolveLocalTarget } from './relay/connector-proxy.js'
 import { codekinPackageVersion } from './relay/relay-credential.js'
 import { createOrchestratorRouter } from './orchestrator-routes.js'
-import { ensureOrchestratorRunning, getOrchestratorProvider, getOrchestratorSessionId, isOrchestratorSession, getOrCreateOrchestratorId } from './orchestrator-manager.js'
+import { ensureOrchestratorRunning, getOrchestratorProvider, getOrCreateOrchestratorId } from './orchestrator-manager.js'
 import { OrchestratorMonitor } from './orchestrator-monitor.js'
 import { getOrchestratorOutbox } from './orchestrator-outbox.js'
 import { PORT as CONFIG_PORT, BIND_HOST, AUTH_TOKEN as configAuthToken, CORS_ORIGIN, FRONTEND_DIST, AGENT_DISPLAY_NAME, getAgentDisplayName, setAgentDisplayNameResolver, TRUST_PROXY, AUTO_RESTORE_SESSIONS, ORCHESTRATOR_MONITOR, DATA_DIR, resolveRepoPathInRoot } from './config.js'
@@ -386,7 +386,7 @@ const interruptedAgentRuns = runStore.failInterrupted('agent')
 if (interruptedAgentRuns.length) {
   console.log(`[run-store] Failed ${interruptedAgentRuns.length} agent run(s) interrupted by restart`)
 }
-// Orchestrator router — monitorRef is populated after workflow engine init
+// Set once the workflow engine is up; the loop event listener forwards to it.
 const orchestratorMonitorRef: { current: OrchestratorMonitor | null } = { current: null }
 // Child manager is created here (not router-internal) so the deployment
 // breach handler can spawn diagnostic children through the same instance.
@@ -440,7 +440,7 @@ taskService.setGuard(maintenanceService)
 automationService.setChangeObserver((id, action) => maintenanceService.affectedBy(id, action))
 childManager.onChildUpdate((child) => taskService.syncFromChild(child))
 childManager.recoverInterrupted(interruptedAgentRuns)
-app.use(createOrchestratorRouter(verifyToken, extractToken, sessions, orchestratorMonitorRef, verifyTokenOrSessionToken, undefined, childManager, runStore, taskService, automationService, joeBridge, maintenanceService))
+app.use(createOrchestratorRouter(verifyToken, extractToken, sessions, verifyTokenOrSessionToken, undefined, childManager, runStore, taskService, automationService, joeBridge, maintenanceService))
 // Loops 2.0 — durable, event-sourced outcome loops (docs/LOOPS-REWRITE-SPEC.md).
 const loopStore = new LoopStore()
 const loopArtifacts = new LoopArtifactStore(join(DATA_DIR, 'loop-artifacts'))
@@ -702,34 +702,14 @@ server.listen(port, BIND_HOST, () => {
     console.log('[boot]   Set CODEKIN_AUTO_RESTORE_SESSIONS=true to re-enable.')
   }
 
-  // Wire up prompt listener: notify the orchestrator session when any child
-  // session has a pending approval so it can respond via the REST API.
+  // Prompt listener: tell the orchestrator a session is waiting on an
+  // approval or answer, so it can respond via pending_prompts. Same
+  // idle-gated path as every other Joe notification.
   sessions.onSessionPrompt((sessionId, promptType, toolName, requestId) => {
-    const orchestratorId = getOrchestratorSessionId(sessions)
-    if (!orchestratorId) return
-    // Don't notify the orchestrator about its own prompts
-    const session = sessions.get(sessionId)
-    if (!session || isOrchestratorSession(session.source)) return
-    // Joe's own children are reported by the child manager (deduplicated,
-    // through the outbox's idle gate) — don't interrupt Joe a second time.
-    if (childManager.get(sessionId)) return
-
-    const displayName = getAgentDisplayName()
-    const actionDesc = toolName ? `Tool: ${toolName}` : 'Unknown tool'
-    const message = [
-      `[Agent ${displayName} — Child Session Needs ${promptType === 'question' ? 'Answer' : 'Approval'}]`,
-      `Session: ${session.name} (${sessionId})`,
-      actionDesc,
-      `Request ID: ${requestId ?? 'unknown'}`,
-      '',
-      `Use the pending-prompts endpoint to see details and respond:`,
-      `curl -s "http://localhost:$CODEKIN_PORT/api/orchestrator/sessions/pending-prompts" -H "Authorization: Bearer $CODEKIN_AUTH_TOKEN"`,
-    ].join('\n')
-
-    const orchestrator = sessions.get(orchestratorId)
-    if (orchestrator?.claudeProcess?.isAlive()) {
-      sessions.sendInput(orchestratorId, message)
-    }
+    notifySessionPrompt(sessions, {
+      isManagedChild: (id) => Boolean(childManager.get(id)),
+      isLoopSession: (id) => loopEngine.reportsPromptsFor(id),
+    }, { sessionId, promptType, toolName, requestId })
   })
 
   // Initialize workflow engine
