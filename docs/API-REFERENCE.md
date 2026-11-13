@@ -293,10 +293,10 @@ Detach a folder (the `path` as the session lists it). The agent is told to stop 
 
 ### `POST /api/sessions/:id/move`
 
-Move a scratch session's folder into another folder, keeping its name, and continue the session there. This only works between turns, and only for Claude and Codex sessions. Claude's conversation storage is copied to the new folder's project directory. Codex resumes its thread with the new working directory. The agent is told about the move before the next message.
+Move a scratch session's folder into another folder, keeping its name, and continue the session there. This only works between turns. Claude's conversation storage is copied to the new folder's project directory, and Codex resumes its thread with the new working directory. Grok and OpenCode tie a conversation to its folder, so they start a new one in the moved folder. Its first message carries a handoff from the old transcript (Grok), or a summary of the session's recent history (OpenCode, or when no transcript is found). The agent is told about the move before the next message.
 
 **Request body:** `{ "parent": "~/projects" }`. The parent must be an existing folder under the home directory or the repositories root, outside the scratch folders. The target (`<parent>/<folder name>`) must not exist yet.
-**Response:** `{ "path": "/home/user/projects/brisk-otter", "place": { … } }`. `400` invalid parent or target already exists. `404` unknown session. `409` not a scratch folder, a Grok or OpenCode session, or a turn is running.
+**Response:** `{ "path": "/home/user/projects/brisk-otter", "place": { … } }`. `400` invalid parent or target already exists. `404` unknown session. `409` not a scratch folder, or a turn is running.
 
 ### `POST /api/sessions/:id/publish`
 

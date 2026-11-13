@@ -978,9 +978,8 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
   // "Keep this work?" on a scratch session that holds something, between turns (phase 3).
   const keepWorkDismissed = usePref('keepWorkDismissed')
   const activePlace = activeSession?.place
-  // Grok and OpenCode key their sessions by folder, so only Claude and Codex can move it.
-  const canMoveFolder = (activeSession?.provider ?? 'claude') === 'claude' || activeSession?.provider === 'codex'
-  const showKeepThisWork = !!activeSession && activePlace?.kind === 'scratch' && !!activePlace.hasFiles && (!activePlace.remote || canMoveFolder)
+  // Published already still leaves Move to a folder.
+  const showKeepThisWork = !!activeSession && activePlace?.kind === 'scratch' && !!activePlace.hasFiles
     && activeSession.source === 'manual' && !isProcessing && messages.some(m => m.type === 'user')
     && !(keepWorkDismissed ?? []).includes(activeSession.id)
 
@@ -1273,10 +1272,10 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
                   return url
                 }}
                 token={settings.token}
-                onMove={canMoveFolder ? async (parent) => {
+                onMove={async (parent) => {
                   await moveSessionFolder(settings.token, activeSession.id, parent)
                   await refreshSessions()
-                } : undefined}
+                }}
                 onDismiss={() => { setPref('keepWorkDismissed', [...(keepWorkDismissed ?? []).filter(id => id !== activeSession.id), activeSession.id].slice(-200)) }}
               />
             ) : undefined}

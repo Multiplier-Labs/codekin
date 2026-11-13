@@ -227,21 +227,26 @@ describe('attached places', () => {
 })
 
 describe('move a scratch folder', () => {
-  it('moves the folder, repoints the session and tells the agent; refuses other agents and running turns', async () => {
+  async function setup() {
     const { configureScratchRoot } = await import('./places.js')
+    const { mkdirSync, writeFileSync } = await import('fs')
     const base = realpathSync(mkdtempSync(join(homedir(), '.codekin-move-test-')))
     const scratch = join(base, 'scratch')
-    const { mkdirSync, writeFileSync, existsSync } = await import('fs')
     mkdirSync(join(scratch, 'brisk-otter'), { recursive: true })
     mkdirSync(join(base, 'projects'))
     writeFileSync(join(scratch, 'brisk-otter', 'a.txt'), 'x')
     configureScratchRoot(scratch)
+    const cleanup = () => { configureScratchRoot(''); rmSync(base, { recursive: true, force: true }) }
+    return { base, scratch, cleanup }
+  }
+
+  it('moves the folder, repoints a Claude session and tells the agent; waits for a running turn', async () => {
+    const { base, scratch, cleanup } = await setup()
+    const { existsSync } = await import('fs')
     try {
       const sm = new SessionManager()
-      const grok = sm.create('g', join(scratch, 'brisk-otter'), { provider: 'grok' })
-      expect(await sm.moveSessionFolder(grok.id, join(base, 'projects'))).toMatchObject({ ok: false, status: 409 })
-
       const s = sm.create('c', join(scratch, 'brisk-otter'))
+      s.claudeSessionId = 'claude-conv'
       s.isProcessing = true
       expect(await sm.moveSessionFolder(s.id, join(base, 'projects'))).toMatchObject({ ok: false, error: /turn/ })
       s.isProcessing = false
@@ -251,10 +256,60 @@ describe('move a scratch folder', () => {
       expect(s.workingDir).toBe(join(base, 'projects', 'brisk-otter'))
       expect(existsSync(join(base, 'projects', 'brisk-otter', 'a.txt'))).toBe(true)
       expect(s.pendingPlaceNotes?.[0]).toContain('<codekin-place-moved>')
+      // Claude resumes the same conversation.
+      expect(s.claudeSessionId).toBe('claude-conv')
+      expect(mocks.generateHandoff).not.toHaveBeenCalled()
       expect(sm.list().find(i => i.id === s.id)?.place?.kind).toBe('folder')
     } finally {
-      configureScratchRoot('')
-      rmSync(base, { recursive: true, force: true })
+      cleanup()
+    }
+  })
+
+  it('carries a Grok conversation over with a handoff, upgraded to the distilled one before the next message', async () => {
+    const { base, scratch, cleanup } = await setup()
+    try {
+      const raw: Handoff = { ...FAKE_HANDOFF, sourceHarness: 'grok', distilled: false, content: 'raw extract' }
+      const distilled: Handoff = { ...FAKE_HANDOFF, sourceHarness: 'grok', distilled: true, content: 'distilled doc' }
+      mocks.generateHandoff.mockReset()
+      mocks.generateHandoff.mockResolvedValueOnce(raw).mockResolvedValueOnce(distilled)
+      const sm = new SessionManager()
+      const s = sm.create('g', join(scratch, 'brisk-otter'), { provider: 'grok' })
+      s.claudeSessionId = '11111111-2222-3333-4444-555555555555'
+
+      const res = await sm.moveSessionFolder(s.id, join(base, 'projects'))
+      expect(res.ok).toBe(true)
+      // The transcript is read from the old folder's session, before the move.
+      expect(mocks.generateHandoff.mock.calls[0][0]).toMatchObject({ provider: 'grok', workingDir: join(scratch, 'brisk-otter'), harnessSessionId: '11111111-2222-3333-4444-555555555555' })
+      expect(s.claudeSessionId).toBeNull()
+      await vi.waitFor(() => { expect(s.pendingHandoff).toBe(distilled) })
+
+      const cp = fakeProcess(true)
+      s.claudeProcess = cp
+      sm.sendInput(s.id, 'carry on')
+      const sent = cp.sendMessage.mock.calls[0][0] as string
+      expect(sent).toContain('<codekin-place-moved>')
+      expect(sent).toContain('[HANDOFF from grok]')
+      expect(sent).toContain('distilled doc')
+    } finally {
+      cleanup()
+    }
+  })
+
+  it('moves an OpenCode session to a fresh conversation, summarized from history', async () => {
+    const { base, scratch, cleanup } = await setup()
+    try {
+      mocks.generateHandoff.mockReset()
+      mocks.generateHandoff.mockResolvedValue(null)
+      const sm = new SessionManager()
+      const s = sm.create('o', join(scratch, 'brisk-otter'), { provider: 'opencode' })
+      s.claudeSessionId = 'ses_abc'
+      const res = await sm.moveSessionFolder(s.id, join(base, 'projects'))
+      expect(res.ok).toBe(true)
+      expect(s.claudeSessionId).toBeNull()
+      expect(s.pendingHandoff).toBeUndefined()
+      expect(s.outputHistory.some(m => m.type === 'system_message' && m.text.includes('OpenCode starts a new conversation'))).toBe(true)
+    } finally {
+      cleanup()
     }
   })
 })

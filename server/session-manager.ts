@@ -1684,16 +1684,17 @@ export class SessionManager {
    * Move a scratch session's folder into `rawParent` and repoint the session
    * (Keep this work? → Move to a folder…). Between turns only. Claude's
    * conversation storage is copied to the new folder's project directory;
-   * Codex resumes its thread with the new cwd. Grok and OpenCode key their
-   * sessions by directory, so they don't move in this phase.
+   * Codex resumes its thread with the new cwd. Grok and OpenCode tie a
+   * conversation to its folder, so they start a fresh one in the new folder
+   * and carry the old one over like a provider switch: a handoff from the
+   * transcript (Grok), else the recent-history summary (OpenCode, or no
+   * transcript found) on the next message.
    */
   async moveSessionFolder(sessionId: string, rawParent: unknown): Promise<{ ok: true; path: string } | { ok: false; status: number; error: string }> {
     const session = this.sessions.get(sessionId)
     if (!session) return { ok: false, status: 404, error: 'Session not found' }
     const provider = session.provider ?? 'claude'
-    if (provider !== 'claude' && provider !== 'codex') {
-      return { ok: false, status: 409, error: 'Only Claude and Codex sessions can move their folder for now' }
-    }
+    const resumesInPlace = provider === 'claude' || provider === 'codex'
     const source = session.workingDir
     invalidatePlace(source)
     if (session.groupDir || session.worktreePath || describePlace(source).kind !== 'scratch') {
@@ -1705,6 +1706,15 @@ export class SessionManager {
 
     const wasAlive = session.claudeProcess?.isAlive() ?? false
     await this.stopClaudeAndWait(sessionId)
+    // Grok/OpenCode: read the transcript before anything moves. A raw extract
+    // is ready at once; the distilled document replaces it if it's done
+    // before the next message.
+    const handoffSource = !resumesInPlace && session.claudeSessionId
+      ? { codekinSessionId: session.id, provider, workingDir: source, harnessSessionId: session.claudeSessionId }
+      : null
+    const rawHandoff = handoffSource
+      ? await generateHandoff(handoffSource, () => Promise.reject(new Error('raw extract first'))).catch(() => null)
+      : null
     try {
       moveDir(source, checked.target)
     } catch (err) {
@@ -1719,14 +1729,34 @@ export class SessionManager {
       }
     }
     session.workingDir = checked.target
+    if (!resumesInPlace) {
+      // A fresh conversation in the new folder; sendInput prefixes the
+      // handoff, or the history summary when there is none.
+      session.claudeSessionId = null
+      if (rawHandoff) session.pendingHandoff = rawHandoff
+    }
     invalidatePlace(source)
     invalidatePlace(checked.target)
     this.persistToDisk()
+    const label = provider === 'grok' ? 'Grok' : 'OpenCode'
     this.queuePlaceNote(session.id, [
       '<codekin-place-moved>',
       `The user moved this session's folder from ${source} to ${checked.target}. Your working directory is now ${checked.target}; the old path no longer exists.`,
       '</codekin-place-moved>',
-    ].join('\n'), `Moved to ${checked.target}`)
+    ].join('\n'), resumesInPlace
+      ? `Moved to ${checked.target}`
+      : `Moved to ${checked.target}. ${label} starts a new conversation there and gets a summary of this one with your next message.`)
+    if (rawHandoff && handoffSource && !this.isRateLimited()) {
+      void generateHandoff({ ...handoffSource, transcriptPath: rawHandoff.transcriptPath })
+        .then((distilled) => {
+          // Only while the raw extract is still waiting to be sent.
+          if (distilled?.distilled && session.pendingHandoff === rawHandoff) {
+            session.pendingHandoff = distilled
+            this.persistToDiskDebounced()
+          }
+        })
+        .catch(() => { /* the raw extract stands */ })
+    }
     if (wasAlive) this.startClaude(sessionId)
     return { ok: true, path: checked.target }
   }
