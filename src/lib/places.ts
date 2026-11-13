@@ -196,6 +196,14 @@ export function isNotRepoPlace(place: SessionPlace | undefined): boolean {
   return !!place && !place.git && place.kind !== 'org'
 }
 
+/** Short label for a folder: `scratch/<name>`, the repo or owner name, or `~/path`. */
+export function sessionPlaceLabel(path: string, place: SessionPlace, home?: string | null): string {
+  if (place.kind === 'scratch') return `scratch/${baseName(path)}`
+  if (place.kind === 'org') return place.owner ?? baseName(path)
+  if (place.kind === 'repo') return baseName(path)
+  return tildify(path, home)
+}
+
 /** Tag shown next to a place in lists and sidebar group headers. */
 export function placeTag(kind: DraftPlaceKind | SessionPlace['kind'], git: boolean): string {
   switch (kind) {

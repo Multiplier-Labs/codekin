@@ -562,6 +562,33 @@ export async function setScratchRoot(token: string, path: string): Promise<{ pat
   return jsonBody<{ path: string; effective: string }>(res)
 }
 
+/** Attach a folder to a running session; returns the attached folders (realpaths). */
+export async function attachFolder(token: string, sessionId: string, path: string): Promise<string[]> {
+  const res = await transport.authFetch(`/api/sessions/${encodeURIComponent(sessionId)}/attached`, {
+    method: 'POST',
+    headers: headers(token),
+    body: JSON.stringify({ path }),
+  })
+  if (!res.ok) {
+    const data = await errorBody(res, 'Could not attach the folder')
+    throw new Error(data.error ?? `Could not attach the folder: ${res.status}`)
+  }
+  return (await jsonBody<{ attached: string[] }>(res)).attached
+}
+
+/** Detach a folder attached with attachFolder(). */
+export async function detachFolder(token: string, sessionId: string, path: string): Promise<string[]> {
+  const res = await transport.authFetch(`/api/sessions/${encodeURIComponent(sessionId)}/attached?path=${encodeURIComponent(path)}`, {
+    method: 'DELETE',
+    headers: headers(token),
+  })
+  if (!res.ok) {
+    const data = await errorBody(res, 'Could not detach the folder')
+    throw new Error(data.error ?? `Could not detach the folder: ${res.status}`)
+  }
+  return (await jsonBody<{ attached: string[] }>(res)).attached
+}
+
 /** Run `git init` in a session's folder; returns the session's new place. */
 export async function gitInit(token: string, sessionId: string): Promise<SessionPlace> {
   const res = await transport.authFetch(`/api/sessions/${encodeURIComponent(sessionId)}/git-init`, {

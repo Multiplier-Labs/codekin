@@ -8,7 +8,7 @@ vi.mock('./prefs', () => ({
 
 import {
   NEW_SCRATCH, MAX_RECENT_PLACES, defaultPlace, withRecentPlace, placeKey, samePlace,
-  placeFromRepo, placeFromPath, placeFromSession, placeFromOwner, placeHint, placeTag, isNotRepoPlace,
+  placeFromRepo, placeFromPath, sessionPlaceLabel, placeFromSession, placeFromOwner, placeHint, placeTag, isNotRepoPlace,
   tildify, untildify, baseName, getRecentPlaces, rememberPlace, type DraftPlace,
 } from './places'
 import type { ApiRepo } from '../hooks/useRepos'
@@ -156,5 +156,14 @@ describe('placeTag', () => {
     expect(placeTag('folder', false)).toBe('folder')
     expect(placeTag('folder', true)).toBe('git folder')
     expect(placeTag('repo', true)).toBe('repo')
+  })
+})
+
+describe('sessionPlaceLabel', () => {
+  it('names scratch, org, repo and folder places', () => {
+    expect(sessionPlaceLabel('/home/sam/codekin/scratch/brisk-otter', { kind: 'scratch', git: false }, '/home/sam')).toBe('scratch/brisk-otter')
+    expect(sessionPlaceLabel('/home/sam/repos/acme-co', { kind: 'org', git: false, owner: 'acme-co' }, '/home/sam')).toBe('acme-co')
+    expect(sessionPlaceLabel('/home/sam/repos/acme-co/api', { kind: 'repo', git: true }, '/home/sam')).toBe('api')
+    expect(sessionPlaceLabel('/home/sam/notes', { kind: 'folder', git: false }, '/home/sam')).toBe('~/notes')
   })
 })

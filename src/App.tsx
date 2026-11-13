@@ -39,7 +39,9 @@ import { deriveActivityLabel } from './lib/deriveActivityLabel'
 import { emitWorkflowEvent } from './lib/workflowEvents'
 import { setAgentHealth, getAgentHealth, resolveDefaultProvider } from './lib/agentHealth'
 import { useAgentHealth } from './hooks/useAgentHealth'
-import { getQueueMessages, getAgentName, listArchivedSessions, type ArchivedSessionInfo, cloneRepo, createScratch, gitInit, orgFolder, uploadAndBuildMessage } from './lib/ccApi'
+import { getQueueMessages, getAgentName, listArchivedSessions, type ArchivedSessionInfo, attachFolder, cloneRepo, createScratch, detachFolder, gitInit, orgFolder, uploadAndBuildMessage } from './lib/ccApi'
+import { ContextBar } from './components/ContextBar'
+import { sessionIsShared } from './hosted/sessionShares'
 import { SettingsView } from './components/settings/SettingsView'
 import { LeftSidebar } from './components/LeftSidebar'
 import { MobileTopBar } from './components/MobileTopBar'
@@ -49,7 +51,7 @@ import type { InputBarHandle } from './components/InputBar'
 import { NewSessionComposer } from './components/NewSessionComposer'
 import { EnvironmentChecklist } from './components/EnvironmentChecklist'
 import { defaultPlace, getRecentPlaces, isNotRepoPlace, placeFromSession, rememberPlace, type DraftPlace } from './lib/places'
-import { startDraftSession } from './lib/startDraftSession'
+import { resolvePlacePath, startDraftSession } from './lib/startDraftSession'
 import { useDraftPermissionMode, useDraftState } from './hooks/useDraftState'
 import { DiffPanel } from './components/DiffPanel'
 import { OrchestratorContent } from './components/OrchestratorContent'
@@ -617,6 +619,33 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
       draft.fail(err instanceof Error ? err.message : String(err))
     })
   }, [settings.token, draft, currentModel, availableModels, draftPlace, draftProvider, currentEffort, draftPermissionMode, useWorktree, wsCreateSession])
+
+  // Attach a place to the open session (phase 3): resolve it to a folder
+  // (clone a repo, prepare an org folder) the same way Send does, then attach.
+  const handleAttach = useCallback(async (picked: DraftPlace, onProgress: (text: string) => void) => {
+    const token = settings.token
+    const sessionId = activeSessionId
+    if (!token || !sessionId) return
+    const machineId = (transport as { machineId?: string }).machineId
+    if (isHosted && machineId && await sessionIsShared(machineId, sessionId)
+      && !window.confirm('This session is shared. People you shared it with can reach the attached folder through the agent. Attach it?')) return
+    const resolved = await resolvePlacePath(picked, {
+      createScratch: () => createScratch(token),
+      cloneRepo: (owner, name) => cloneRepo(token, owner, name),
+      orgFolder: (owner) => orgFolder(token, owner),
+      onProgress: (text) => { if (text) onProgress(text) },
+    })
+    onProgress('Attaching…')
+    await attachFolder(token, sessionId, resolved.path)
+    await refreshSessions()
+  }, [settings.token, activeSessionId, refreshSessions])
+
+  const handleDetach = useCallback(async (path: string) => {
+    const token = settings.token
+    if (!token || !activeSessionId) return
+    await detachFolder(token, activeSessionId, path)
+    await refreshSessions()
+  }, [settings.token, activeSessionId, refreshSessions])
 
   // Handle built-in slash commands locally (not sent to Claude)
   const handleBuiltinCommand = useCallback((command: string, args: string) => {
@@ -1214,6 +1243,20 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
             activeRepoName={activeRepo?.name ?? activeWorkingDir?.split('/').pop() ?? 'this repo'}
             place={activeSession?.place}
             placePath={activeSession ? activeSession.groupDir ?? activeSession.workingDir : undefined}
+            contextBar={activeSession?.place && activeSession.source === 'manual' && effectiveOwner(activeSession) !== 'joe' ? (
+              <ContextBar
+                token={settings.token}
+                path={activeSession.groupDir ?? activeSession.workingDir}
+                place={activeSession.place}
+                attached={activeSession.attached ?? []}
+                groups={groups}
+                recent={recentPlacesPref ?? []}
+                isMobile={isMobile}
+                disabled={!settings.token}
+                onAttach={handleAttach}
+                onDetach={handleDetach}
+              />
+            ) : undefined}
             onExecuteTentative={() => handleExecuteTentative(activeSessionId)}
             onDiscardTentative={() => handleDiscardTentative(activeSessionId)}
             inputBarRef={inputBarRef}

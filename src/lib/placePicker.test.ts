@@ -76,6 +76,12 @@ describe('root view', () => {
     expect(rows.filter(r => r.label === 'Scratch folder')).toHaveLength(1)
   })
 
+  it('offers no scratch folder when attaching', () => {
+    const model = pickerModel(INITIAL_PICKER_STATE, data({ allowScratch: false }))
+    expect(model.sections.map(s => s.title)).toEqual(['Recent', 'This machine', 'GitHub'])
+    expect(flatRows(model).some(r => r.label === 'Scratch folder')).toBe(false)
+  })
+
   it('drops the Recent section with no history', () => {
     expect(pickerModel(INITIAL_PICKER_STATE, data({ recent: [] })).sections[0].title).toBe('Start fresh')
   })
