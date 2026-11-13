@@ -16,8 +16,8 @@ import { readReport, getReportsSince } from './orchestrator-reports.js'
 import { loadWorkflowConfig } from './workflow-config.js'
 import type { OrchestratorMemory } from './orchestrator-memory.js'
 import { ChildControlError, isTerminalChildStatus, type OrchestratorChildManager } from './orchestrator-children.js'
-import type { OrchestratorMonitor } from './orchestrator-monitor.js'
 import { TaskActionError, type OrchestratorTaskService } from './orchestrator-tasks.js'
+import { getOrchestratorOutbox } from './orchestrator-outbox.js'
 
 // ---------------------------------------------------------------------------
 // Per-IP rate limiter for child-session spawn (mirrors auth-routes pattern).
@@ -107,7 +107,6 @@ export function createSessionRouter(
   sessions: SessionManager,
   memory: OrchestratorMemory,
   children: OrchestratorChildManager,
-  monitorRef?: { current: OrchestratorMonitor | null },
   tasks?: OrchestratorTaskService,
 ): Router {
   const router = Router()
@@ -581,7 +580,6 @@ export function createSessionRouter(
     if (!verifyOrchestratorAuth(req)) return res.status(401).json({ error: 'Unauthorized' })
 
     const repoItems = memory.list({ memoryType: 'repo_context' })
-    const pendingNotifications = monitorRef?.current?.getPending() ?? []
     const activeChildren = children.activeCount()
     const trustRecords = memory.listTrustRecords()
     const autoApproved = trustRecords.filter(t => t.effectiveLevel !== 'ask').length
@@ -589,7 +587,8 @@ export function createSessionRouter(
     res.json({
       stats: {
         managedRepos: repoItems.length,
-        pendingNotifications: pendingNotifications.length,
+        // Notifications not yet delivered to the orchestrator (held while it is busy or away).
+        pendingNotifications: getOrchestratorOutbox().size(),
         activeChildSessions: activeChildren,
         totalChildSessions: children.list().length,
         trustRecords: trustRecords.length,

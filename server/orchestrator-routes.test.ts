@@ -119,7 +119,6 @@ describe('createOrchestratorRouter', () => {
         extractToken,
         makeSessions(),
         undefined,
-        undefined,
         makeMemory(),
         makeChildren(),
       )
@@ -155,7 +154,6 @@ describe('createOrchestratorRouter', () => {
         verifyToken,
         extractToken,
         makeSessions(),
-        undefined,
         undefined, // no session-token verifier
         makeMemory(),
         makeChildren(),
@@ -200,7 +198,6 @@ describe('createOrchestratorRouter', () => {
         verifyToken,
         extractToken,
         makeSessions(),
-        undefined,
         verifyTokenOrSessionToken,
         makeMemory(),
         makeChildren(),

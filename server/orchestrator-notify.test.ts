@@ -15,12 +15,19 @@ vi.mock('./orchestrator-outbox.js', () => ({
   getOrchestratorOutbox: () => ({ enqueue: () => {} }),
 }))
 
-import { sendOrchestratorNotification, type NotificationOutbox } from './orchestrator-notify.js'
+const orchestratorId = vi.hoisted(() => ({ current: 'orch-id' as string | null }))
+vi.mock('./orchestrator-manager.js', () => ({
+  getOrchestratorSessionId: () => orchestratorId.current,
+  isOrchestratorSession: (source: string | undefined) => source === 'orchestrator',
+}))
+
+import { sendOrchestratorNotification, notifyOrchestrator, notifySessionPrompt, type NotificationOutbox } from './orchestrator-notify.js'
 
 function makeSessions(opts: {
   exists: boolean
   alive: boolean
   isProcessing?: boolean
+  rateLimited?: boolean
 }) {
   const sentInputs: Array<{ id: string; data: string }> = []
   const session = opts.exists
@@ -34,6 +41,7 @@ function makeSessions(opts: {
 
   return {
     get: vi.fn(() => session),
+    isRateLimited: vi.fn(() => opts.rateLimited ?? false),
     sendInput: vi.fn((id: string, data: string) => { sentInputs.push({ id, data }) }),
     _sentInputs: sentInputs,
   } as any
@@ -132,5 +140,79 @@ describe('sendOrchestratorNotification', () => {
 
     expect(ok).toBe(false)
     expect(sessions.sendInput).not.toHaveBeenCalled()
+  })
+})
+
+describe('sendOrchestratorNotification rate limit', () => {
+  it('queues instead of sending while the rate-limit breaker is open', () => {
+    const sessions = makeSessions({ exists: true, alive: true, rateLimited: true })
+    const outbox = makeOutbox()
+    expect(sendOrchestratorNotification(sessions, { parentSessionId: 'p', label: 'INFO', title: 't', body: 'b' }, outbox)).toBe(true)
+    expect(sessions.sendInput).not.toHaveBeenCalled()
+    expect(outbox.enqueue).toHaveBeenCalledWith({ label: 'INFO', title: 't', body: 'b' })
+  })
+})
+
+describe('notifyOrchestrator', () => {
+  it('sends to the configured orchestrator session', () => {
+    orchestratorId.current = 'orch-id'
+    const sessions = makeSessions({ exists: true, alive: true })
+    expect(notifyOrchestrator(sessions, { label: 'ALERT', title: 't', body: 'b' }, makeOutbox())).toBe(true)
+    expect(sessions._sentInputs[0].id).toBe('orch-id')
+  })
+
+  it('does nothing, and queues nothing, when no orchestrator is configured', () => {
+    orchestratorId.current = null
+    const sessions = makeSessions({ exists: true, alive: true })
+    const outbox = makeOutbox()
+    expect(notifyOrchestrator(sessions, { label: 'ALERT', title: 't', body: 'b' }, outbox)).toBe(false)
+    expect(sessions.sendInput).not.toHaveBeenCalled()
+    expect(outbox.enqueue).not.toHaveBeenCalled()
+    orchestratorId.current = 'orch-id'
+  })
+})
+
+describe('notifySessionPrompt', () => {
+  function promptSessions(opts: { source: string; orchestratorBusy: boolean }) {
+    const prompting = { name: 'my-session', source: opts.source }
+    const orchestrator = { isProcessing: opts.orchestratorBusy, claudeProcess: { isAlive: () => true } }
+    return {
+      get: vi.fn((id: string) => (id === 'orch-id' ? orchestrator : id === 's1' ? prompting : undefined)),
+      isRateLimited: () => false,
+      sendInput: vi.fn(),
+    } as any
+  }
+  const none = { isManagedChild: () => false, isLoopSession: () => false }
+  const prompt = { sessionId: 's1', promptType: 'permission' as const, toolName: 'Bash', requestId: 'r1' }
+
+  it('holds a manual session\'s prompt in the outbox while the orchestrator is mid-turn', () => {
+    const sessions = promptSessions({ source: 'manual', orchestratorBusy: true })
+    const outbox = makeOutbox()
+    expect(notifySessionPrompt(sessions, none, prompt, outbox)).toBe(true)
+    expect(sessions.sendInput).not.toHaveBeenCalled()
+    expect(outbox.enqueue).toHaveBeenCalledWith(expect.objectContaining({
+      label: 'Session Needs Approval',
+      title: 'my-session (s1)',
+      body: expect.stringContaining('Request ID: r1'),
+    }))
+  })
+
+  it('sends right away when the orchestrator is idle', () => {
+    const sessions = promptSessions({ source: 'manual', orchestratorBusy: false })
+    expect(notifySessionPrompt(sessions, none, { ...prompt, promptType: 'question' }, makeOutbox())).toBe(true)
+    expect(sessions.sendInput).toHaveBeenCalledWith('orch-id', expect.stringContaining('Notification — Session Needs Answer]\nmy-session (s1)'))
+  })
+
+  it('skips the orchestrator\'s own prompts, managed children and loop sessions', () => {
+    const outbox = makeOutbox()
+    const own = promptSessions({ source: 'orchestrator', orchestratorBusy: false })
+    expect(notifySessionPrompt(own, none, prompt, outbox)).toBe(false)
+    const sessions = promptSessions({ source: 'agent', orchestratorBusy: false })
+    expect(notifySessionPrompt(sessions, { ...none, isManagedChild: () => true }, prompt, outbox)).toBe(false)
+    expect(notifySessionPrompt(sessions, { ...none, isLoopSession: () => true }, prompt, outbox)).toBe(false)
+    expect(notifySessionPrompt(sessions, none, { ...prompt, sessionId: 'gone' }, outbox)).toBe(false)
+    expect(sessions.sendInput).not.toHaveBeenCalled()
+    expect(own.sendInput).not.toHaveBeenCalled()
+    expect(outbox.enqueue).not.toHaveBeenCalled()
   })
 })

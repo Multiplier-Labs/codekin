@@ -1789,6 +1789,18 @@ export class LoopEngine {
   // -------------------------------------------------------------------------
 
   /**
+   * True when `sessionId` is an active run's maker or reviewer. Its prompts
+   * are reported as `session_blocked` run events (see onSessionBlocked), so
+   * other prompt listeners should not report them a second time.
+   */
+  reportsPromptsFor(sessionId: string): boolean {
+    for (const ctx of this.active.values()) {
+      if (ctx.makerSessionId === sessionId || ctx.reviewSessionId === sessionId) return true
+    }
+    return false
+  }
+
+  /**
    * A maker/reviewer tool call fell through the allowlist and waits on a
    * human. Loop sessions are exempt from last-client-leave auto-deny, so
    * surface it: a state reason + event (the Phase 2 UI renders these as
