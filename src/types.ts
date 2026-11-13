@@ -206,7 +206,7 @@ export interface Session {
 }
 
 /** Kind of place a session runs in. Keep in sync with server/places.ts. */
-export type PlaceKind = 'scratch' | 'folder' | 'repo'
+export type PlaceKind = 'scratch' | 'folder' | 'repo' | 'org'
 
 /** Where a session runs: a scratch folder, a plain folder (git or not), or a repository. */
 export interface SessionPlace {
@@ -215,6 +215,8 @@ export interface SessionPlace {
   git: boolean
   /** The enclosing repository's root, when the folder is inside one rather than its root. */
   inRepo?: string
+  /** The GitHub owner, for an org place (a folder directly under the repos root). */
+  owner?: string
 }
 
 /**

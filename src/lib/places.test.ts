@@ -8,7 +8,7 @@ vi.mock('./prefs', () => ({
 
 import {
   NEW_SCRATCH, MAX_RECENT_PLACES, defaultPlace, withRecentPlace, placeKey, samePlace,
-  placeFromRepo, placeFromPath, placeFromSession, placeFromOwner, placeHint, placeTag,
+  placeFromRepo, placeFromPath, placeFromSession, placeFromOwner, placeHint, placeTag, isNotRepoPlace,
   tildify, untildify, baseName, getRecentPlaces, rememberPlace, type DraftPlace,
 } from './places'
 import type { ApiRepo } from '../hooks/useRepos'
@@ -101,6 +101,22 @@ describe('place constructors', () => {
     expect(placeFromSession({ workingDir: '/s/x', place: { kind: 'scratch', git: false } }, HOME)).toBe(NEW_SCRATCH)
     expect(placeFromSession({ workingDir: '/home/sam/wt/1', groupDir: '/home/sam/repos/a', place: { kind: 'repo', git: true } }, HOME))
       .toEqual({ kind: 'repo', path: '/home/sam/repos/a', git: true, label: 'a' })
+  })
+
+  it('an org session reopens as its org, and is never offered git init', () => {
+    const fromSession = placeFromSession({ workingDir: '/home/sam/repos/acme-co', place: { kind: 'org', git: false, owner: 'acme-co' } }, HOME)
+    expect(fromSession).toEqual({ kind: 'org', path: '/home/sam/repos/acme-co', git: false, label: 'acme-co', owner: 'acme-co' })
+    expect(isNotRepoPlace({ kind: 'org', git: false, owner: 'acme-co' })).toBe(false)
+    expect(isNotRepoPlace({ kind: 'folder', git: false })).toBe(true)
+    expect(isNotRepoPlace({ kind: 'repo', git: true })).toBe(false)
+    expect(isNotRepoPlace(undefined)).toBe(false)
+  })
+
+  it('describes an org place before and after its folder exists', () => {
+    expect(placeHint(placeFromOwner('acme-co'), true, { home: HOME }))
+      .toBe("Works across acme-co from the repositories folder's acme-co/. The agent clones repos as it needs them (you approve each), and each repo it changes gets its own worktree.")
+    expect(placeHint({ ...placeFromOwner('acme-co'), path: '/home/sam/repos/acme-co' }, false, { home: HOME }))
+      .toBe('Works across acme-co from ~/repos/acme-co. The agent clones repos as it needs them (you approve each), and it edits the clones in place.')
   })
 
   it('org places key by owner', () => {
