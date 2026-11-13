@@ -393,6 +393,20 @@ describe('useChatSocket hook', () => {
       unmount()
     })
 
+    it('createSession passes an explicitly chosen model and effort for any provider', () => {
+      resetPrefsForTest({ claudeModel: 'claude-opus-5' })
+      const { result, unmount } = setupConnected()
+      act(() => result.current.createSession('My Session', '/home/dev', false, 'acceptEdits', 'codex', { model: 'gpt-6', effort: 'high' }))
+      expect(sentMessages(MockWebSocket.latest()).pop()).toMatchObject({
+        type: 'create_session',
+        provider: 'codex',
+        model: 'gpt-6',
+        effort: 'high',
+      })
+      resetPrefsForTest()
+      unmount()
+    })
+
     it('createSession omits the Claude model for non-Claude providers', () => {
       resetPrefsForTest({ claudeModel: 'claude-opus-5' })
       const { result, unmount } = setupConnected()

@@ -17,6 +17,12 @@ import { usePromptState } from './usePromptState'
 import { useWsConnection } from './useWsConnection'
 import { getPref, setPref } from '../lib/prefs'
 
+/** A model chosen explicitly for a new session (with its effort, if any). */
+export interface CreateSessionModel {
+  model?: string
+  effort?: string
+}
+
 /** Max chat messages kept in the browser before trimming older entries. */
 const MAX_BROWSER_MESSAGES = 500
 
@@ -140,6 +146,7 @@ function applyMessageMut(messages: ChatMessage[], msg: WsServerMessage): boolean
  * Used for real-time message processing (one event at a time).
  * Wraps applyMessageMut with defensive cloning to preserve React immutability.
  */
+
 export function processMessage(messages: ChatMessage[], msg: WsServerMessage): ChatMessage[] {
   // Clone the array; defensively clone the last element if it could be mutated in-place
   const clone = [...messages]
@@ -559,17 +566,23 @@ export function useChatSocket({
     send({ type: 'join_session', sessionId })
   }, [send, flushEffort])
 
-  const createSession = useCallback((name: string, workingDir: string, useWorktree?: boolean, permissionMode?: PermissionMode, provider?: import('../types').CodingProvider) => {
-    // Pass the model the picker is currently showing, so the CLI starts on it
-    // instead of on the server's own default (which the picker then flips to
-    // when the init message arrives). Only for Claude sessions and only for
-    // Claude model IDs — passing a cross-provider model (e.g. a Claude model
-    // to an OpenCode session) causes a spurious model message.
+  const createSession = useCallback((name: string, workingDir: string, useWorktree?: boolean, permissionMode?: PermissionMode, provider?: import('../types').CodingProvider, explicit?: CreateSessionModel) => {
+    flushEffort()
+    // A caller that chose the model itself (the new-session composer) passes
+    // it for any provider.
+    if (explicit?.model) {
+      send({ type: 'create_session', name, workingDir, useWorktree, permissionMode, provider, model: explicit.model, ...(explicit.effort ? { effort: explicit.effort } : {}) })
+      return
+    }
+    // Otherwise pass the model the picker is currently showing, so the CLI
+    // starts on it instead of on the server's own default (which the picker
+    // then flips to when the init message arrives). Only for Claude sessions
+    // and only for Claude model IDs — passing a cross-provider model (e.g. a
+    // Claude model to an OpenCode session) causes a spurious model message.
     const model = currentModelRef.current
     const carryModel = (provider ?? 'claude') === 'claude' && model?.startsWith('claude-') ? model : undefined
     // The effort remembered for that model travels with it.
     const carryEffort = carryModel ? getPref('modelEfforts')?.[carryModel] : undefined
-    flushEffort()
     send({ type: 'create_session', name, workingDir, useWorktree, permissionMode, provider, model: carryModel, ...(carryEffort ? { effort: carryEffort } : {}) })
   }, [send, flushEffort])
 
