@@ -30,7 +30,7 @@ import { execFile } from 'child_process'
 import { promisify } from 'util'
 import {
   allowedRoots as allowedRootsOf, configureScratchRoot, createScratchDir, describePlace, getScratchRoot, invalidatePlace,
-  findWorkTreeRoot, isGitWorkTree, validateScratchRoot,
+  ensureOrgFolder, findWorkTreeRoot, isGitWorkTree, isValidOwner, validateScratchRoot,
 } from './places.js'
 
 const execFileAsync = promisify(execFile)
@@ -517,6 +517,22 @@ export function createSessionRouter(
       res.json({ path: createScratchDir() })
     } catch (err) {
       res.status(500).json({ error: `Could not create a scratch folder: ${err instanceof Error ? err.message : String(err)}` })
+    }
+  })
+
+  // The folder an org session runs in, REPOS_ROOT/<owner>, created on first
+  // use. Clones of that owner's repositories land inside it.
+  router.post('/api/orgs/:owner/folder', (req, res) => {
+    const token = extractToken(req)
+    if (!verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' })
+    const owner = req.params.owner
+    if (!isValidOwner(owner)) return res.status(400).json({ error: 'Invalid owner name' })
+    try {
+      const path = ensureOrgFolder(owner)
+      invalidatePlace(path)
+      res.json({ path })
+    } catch (err) {
+      res.status(400).json({ error: `Could not prepare the folder for ${owner}: ${err instanceof Error ? err.message : String(err)}` })
     }
   })
 

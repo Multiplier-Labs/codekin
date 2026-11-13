@@ -389,6 +389,31 @@ describe('createSessionRouter', () => {
     })
   })
 
+  describe('POST /api/orgs/:owner/folder', () => {
+    beforeEach(async () => {
+      sessions = fakeSessions()
+      server = await startApp(createSessionRouter(verifyToken, extractToken, sessions))
+    })
+
+    it('requires a token', async () => {
+      expect((await fetch(`${server.baseUrl}/api/orgs/acme-co/folder`, { method: 'POST' })).status).toBe(401)
+    })
+
+    it('creates the owner folder under the repos root', async () => {
+      const res = await fetch(`${server.baseUrl}/api/orgs/acme-co/folder`, { method: 'POST', headers: auth() })
+      expect(res.status).toBe(200)
+      expect((await res.json()).path).toBe(join(REPOS_DIR, 'acme-co'))
+      expect(existsSync(join(REPOS_DIR, 'acme-co'))).toBe(true)
+    })
+
+    it('refuses an invalid owner and a symlinked owner folder', async () => {
+      expect((await fetch(`${server.baseUrl}/api/orgs/-bad/folder`, { method: 'POST', headers: auth() })).status).toBe(400)
+      symlinkSync(OUTSIDE_DIR, join(REPOS_DIR, 'escape'))
+      const res = await fetch(`${server.baseUrl}/api/orgs/escape/folder`, { method: 'POST', headers: auth() })
+      expect(res.status).toBe(400)
+    })
+  })
+
   describe('POST /api/sessions/:id/git-init', () => {
     function withSession(workingDir: string) {
       sessions = fakeSessions({

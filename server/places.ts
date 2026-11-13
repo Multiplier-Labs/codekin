@@ -12,6 +12,10 @@
  * - `folder`: anything else; `git` says whether it is a work tree without a
  *   remote (shown as "git folder") or no repository at all.
  *
+ * - `org`: a folder directly under REPOS_ROOT that is not itself in a
+ *   repository — the owner folder clones land in (`REPOS_ROOT/<owner>/<name>`).
+ *   An org session works across that owner's repositories.
+ *
  * A folder inside a repository (not its root) belongs to that repository:
  * `git` is true and `inRepo` names the repository root. Such sessions run in
  * place; worktrees are only made from a repository root.
@@ -22,13 +26,13 @@
  * working directory is held to.
  */
 
-import { existsSync, mkdirSync, readFileSync, realpathSync, statSync } from 'fs'
+import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, statSync } from 'fs'
 import { homedir } from 'os'
 import { dirname, isAbsolute, join, resolve } from 'path'
 import { randomInt } from 'crypto'
 import { REPOS_ROOT } from './config.js'
 
-export type PlaceKind = 'scratch' | 'folder' | 'repo'
+export type PlaceKind = 'scratch' | 'folder' | 'repo' | 'org'
 
 export interface SessionPlace {
   kind: PlaceKind
@@ -36,6 +40,8 @@ export interface SessionPlace {
   git: boolean
   /** The enclosing repository's root, when the folder is inside one rather than its root. */
   inRepo?: string
+  /** The GitHub owner (org or user), for an org place. */
+  owner?: string
 }
 
 // ---------------------------------------------------------------------------
@@ -242,6 +248,44 @@ export function findWorkTreeRoot(dir: string): string | null {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Org folders
+// ---------------------------------------------------------------------------
+
+/** GitHub owner names: letters, digits and single hyphens, up to 39 characters. */
+const OWNER_RE = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/
+
+export function isValidOwner(owner: string): boolean {
+  return OWNER_RE.test(owner) && !owner.includes('--') && !owner.endsWith('-')
+}
+
+/** The owner when `root` is a folder directly under REPOS_ROOT (not in a repository); else null. */
+function ownerOfOrgFolder(root: string): string | null {
+  const reposRoot = realpathOfExistingPrefix(resolve(REPOS_ROOT))
+  const real = realpathOfExistingPrefix(resolve(root))
+  if (dirname(real) !== reposRoot) return null
+  const owner = real.slice(reposRoot.length + 1)
+  return isValidOwner(owner) ? owner : null
+}
+
+/**
+ * The folder for an org session, `REPOS_ROOT/<owner>`, created on first use.
+ * Refuses an invalid owner and an owner folder that is a symlink (it must not
+ * lead out of the repos root).
+ */
+export function ensureOrgFolder(owner: string): string {
+  if (!isValidOwner(owner)) throw new Error('Invalid owner name')
+  const reposRoot = realpathSync(resolve(REPOS_ROOT))
+  const dir = join(reposRoot, owner)
+  let st
+  try { st = lstatSync(dir) } catch { st = null }
+  if (st?.isSymbolicLink()) throw new Error('The owner folder is a symlink')
+  if (st && !st.isDirectory()) throw new Error('The owner folder path exists and is not a directory')
+  if (!st) mkdirSync(dir)
+  if (findWorkTreeRoot(dir)) throw new Error('The owner folder is inside a git repository')
+  return dir
+}
+
 /** Uncached place detection. Exported for tests. */
 export function detectPlace(root: string, scratchRoot: string = getScratchRoot()): SessionPlace {
   // A scratch folder is a fresh, self-contained place: only its own `.git` counts.
@@ -250,7 +294,10 @@ export function detectPlace(root: string, scratchRoot: string = getScratchRoot()
   }
   const repoRoot = findWorkTreeRoot(root)
   const gitDir = repoRoot && gitDirOf(repoRoot)
-  if (!repoRoot || !gitDir) return { kind: 'folder', git: false }
+  if (!repoRoot || !gitDir) {
+    const owner = ownerOfOrgFolder(root)
+    return owner ? { kind: 'org', git: false, owner } : { kind: 'folder', git: false }
+  }
   const place: SessionPlace = { kind: hasOriginRemote(gitDir) ? 'repo' : 'folder', git: true }
   if (repoRoot !== resolve(root)) place.inRepo = repoRoot
   return place
