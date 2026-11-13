@@ -7,7 +7,7 @@ import { Router } from 'express'
 import type { Request, RequestHandler, Response } from 'express'
 import { resolve } from 'path'
 import { existsSync, statSync, realpathSync } from 'fs'
-import { AGENT_PROVIDERS } from './types.js'
+import { AGENT_PROVIDERS, type WsServerMessage } from './types.js'
 import type { CodingProvider } from './coding-process.js'
 import type { SessionManager } from './session-manager.js'
 import { ensureOrchestratorRunning, getOrchestratorSessionId, getOrCreateOrchestratorId, getOrchestratorProvider, setOrchestratorProvider } from './orchestrator-manager.js'
@@ -467,9 +467,9 @@ export function createSessionRouter(
       const actionLabel = promptType === 'question'
         ? `answered question from ${promptToolName}`
         : `responded "${Array.isArray(value) ? value.join(', ') : value}" to ${promptToolName}`
-      const notifMsg = {
-        type: 'system_message' as const,
-        subtype: 'info' as const,
+      const notifMsg: WsServerMessage = {
+        type: 'system_message',
+        subtype: 'info',
         text: `[${getAgentDisplayName()}] ${actionLabel} in session "${session.name}"`,
       }
       for (const ws of orchestratorSession.clients) {

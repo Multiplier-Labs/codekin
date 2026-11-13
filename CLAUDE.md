@@ -31,7 +31,7 @@ npm run lint         # eslint
 
 - TypeScript strict mode for server code
 - Frontend uses TailwindCSS utility classes with custom color theme defined in `src/index.css`
-- WebSocket message types defined in `src/types.ts` (shared between client and server)
+- WebSocket message types defined once in `server/protocol.ts` (type-only, no imports), re-exported by `src/types.ts` and `server/types.ts`
 - Monospace font: Inconsolata; Sans font: Lato
 
 ## Styling Rules
