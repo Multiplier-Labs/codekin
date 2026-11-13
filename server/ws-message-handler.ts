@@ -390,7 +390,8 @@ export function handleWsMessage(msg: WsClientMessage, ctx: WsHandlerContext): vo
       const view = msg.scope ?? 'all'
       if (!sessionId) { send({ type: 'diff_error', message: 'Not in a session', requestId }); break }
       if (!isDiffView(view)) { send({ type: 'diff_error', message: `Unknown diff view: ${String(view)}`, requestId, sessionId }); break }
-      void sessions.getDiff(sessionId, view).then(result => { send({ ...result, requestId, sessionId } as WsServerMessage) })
+      const root = typeof msg.root === 'string' ? msg.root : undefined
+      void sessions.getDiff(sessionId, view, root).then(result => { send({ ...result, requestId, sessionId, ...(root ? { root } : {}) } as WsServerMessage) })
       break
     }
 
@@ -527,7 +528,8 @@ export function handleWsMessage(msg: WsClientMessage, ctx: WsHandlerContext): vo
     case 'discard_changes': {
       const sessionId = clientSessions.get(ws)
       if (sessionId) {
-        void sessions.discardChanges(sessionId, msg.scope, msg.paths, msg.statuses).then(result => { send({ ...result, sessionId } as WsServerMessage) })
+        const root = typeof msg.root === 'string' ? msg.root : undefined
+        void sessions.discardChanges(sessionId, msg.scope, msg.paths, msg.statuses, root).then(result => { send({ ...result, sessionId, ...(root ? { root } : {}) } as WsServerMessage) })
       } else {
         send({ type: 'diff_error', message: 'Not in a session' })
       }
