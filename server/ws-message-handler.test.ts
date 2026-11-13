@@ -3,6 +3,9 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 // Mock config so REPOS_ROOT covers test paths
 vi.mock('./config.js', () => ({ REPOS_ROOT: '/projects' }))
+// The test paths are fake; treat every folder as a git work tree unless a test says otherwise.
+const isGitWorkTreeMock = vi.hoisted(() => vi.fn((_dir: string) => true))
+vi.mock('./places.js', () => ({ isGitWorkTree: isGitWorkTreeMock }))
 
 // The orchestrator manager reads DATA_DIR from the (mocked) config at import
 // time, so stub it out — only the two model helpers are used here.
@@ -193,6 +196,21 @@ describe('handleWsMessage', () => {
   /* ---- create_session (with worktree) ---- */
 
   describe('create_session (with worktree)', () => {
+    it('runs a folder that is not a git repository in place, without a worktree', () => {
+      isGitWorkTreeMock.mockReturnValueOnce(false)
+      const session = mockSession({ id: 'plain-1', name: 'Notes', workingDir: '/projects/notes' })
+      ;(ctx.sessions.create as ReturnType<typeof vi.fn>).mockReturnValue(session)
+      handleWsMessage({
+        type: 'create_session',
+        name: 'Notes',
+        workingDir: '/projects/notes',
+        useWorktree: true,
+      } as WsClientMessage, ctx)
+      expect(ctx.sessions.create).toHaveBeenCalledWith('Notes', '/projects/notes', expect.objectContaining({ useWorktree: false }))
+      expect(ctx.sessions.prepareSessionWorktree).not.toHaveBeenCalled()
+      expect(ctx.sent[0]).toMatchObject({ type: 'session_created', sessionId: 'plain-1' })
+    })
+
     it('creates session, creates worktree async, sends session_created after', async () => {
       const session = mockSession({ id: 'wt-1', name: 'WT Session', workingDir: '/projects/app' })
       ;(ctx.sessions.create as ReturnType<typeof vi.fn>).mockReturnValue(session)

@@ -150,3 +150,45 @@ describe('DiffPanel', () => {
     expect(sent.at(-1)).toMatchObject({ type: 'get_diff', scope: 'branch' })
   })
 })
+
+describe('DiffPanel for a folder without git', () => {
+  function mountNotRepo(onInitGit: () => Promise<void>) {
+    const sent: WsClientMessage[] = []
+    container = document.createElement('div')
+    document.body.appendChild(container)
+    act(() => {
+      root = createRoot(container!)
+      root.render(
+        <DiffPanel
+          isOpen
+          onClose={vi.fn()}
+          send={(m) => { sent.push(m) }}
+          onHandleMessage={vi.fn()}
+          onHandleToolDone={vi.fn()}
+          onHandleTurnDone={vi.fn()}
+          sessionId="s1"
+          defaultView="all"
+          notRepo
+          onInitGit={onInitGit}
+        />,
+      )
+    })
+    return { c: container, sent }
+  }
+
+  it('asks for no diff and offers to initialize git', async () => {
+    const onInitGit = vi.fn(async () => {})
+    const { c, sent } = mountNotRepo(onInitGit)
+    expect(sent.filter(m => m.type === 'get_diff')).toHaveLength(0)
+    expect(c.textContent).toContain('Not a git repository')
+    expect(c.textContent).toContain("Codekin can't show diffs for this folder.")
+    await act(async () => { buttonWith(c, 'Initialize git here')!.click() })
+    expect(onInitGit).toHaveBeenCalledTimes(1)
+  })
+
+  it('shows why git init failed', async () => {
+    const { c } = mountNotRepo(vi.fn(async () => { throw new Error('git init failed: permission denied') }))
+    await act(async () => { buttonWith(c, 'Initialize git here')!.click() })
+    expect(c.querySelector('[role="alert"]')!.textContent).toBe('git init failed: permission denied')
+  })
+})

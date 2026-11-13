@@ -18,6 +18,7 @@ import type { SessionManager } from './session-manager.js'
 import { VALID_PERMISSION_MODES, VALID_PROVIDERS } from './types.js'
 import type { CodingProvider } from './coding-process.js'
 import type { WsClientMessage, WsServerMessage } from './types.js'
+import { isGitWorkTree } from './places.js'
 
 /** Closure state passed to handleWsMessage from the ws.on('connection') scope. */
 export interface WsHandlerContext {
@@ -117,14 +118,18 @@ export function handleWsMessage(msg: WsClientMessage, ctx: WsHandlerContext): vo
       const model = msg.model ?? (provider === 'claude' ? getDefaultClaudeModel() : undefined)
       // Use the security-checked canonical path (not the raw msg.workingDir) so
       // grouping/archive behavior stays consistent with the resolved directory.
-      const session = sessions.create(msg.name, resolvedDir, { model, effort: validEffort(msg.effort, provider) ? msg.effort : undefined, permissionMode: msg.permissionMode, allowedTools: msg.allowedTools, provider: msg.provider, useWorktree: msg.useWorktree })
+      // A worktree needs a git repository. A folder that isn't one runs in
+      // place; the worktree preference is a default, not a demand, and
+      // failing the create would strand the user's first message.
+      const useWorktree = !!msg.useWorktree && isGitWorkTree(resolvedDir)
+      const session = sessions.create(msg.name, resolvedDir, { model, effort: validEffort(msg.effort, provider) ? msg.effort : undefined, permissionMode: msg.permissionMode, allowedTools: msg.allowedTools, provider: msg.provider, useWorktree })
       session.clients.add(ws)
       clientSessions.set(ws, session.id)
 
       // Trigger background CLI probe to discover latest model IDs (once per day)
       triggerCliProbeIfNeeded()
 
-      if (msg.useWorktree) {
+      if (useWorktree) {
         // Create the worktree, then start Claude in it. An isolated session
         // never falls back to the shared checkout: on failure it stays
         // stopped (input is held) until the user retries or switches.

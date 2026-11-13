@@ -1,9 +1,11 @@
 /**
  * What the Changes panel's file area shows when there is no file to show:
- * loading skeleton, empty view and the error box.
+ * loading skeleton, empty view, the error box, and the state for a folder
+ * that is not a git repository.
  */
 
-import { IconAlertCircle, IconFileCode } from '@tabler/icons-react'
+import { useState } from 'react'
+import { IconAlertCircle, IconFileCode, IconFolder } from '@tabler/icons-react'
 import type { DiffView } from '../../types'
 
 const SKELETON_WIDTHS = [62, 48, 71, 40, 55, 66]
@@ -71,6 +73,48 @@ export function DiffError({ message, onRetry }: { message: string; onRetry: () =
           Retry
         </button>
       </div>
+    </div>
+  )
+}
+
+/**
+ * The session's folder is not a git repository, so there is nothing to diff.
+ * Offers to make it one; the session keeps running in the same folder.
+ */
+export function DiffNotRepo({ onInitGit }: { onInitGit?: () => Promise<void> }) {
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  async function init() {
+    if (!onInitGit) return
+    setBusy(true)
+    setError(null)
+    try {
+      await onInitGit()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'git init failed')
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <div className="flex flex-1 flex-col items-center justify-center gap-2 px-6 py-10 text-center">
+      <IconFolder size={36} className="text-ink-faint" />
+      <p className="text-body font-bold text-ink">Not a git repository</p>
+      <p className="text-meta text-ink-muted">Codekin can't show diffs for this folder.</p>
+      {onInitGit && (
+        <>
+          <button
+            type="button"
+            onClick={() => { void init() }}
+            disabled={busy}
+            className="density-row mt-2 h-8 rounded-control bg-primary-8 px-3 text-meta font-medium text-on-primary hover:bg-primary-7 disabled:opacity-60"
+          >
+            {busy ? 'Initializing…' : 'Initialize git here'}
+          </button>
+          <p className="max-w-[260px] text-micro text-ink-muted">Runs <code className="font-mono">git init</code> in this folder. The session keeps going.</p>
+        </>
+      )}
+      {error && <p role="alert" className="text-meta text-error-4">{error}</p>}
     </div>
   )
 }
