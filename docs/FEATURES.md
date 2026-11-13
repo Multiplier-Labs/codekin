@@ -47,7 +47,8 @@ Codekin supports running multiple Claude Code sessions simultaneously, each boun
 
 - **Session tabs** — A horizontal tab bar at the top of the screen shows all active sessions. Click a tab to switch between them instantly.
 - **Session status indicators** — Each tab shows a colored dot: green for active (Claude is running), amber for waiting (pending user input), gray for inactive.
-- **Create sessions** — Click the `+` button in the sidebar to create a new session. Choose a repository and optionally provide a custom session name.
+- **Create sessions** — **New** opens an empty composer. Type first; the place chip beside the prompt sets where the session runs: a new scratch folder (the default on first use), any folder under your home directory or the repositories root (git optional), or a repository, which is cloned when you send if it isn't on the machine yet. The session is created when you send, and is named from your first message.
+- **Sessions without a repository** — A session in a folder without git runs in place (no worktree). Its corner shows the folder and `no git`; **Changes** offers **Initialize git here**, which runs `git init` without restarting the session. Scratch sessions share one **Scratch** group in the sidebar, and group headers are tagged `scratch`, `folder`, `git folder` or `repo`.
 - **Delete sessions** — Hover over a session tab to reveal a close button (`×`). Deleting a session kills its Claude process and removes it from the list.
 - **Auto-join on reconnect** — When the WebSocket reconnects (e.g., after a network hiccup), Codekin automatically rejoins the last active session and restores its message history.
 - **Session name convention** — Sessions auto-created from repos use the `hub:<repo-id>` naming pattern. The `hub:` prefix is stripped in the tab display for cleanliness.

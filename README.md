@@ -135,7 +135,7 @@ Codekin runs coding agents on your own computer; a Codekin web app is how you re
 2. Open your Codekin web app and sign in with GitHub. Access is by invitation: open the invite link a workspace owner or admin sent you, then sign in. Owners and admins set up two-factor authentication (an authenticator app or a passkey) on first sign-in.
 3. On **Connect your computer**, copy the generated install command and run it in a terminal **on that computer**. It pairs the computer with the web app you generated it in, whichever instance that is. The pairing command expires after 10 minutes and can be used once.
 4. Wait for the computer to show **online**, then click **Open**. Keep the computer awake and connected while using Codekin remotely.
-5. Use **New** to choose a repository and a coding agent. Local Git checkouts under `~/repos` appear automatically; the GitHub CLI is optional for listing and cloning GitHub repositories.
+5. Use **New**, type what you want to do, and send. A session starts in a new scratch folder by default; the place chip picks any folder on the computer or a repository instead. Local Git checkouts under `~/repos` appear automatically; the GitHub CLI is optional for listing and cloning GitHub repositories.
 
 ## Usage
 
@@ -185,6 +185,7 @@ The installed service reads environment variables from `~/.config/codekin/env`. 
 |---|---|---|
 | `PORT` | `32352` | Server port |
 | `REPOS_ROOT` | `~/repos` | Root directory scanned for local repositories |
+| `SCRATCH_ROOT` | `~/codekin/scratch` | Where scratch folders for new sessions are created; must be under the home directory or `REPOS_ROOT`. The Settings value wins |
 
 You can also change **Repositories Path** in **Settings → Sessions** or on the first-session screen without restarting the service. See [Getting started](docs/GETTING-STARTED.md#no-repositories-appear).
 

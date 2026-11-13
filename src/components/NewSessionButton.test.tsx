@@ -1,7 +1,6 @@
 /**
- * Tests for NewSessionButton — the popover hangs from the button's right edge
- * and grows leftward, so in a narrow sidebar it used to run off the left edge
- * of the window. Guards the measured nudge that keeps it on screen.
+ * Tests for NewSessionButton — New opens the new-session composer and is
+ * marked current while the composer is up.
  */
 // @vitest-environment jsdom
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
@@ -14,26 +13,15 @@ import { NewSessionButton } from './NewSessionButton.js'
 let activeRoot: ReturnType<typeof createRoot> | null = null
 let activeContainer: HTMLElement | null = null
 
-const POPUP_WIDTH = 288
-
-function renderAt(anchorRight: number): HTMLElement {
-  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue(
-    { right: anchorRight, left: anchorRight - 80, top: 0, bottom: 32, width: 80, height: 32, x: 0, y: 0, toJSON: () => ({}) } as DOMRect,
-  )
-  vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(POPUP_WIDTH)
+function render(ui: React.ReactElement): HTMLElement {
   const container = document.createElement('div')
   document.body.appendChild(container)
   act(() => {
     activeRoot = createRoot(container)
-    activeRoot.render(<NewSessionButton groups={[]} onOpen={() => {}} />)
+    activeRoot.render(ui)
   })
   activeContainer = container
-  act(() => { container.querySelector('button')!.click() })
   return container
-}
-
-function popover(container: HTMLElement): HTMLElement {
-  return container.querySelector('[aria-expanded="true"]')!.nextElementSibling as HTMLElement
 }
 
 afterEach(() => {
@@ -41,42 +29,21 @@ afterEach(() => {
   activeContainer?.remove()
   activeRoot = null
   activeContainer = null
-  vi.restoreAllMocks()
 })
 
-describe('NewSessionButton popover placement', () => {
-  it('stays right-aligned to the button when there is room', () => {
-    const c = renderAt(400)
-    expect(popover(c).style.right).toBe('0px')
-  })
-
-  it('shifts right so it does not overflow the left edge in a narrow sidebar', () => {
-    // Button ends 180px from the left; a 288px popover would start at -108px.
-    const c = renderAt(180)
-    expect(popover(c).style.right).toBe(`-${POPUP_WIDTH - 180 + 8}px`)
-  })
-
-  it('caps its width to the viewport', () => {
-    const c = renderAt(400)
-    expect(popover(c).style.maxWidth).toBe('calc(100vw - 16px)')
-  })
-})
-
-describe('NewSessionButton with the composer', () => {
-  it('opens the composer instead of the repo popover, and marks it current', () => {
+describe('NewSessionButton', () => {
+  it('opens the composer', () => {
     const onNewSession = vi.fn()
-    const container = document.createElement('div')
-    document.body.appendChild(container)
-    act(() => {
-      activeRoot = createRoot(container)
-      activeRoot.render(<NewSessionButton groups={[]} onOpen={() => {}} onNewSession={onNewSession} current />)
-    })
-    activeContainer = container
-    const button = container.querySelector('button')!
-    expect(button.getAttribute('aria-current')).toBe('page')
-    expect(button.hasAttribute('aria-expanded')).toBe(false)
+    const c = render(<NewSessionButton onNewSession={onNewSession} />)
+    const button = c.querySelector('button')!
+    expect(button.textContent).toBe('New')
+    expect(button.hasAttribute('aria-current')).toBe(false)
     act(() => { button.click() })
     expect(onNewSession).toHaveBeenCalledTimes(1)
-    expect(container.querySelectorAll('button')).toHaveLength(1)
+  })
+
+  it('is marked current while the composer is up', () => {
+    const c = render(<NewSessionButton onNewSession={() => {}} current />)
+    expect(c.querySelector('button')!.getAttribute('aria-current')).toBe('page')
   })
 })

@@ -14,7 +14,6 @@ import {
   IconChevronRight, IconChevronLeft, IconSparkles, IconX, IconChecklist,
 } from '@tabler/icons-react'
 import type { Session, Module, Repo, MobileProps, ConnectionState } from '../types'
-import type { RepoGroup } from '../hooks/useRepos'
 import AppIcon from './AppIcon'
 import { NewSessionButton } from './NewSessionButton'
 import { RepoSection } from './RepoSection'
@@ -50,14 +49,10 @@ interface Props {
   waitingSessions: Record<string, boolean>
   /** Per-session tentative message queues (held while another session is processing). */
   tentativeQueues: Record<string, { text: string; files: File[] }[]>
-  /** Repo groups from the API, used for the repo selector dropdown. */
-  groups: RepoGroup[]
   /** Global modules available across all repos (shown in module browser). */
   globalModules: Module[]
   /** The Repo object for the currently active working directory. */
   activeRepo: Repo | null
-  /** Auth token for API requests (file uploads, repo fetches). */
-  token: string
   /** Current color theme. */
   theme: ThemeId
   /** WebSocket connection state ('disconnected' | 'connecting' | 'connected'). */
@@ -104,13 +99,10 @@ interface Props {
   /** Rename a session in the sidebar tree. */
   onRenameSession: (id: string, name: string) => void
   /** Create a new session in a specific repo (the per-repo hover action). */
-  onNewSessionInRepo: (workingDir: string, provider?: import('../types').CodingProvider) => void
-  /** Open a repo's latest session, or create a new one when a provider is chosen. */
-  onOpenSession: (repo: Repo, provider?: import('../types').CodingProvider) => void
-  /** Open the new-session composer. When set, New is a plain button instead of the repo popover. */
-  onNewSession?: () => void
-  /** Open the composer preset to a group's place (its "New session" row). Set together with onNewSession. */
-  onNewSessionInPlace?: (place: DraftPlace) => void
+  /** Open the new-session composer. */
+  onNewSession: () => void
+  /** Open the composer preset to a group's place (its "New session" row). */
+  onNewSessionInPlace: (place: DraftPlace) => void
   /** Switch the active repo (expands its tree node). */
   onSelectRepo: (workingDir: string) => void
   /** Close every session in a repo, dropping it from the sidebar. */
@@ -150,10 +142,8 @@ export function LeftSidebar({
   activeWorkingDir,
   waitingSessions,
   tentativeQueues,
-  groups,
   globalModules,
   activeRepo,
-  token,
   theme,
   connState,
   claudeDisabled,
@@ -171,8 +161,6 @@ export function LeftSidebar({
   onSelectSession,
   onDeleteSession,
   onRenameSession,
-  onNewSessionInRepo,
-  onOpenSession,
   onNewSession,
   onNewSessionInPlace,
   onSelectRepo,
@@ -359,10 +347,7 @@ export function LeftSidebar({
           </button>
         )}
         <NewSessionButton
-          groups={groups}
-          token={token}
-          onOpen={(repo, provider) => { onOpenSession(repo, provider); if (isMobile) onMobileClose?.() }}
-          onNewSession={onNewSession ? () => { onNewSession(); if (isMobile) onMobileClose?.() } : undefined}
+          onNewSession={() => { onNewSession(); if (isMobile) onMobileClose?.() }}
           current={view === 'new'}
         />
       </div>
@@ -442,11 +427,10 @@ export function LeftSidebar({
             onSelectSession={handleSelectSessionMobile}
             onDeleteSession={onDeleteSession}
             onRenameSession={onRenameSession}
-            onNewSession={(provider) => { onNewSessionInRepo(node.workingDir, provider) }}
-            onNewSessionHere={onNewSessionInPlace ? () => {
+            onNewSessionHere={() => {
               onNewSessionInPlace(scratch ? NEW_SCRATCH : placeFromSession(node.sessions[0]))
               if (isMobile) onMobileClose?.()
-            } : undefined}
+            }}
             onSelectRepo={(wd) => {
               // The Scratch group spans many folders; selecting it only expands it.
               if (!scratch) onSelectRepo(wd)

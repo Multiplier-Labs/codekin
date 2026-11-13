@@ -166,6 +166,7 @@ All configuration is via environment variables. Defaults suit a local install; o
 | `AUTH_TOKEN_FILE` | `~/.config/codekin/token` | Path to auth token file |
 | `FRONTEND_DIST` | (set by CLI) | Path to built frontend `dist/` directory |
 | `REPOS_ROOT` | `~/repos` | Root directory scanned for local repositories |
+| `SCRATCH_ROOT` | `~/codekin/scratch` | Where scratch folders for new sessions are created; must be under the home directory or `REPOS_ROOT`. The Settings value wins |
 | `DATA_DIR` | `~/.codekin` | Codekin data directory (sessions, uploads, etc.) |
 | `CORS_ORIGIN` | `http://localhost:5173` | Restrict CORS for remote access |
 | `GH_ORG` | — | Comma-separated GitHub orgs for repo listing |

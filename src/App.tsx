@@ -46,7 +46,6 @@ import { MobileTopBar } from './components/MobileTopBar'
 import { AutomationsView } from './components/AutomationsView'
 import { CommandPalette } from './components/CommandPalette'
 import type { InputBarHandle } from './components/InputBar'
-import { RepoSelector } from './components/RepoSelector'
 import { NewSessionComposer } from './components/NewSessionComposer'
 import { EnvironmentChecklist } from './components/EnvironmentChecklist'
 import { defaultPlace, getRecentPlaces, placeFromSession, rememberPlace, type DraftPlace } from './lib/places'
@@ -237,7 +236,6 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
   // The draft screen holds what the next session will be — where it runs,
   // which agent — before anything exists on the server. Send creates it; the
   // first message follows once session_created arrives.
-  const composerEnabled = usePref('newSessionComposer') === true
   const recentPlacesPref = usePref('recentPlaces')
   const [draftPlace, setDraftPlace] = useState<DraftPlace>(() => defaultPlace(getRecentPlaces()))
   const [draftProviderChoice, setDraftProviderChoice] = useState<CodingProvider | null>(null)
@@ -402,8 +400,8 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
   // from session_created/session_joined beats the new-session default, which
   // would otherwise sync another harness's model onto it.
   const listedProvider = sessions.find(s => s.id === activeSessionId)?.provider
-  // The composer is up on /new, and on the landing page once the preview is on.
-  const showComposer = view === 'new' || (composerEnabled && view === 'chat' && !activeSessionId)
+  // The composer is up on /new, and on the landing page when no session is open.
+  const showComposer = view === 'new' || (view === 'chat' && !activeSessionId)
   const draftProvider = draftProviderChoice ?? currentProvider
   const activeSessionProvider = showComposer ? draftProvider : view === 'orchestrator'
     ? sessionProvider ?? 'claude'
@@ -493,7 +491,6 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
     handleSelectRepo,
     handleDeleteRepo,
     handleNewSessionForRepo,
-    handleNewSessionInRepo,
     handleNewSessionFromArchive,
   } = useSessionOrchestration({
     sessions,
@@ -987,10 +984,8 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
         activeWorkingDir={activeWorkingDir}
         waitingSessions={waitingSessions}
         tentativeQueues={tentativeQueues}
-        groups={groups}
         globalModules={globalModules}
         activeRepo={activeRepo}
-        token={settings.token}
         theme={settings.theme}
         connState={connState}
         claudeDisabled={claudeDisabled}
@@ -1008,10 +1003,8 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
         onSelectSession={(id) => { docsBrowser.close(); if (view === 'orchestrator' || view === 'tasks' || view === 'maintenance') navigate(`/s/${id}`); handleSelectSession(id) }}
         onDeleteSession={handleDeleteSession}
         onRenameSession={renameSession}
-        onNewSessionInRepo={handleNewSessionInRepo}
-        onOpenSession={handleOpenSession}
-        onNewSession={composerEnabled ? () => { docsBrowser.close(); openNewSession() } : undefined}
-        onNewSessionInPlace={composerEnabled ? (place) => { docsBrowser.close(); openNewSession(place) } : undefined}
+        onNewSession={() => { docsBrowser.close(); openNewSession() }}
+        onNewSessionInPlace={(place) => { docsBrowser.close(); openNewSession(place) }}
         onSelectRepo={handleSelectRepo}
         onDeleteRepo={handleDeleteRepo}
         onSettingsOpen={() => { openSettings() }}
@@ -1044,10 +1037,8 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
             repoName={activeRepoName}
             sessionName={activeSessionName}
             onMenuOpen={() => setMobileMenuOpen(true)}
-            onNewSession={composerEnabled
-              // Same place as the session in view (a new scratch folder for a scratch session); else the default.
-              ? () => { openNewSession(activeSession ? placeFromSession(activeSession) : undefined) }
-              : handleNewSessionForRepo}
+            // Same place as the session in view (a new scratch folder for a scratch session); else the default.
+            onNewSession={() => { openNewSession(activeSession ? placeFromSession(activeSession) : undefined) }}
             onSettingsOpen={() => { openSettings() }}
             activeRepo={activeRepo}
           />
@@ -1290,9 +1281,7 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
             supervisedTaskTitle={activeSession?.controller?.taskId ? sessionTasks.tasks[activeSession.controller.taskId]?.title : undefined}
             onTakeBackControl={() => { changeController('takeback', activeSessionId) }}
           />
-        ) : (
-          <RepoSelector groups={groups} token={settings.token} ghStatus={ghStatus} ghError={ghError} loading={reposLoading} error={reposError} onOpen={handleOpenSession} onRefreshRepos={refreshRepos} />
-        )}
+        ) : null}
       </div>
 
       {/* Repo drawer — independent of the diff panel: own open state, own width */}
