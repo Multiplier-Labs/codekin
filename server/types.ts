@@ -147,8 +147,6 @@ export interface Session {
   _turnCount: number
   /** Number of Claude result turns in this session (for context compression warnings). */
   _claudeTurnCount: number
-  /** Whether a context compression warning has already been shown. */
-  _contextWarningShown?: boolean
   /** Timer for the delayed one-shot naming process. */
   _namingTimer?: ReturnType<typeof setTimeout>
   /** Number of naming attempts so far (for retry back-off). */
@@ -184,13 +182,6 @@ export interface Session {
     /** Guard flag: true while a retry timer is pending, prevents duplicate scheduling. */
     scheduled?: boolean
   }
-  /** Timer handle for scheduled auto-restart, stored to prevent duplicate restarts. */
-  _restartTimer?: ReturnType<typeof setTimeout>
-  /** Monotonically increasing counter bumped on every startClaude() call.
-   *  Restart timers capture the generation at scheduling time and bail if it
-   *  has changed by the time they fire — prevents stale timers from replacing
-   *  a healthy process that was started by a different code path. */
-  _processGeneration: number
   /** Number of consecutive no-output exits with the same claudeSessionId.
    *  Only after reaching the threshold do we clear claudeSessionId. */
   _noOutputExitCount: number

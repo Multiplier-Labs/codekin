@@ -24,27 +24,6 @@ import type { TaskItem } from './types.js'
 export type CodingProvider = 'claude' | 'opencode' | 'codex' | 'grok'
 
 /**
- * Capabilities that differ between providers. SessionManager and frontend
- * use this to gate features that aren't universally available.
- */
-export interface ProviderCapabilities {
-  /** Provider supports bidirectional streaming (true for both Claude and OpenCode). */
-  streaming: boolean
-  /** Provider supports multi-turn conversations within a single process. */
-  multiTurn: boolean
-  /** Provider supports programmatic permission control. */
-  permissionControl: boolean
-  /** Provider emits tool_active/tool_done events for real-time tool indicators. */
-  toolEvents: boolean
-  /** Provider emits thinking/reasoning deltas. */
-  thinkingDisplay: boolean
-  /** Provider supports multiple LLM backends (not just Anthropic). */
-  multiProvider: boolean
-  /** Provider supports plan mode (read-only agent). */
-  planMode: boolean
-}
-
-/**
  * Minimum process interface consumed by SessionManager.
  *
  * Any provider process must:
@@ -107,53 +86,4 @@ export interface CodingProcess extends EventEmitter<ClaudeProcessEvents> {
 
   /** Which provider this process belongs to. */
   readonly provider: CodingProvider
-
-  /** Provider capability flags. */
-  readonly capabilities: ProviderCapabilities
-}
-
-/** Default capabilities for the Claude Code CLI provider. */
-export const CLAUDE_CAPABILITIES: ProviderCapabilities = {
-  streaming: true,
-  multiTurn: true,
-  permissionControl: true,
-  toolEvents: true,
-  thinkingDisplay: true,
-  multiProvider: false,
-  planMode: true,
-}
-
-/** Default capabilities for the OpenCode provider. */
-export const OPENCODE_CAPABILITIES: ProviderCapabilities = {
-  streaming: true,
-  multiTurn: true,
-  permissionControl: true,
-  toolEvents: true,
-  thinkingDisplay: true,
-  multiProvider: true,
-  planMode: true,
-}
-
-/** Default capabilities for the OpenAI Codex CLI provider. */
-export const CODEX_CAPABILITIES: ProviderCapabilities = {
-  streaming: true,
-  multiTurn: true,
-  permissionControl: true,
-  toolEvents: true,
-  thinkingDisplay: true,
-  multiProvider: false,
-  planMode: false,
-}
-
-/** Default capabilities for the Grok Build CLI provider. */
-export const GROK_CAPABILITIES: ProviderCapabilities = {
-  streaming: true,
-  multiTurn: true,
-  permissionControl: true,
-  toolEvents: true,
-  thinkingDisplay: true,
-  multiProvider: false,
-  // Grok's plan mode blocks its edit tools but not shell writes; Codekin
-  // denies those itself (see docs/GROK-BUILD-INTEGRATION-SPEC.md).
-  planMode: true,
 }

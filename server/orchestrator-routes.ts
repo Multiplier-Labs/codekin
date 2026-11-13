@@ -15,7 +15,6 @@ import type { OrchestratorMonitor } from './orchestrator-monitor.js'
 import type { RunStore } from './run-store.js'
 import { createSessionRouter } from './orchestrator-session-router.js'
 import { createMemoryRouter } from './orchestrator-memory-router.js'
-import { createLearningRouter } from './orchestrator-learning-router.js'
 import { createTaskRouter } from './orchestrator-task-router.js'
 import type { OrchestratorTaskService } from './orchestrator-tasks.js'
 import { createAutomationRouter } from './automation-routes.js'
@@ -74,7 +73,6 @@ export function createOrchestratorRouter(
   if (automations) router.use(createAutomationRouter(verifyOrchestratorAuth, actorOf, automations))
   if (maintenance && automations) router.use(createMaintenanceRouter(verifyOrchestratorAuth, actorOf, maintenance, (repo) => automations.isValidRepo(repo)))
   router.use(createMemoryRouter(verifyOrchestratorAuth, memory, monitorRef))
-  router.use(createLearningRouter(verifyOrchestratorAuth, memory))
 
   return router
 }

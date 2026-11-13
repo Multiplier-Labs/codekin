@@ -260,38 +260,6 @@ describe('ApprovalManager', () => {
     })
   })
 
-  // ─── 9. getGlobalApprovals ──────────────────────────────────────────
-
-  describe('getGlobalApprovals', () => {
-    it('returns tools/commands/patterns approved in 5+ repos', () => {
-      mgr.addRepoApproval('/repo/a', { tool: 'Read' })
-      mgr.addRepoApproval('/repo/b', { tool: 'Read' })
-      mgr.addRepoApproval('/repo/c', { tool: 'Read' })
-      mgr.addRepoApproval('/repo/d', { tool: 'Read' })
-      mgr.addRepoApproval('/repo/e', { tool: 'Read' })
-      mgr.addRepoApproval('/repo/a', { pattern: 'cat *' })
-      mgr.addRepoApproval('/repo/b', { pattern: 'cat *' })
-      mgr.addRepoApproval('/repo/c', { pattern: 'cat *' })
-      mgr.addRepoApproval('/repo/d', { pattern: 'cat *' })
-      mgr.addRepoApproval('/repo/e', { pattern: 'cat *' })
-
-      const global = mgr.getGlobalApprovals()
-      expect(global.tools).toHaveProperty('Read')
-      expect(global.tools['Read']).toHaveLength(5)
-      expect(global.patterns).toHaveProperty('cat *')
-      expect(global.patterns['cat *']).toHaveLength(5)
-    })
-
-    it('excludes tools/patterns approved in only 1 repo', () => {
-      mgr.addRepoApproval('/repo/a', { tool: 'Read' })
-      mgr.addRepoApproval('/repo/a', { pattern: 'cat *' })
-
-      const global = mgr.getGlobalApprovals()
-      expect(global.tools).not.toHaveProperty('Read')
-      expect(global.patterns).not.toHaveProperty('cat *')
-    })
-  })
-
   // ─── 10. savePatternApproval ────────────────────────────────────────
 
   describe('savePatternApproval', () => {

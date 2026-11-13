@@ -1,8 +1,8 @@
 /**
  * Unified process lifecycle coordinator for a single session.
  *
- * Replaces the scattered flag/timer pattern (_restartTimer, _isStarting,
- * _processGeneration, _apiRetry.timer) with a single promise-chain mutex
+ * Replaces the scattered flag/timer pattern (restart timers, start flags,
+ * process generations, API-retry timers) with a single promise-chain mutex
  * and centralized timer management.
  *
  * Every lifecycle transition (start, stop, reconfigure) is serialized through

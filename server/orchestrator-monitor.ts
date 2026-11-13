@@ -12,8 +12,6 @@ import type { SessionManager } from './session-manager.js'
 import type { WorkflowEngine, WorkflowEvent } from './workflow-engine.js'
 import type { LoopEvent } from './loop-store.js'
 import { scanRepoReports } from './orchestrator-reports.js'
-import { OrchestratorMemory } from './orchestrator-memory.js'
-import { runAgingCycle, getPendingOutcomeAssessments } from './orchestrator-learning.js'
 import { getOrchestratorSessionId } from './orchestrator-manager.js'
 import { getOrchestratorOutbox } from './orchestrator-outbox.js'
 import { tryGetRepoActivityIndex } from './repo-activity.js'
@@ -38,19 +36,16 @@ export interface OrchestratorNotification {
 // ---------------------------------------------------------------------------
 
 const POLL_INTERVAL_MS = 15 * 60 * 1000  // 15 minutes
-const AGING_INTERVAL_MS = 6 * 60 * 60 * 1000  // aging cycle checked every 6 hours
 /** Cap on the loop-event notification dedup set (oldest entries dropped). */
 const MAX_NOTED_LOOP_EVENTS = 500
 
 export class OrchestratorMonitor {
   private sessions: SessionManager
   private pollTimer: ReturnType<typeof setInterval> | null = null
-  private agingTimer: ReturnType<typeof setInterval> | null = null
   private notifications: OrchestratorNotification[] = []
   private seenReports = new Set<string>()
   /** (runId:event) keys already notified — see handleLoopEvent. */
   private notedLoopEvents = new Set<string>()
-  private memory: OrchestratorMemory | null = null
   private engine: WorkflowEngine | null = null
   /** True once a stall alert has been sent — reset when the heartbeat recovers. */
   private engineStallNotified = false
@@ -70,17 +65,12 @@ export class OrchestratorMonitor {
     })
   }
 
-  /** Set the memory store for aging and decision tracking. */
-  setMemory(memory: OrchestratorMemory): void {
-    this.memory = memory
-  }
-
   /**
    * Start the periodic poll. When an engine is attached (setEngine), the poll
-   * and aging cycles register as engine tick tasks — they ride the dispatch
-   * loop's clock and heartbeat instead of owning setInterval loops (the one
+   * registers as an engine tick task — it rides the dispatch
+   * loop's clock and heartbeat instead of owning a setInterval loop (the one
    * observable liveness story). Without an engine (standalone/tests), the
-   * legacy intervals run.
+   * legacy interval runs.
    */
   start(): void {
     if (this.started) return
@@ -93,18 +83,12 @@ export class OrchestratorMonitor {
 
     if (this.engine) {
       this.engine.registerTickTask('orchestrator-poll', POLL_INTERVAL_MS, () => this.poll())
-      this.engine.registerTickTask('orchestrator-aging', AGING_INTERVAL_MS, () => { this.runAgingAndAssessments() })
       return
     }
 
     this.pollTimer = setInterval(() => {
       void this.poll()
     }, POLL_INTERVAL_MS)
-
-    // Run aging cycle daily (check every 6 hours)
-    this.agingTimer = setInterval(() => {
-      this.runAgingAndAssessments()
-    }, AGING_INTERVAL_MS)
   }
 
   /** Stop the monitor. */
@@ -112,15 +96,10 @@ export class OrchestratorMonitor {
     this.started = false
     if (this.engine) {
       this.engine.unregisterTickTask('orchestrator-poll')
-      this.engine.unregisterTickTask('orchestrator-aging')
     }
     if (this.pollTimer) {
       clearInterval(this.pollTimer)
       this.pollTimer = null
-    }
-    if (this.agingTimer) {
-      clearInterval(this.agingTimer)
-      this.agingTimer = null
     }
   }
 
@@ -162,30 +141,6 @@ export class OrchestratorMonitor {
   // -------------------------------------------------------------------------
   // Internal
   // -------------------------------------------------------------------------
-
-  /** Run aging cycle and check for pending decision assessments. */
-  private runAgingAndAssessments(): void {
-    if (!this.memory) return
-
-    try {
-      const agingResult = runAgingCycle(this.memory)
-      if (agingResult.expired > 0 || agingResult.compacted > 0) {
-        console.log(`[orchestrator-monitor] Aging cycle: ${agingResult.expired} expired, ${agingResult.compacted} compacted, ${agingResult.decayed} decayed`)
-      }
-
-      // Check for decisions that need outcome assessment
-      const pending = getPendingOutcomeAssessments(this.memory)
-      if (pending.length > 0) {
-        this.addNotification({
-          severity: 'info',
-          title: 'Decisions need review',
-          body: `${pending.length} decision(s) from over a week ago need outcome assessment. Ask me to review them.`,
-        })
-      }
-    } catch (err) {
-      console.error('[orchestrator-monitor] Aging cycle error:', err)
-    }
-  }
 
   /** Initial scan — populate the set of already-seen reports. */
   private async initialScan(): Promise<void> {

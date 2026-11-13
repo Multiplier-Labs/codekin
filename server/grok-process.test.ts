@@ -45,7 +45,6 @@ vi.mock('child_process', async (importOriginal) => {
 })
 
 import { GrokProcess, fetchGrokModels, clearGrokModelCache } from './grok-process.js'
-import { GROK_CAPABILITIES } from './coding-process.js'
 import { tmpdir } from 'os'
 
 const tick = async () => {
@@ -102,10 +101,9 @@ describe('GrokProcess', () => {
     vi.useRealTimers()
   })
 
-  it('declares the grok provider and capabilities', () => {
+  it('declares the grok provider', () => {
     const gp = new GrokProcess(WORKDIR)
     expect(gp.provider).toBe('grok')
-    expect(gp.capabilities).toBe(GROK_CAPABILITIES)
   })
 
   it('spawns `grok agent --no-leader stdio` with Claude hooks disabled and no inherited GIT_*', () => {

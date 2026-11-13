@@ -69,7 +69,6 @@ vi.mock('child_process', async (importOriginal) => {
 })
 
 import { CodexProcess, fetchCodexModels, clearCodexModelCache, isCodexAuthError } from './codex-process.js'
-import { CODEX_CAPABILITIES } from './coding-process.js'
 import { writeFileSync, mkdtempSync, rmSync, symlinkSync } from 'fs'
 import { tmpdir } from 'os'
 import { join, basename } from 'path'
@@ -131,12 +130,6 @@ describe('CodexProcess', () => {
   describe('provider interface', () => {
     it('reports provider as codex', () => {
       expect(cxp.provider).toBe('codex')
-    })
-
-    it('has codex capabilities', () => {
-      expect(cxp.capabilities).toBe(CODEX_CAPABILITIES)
-      expect(cxp.capabilities.multiProvider).toBe(false)
-      expect(cxp.capabilities.planMode).toBe(false)
     })
 
     it('starts as not alive and not ready', () => {

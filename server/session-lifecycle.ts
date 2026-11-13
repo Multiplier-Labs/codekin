@@ -115,12 +115,8 @@ export class SessionLifecycle {
     // Archived sessions start only after an explicit resume.
     if (session.archivedAt) return false
 
-    // Clear stopped flag and any pending restart timer on explicit start
+    // Clear the stopped flag on explicit start
     session._stoppedByUser = false
-    if (session._restartTimer) { clearTimeout(session._restartTimer); session._restartTimer = undefined }
-    // Bump generation so any in-flight restart timers from a previous process
-    // become stale and no-op when they fire.
-    session._processGeneration = (session._processGeneration ?? 0) + 1
 
     // An isolated session runs only in its own verified worktree. If it is
     // not ready, stay stopped and let the user retry or explicitly switch to
@@ -483,10 +479,8 @@ export class SessionLifecycle {
       this.deps.addToHistory(session, msg)
       this.deps.broadcast(session, msg)
 
-      // Delegate restart scheduling to the coordinator.  The coordinator
-      // manages timer deduplication, generation-based staleness, and mutex
-      // serialization — replacing the manual _restartTimer / _processGeneration
-      // pattern that was previously here.
+      // Delegate restart scheduling to the coordinator, which owns timer
+      // deduplication, generation-based staleness and mutex serialization.
       session.coordinator.scheduleRestart(
         action.delayMs,
         // onBeforeStart: verify session still exists

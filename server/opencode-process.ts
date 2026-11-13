@@ -23,7 +23,7 @@ import { readFileSync, statSync } from 'fs'
 import { extname } from 'path'
 import { resolveAttachmentPath } from './attachment-paths.js'
 import type { ClaudeProcessEvents } from './claude-process.js'
-import { OPENCODE_CAPABILITIES, type CodingProcess, type CodingProvider, type ProviderCapabilities } from './coding-process.js'
+import type { CodingProcess, CodingProvider } from './coding-process.js'
 import type { PermissionMode, TaskItem } from './types.js'
 import { summarizeToolInput } from './tool-labels.js'
 import { buildHarnessEnv } from './harness-env.js'
@@ -390,7 +390,6 @@ const TURN_STALL_THRESHOLD_MS = 60_000
 
 export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implements CodingProcess {
   readonly provider: CodingProvider = 'opencode'
-  readonly capabilities: ProviderCapabilities = OPENCODE_CAPABILITIES
 
   private sessionId: string
   private opencodeSessionId: string | null = null

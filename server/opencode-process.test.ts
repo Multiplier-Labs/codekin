@@ -45,7 +45,6 @@ import { spawn as mockedSpawn } from 'child_process'
 import { writeFileSync, mkdtempSync, rmSync, symlinkSync } from 'fs'
 import { tmpdir } from 'os'
 import { join, basename } from 'path'
-import { OPENCODE_CAPABILITIES } from './coding-process.js'
 
 describe('OpenCodeProcess', () => {
   let ocp: OpenCodeProcess
@@ -70,11 +69,6 @@ describe('OpenCodeProcess', () => {
   describe('provider interface', () => {
     it('reports provider as opencode', () => {
       expect(ocp.provider).toBe('opencode')
-    })
-
-    it('has opencode capabilities', () => {
-      expect(ocp.capabilities).toBe(OPENCODE_CAPABILITIES)
-      expect(ocp.capabilities.multiProvider).toBe(true)
     })
 
     it('starts as not alive', () => {

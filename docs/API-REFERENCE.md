@@ -434,12 +434,6 @@ Get auto-approval rules for a repo.
 **Query params:** `path` (required) — repo working directory
 **Response:** `{ "approvals": Approval[] }`
 
-### `GET /api/approvals/global`
-
-Get global auto-approval rules.
-
-**Response:** `{ "globalApprovals": Approval[] }`
-
 ### `DELETE /api/approvals`
 
 Remove one or more approval rules.
@@ -605,25 +599,12 @@ List all workflow schedules.
 
 **Response:** `{ "schedules": Schedule[] }`
 
-### `POST /api/workflows/schedules`
-
-Create a new schedule.
-
-**Request body:** `{ "id": "...", "kind": "code-review", "cronExpression": "0 4 * * *", "input": {}, "enabled": true }`
-**Response:** `{ "schedule": Schedule }`, or `400` with `{ "error": "..." }` when required fields are missing or `cronExpression` is not a valid 5-field cron.
-
 ### `PATCH /api/workflows/schedules/:id`
 
 Update a schedule.
 
-**Request body:** `{ "cronExpression": "...", "input": {}, "enabled": false }` (all fields optional)
+**Request body:** `{ "catchUp": "collapse" | "skip", "cronExpression": "...", "input": {}, "enabled": false }` (all fields optional). Schedules are generated from the repo automation config, so the next config change rewrites `cronExpression`, `input` and `enabled`; `catchUp` is kept.
 **Response:** `{ "schedule": Schedule }`, `400` with `{ "error": "Invalid cron expression" }` when a provided `cronExpression` fails validation, or `404`.
-
-### `DELETE /api/workflows/schedules/:id`
-
-Delete a schedule.
-
-**Response:** `{ "success": true }` or `404`
 
 ### `POST /api/workflows/schedules/:id/trigger`
 
@@ -1003,19 +984,6 @@ Delete a memory item.
 
 **Response:** `{ "success": true }` or `404`
 
-#### `POST /api/orchestrator/memory/extract`
-
-Extract memory candidates from an interaction.
-
-**Request body:** `{ "userMessage": "...", "assistantResponse": "...", "repo": "..." }`
-**Response:** `{ "candidates": MemoryCandidate[] }`
-
-#### `POST /api/orchestrator/memory/age`
-
-Run the memory aging/decay cycle (expire TTLs, compact journals, decay confidence).
-
-**Response:** `{ "expired": number, "compacted": number, "decayed": number }`
-
 ### Trust System
 
 #### `GET /api/orchestrator/trust`
@@ -1093,56 +1061,3 @@ Get summary statistics for the orchestrator dashboard.
   }
 }
 ```
-
-### Findings & Learning
-
-#### `POST /api/orchestrator/findings/outcome`
-
-Record the outcome of an audit finding (implemented, skipped, false positive, etc.).
-
-**Request body:** `{ "action": "...", "category": "...", "severity": "...", "outcome": "implemented" | "skipped" | "false_positive", "repo": "..." }`
-**Response:** `{ "success": true }`
-
-#### `GET /api/orchestrator/findings/recommend`
-
-Get triage recommendations based on historical finding outcomes.
-
-**Query params:** `category`, `severity`
-**Response:** `{ "recommendation": "implement" | "skip" | "review", "confidence": 0.85, "stats": {...} }`
-
-### Skills & User Model
-
-#### `GET /api/orchestrator/skills`
-
-Get the user skill profile.
-
-**Response:** `{ "skills": { "typescript": { "level": "advanced", ... }, ... } }`
-
-#### `POST /api/orchestrator/skills`
-
-Record a skill signal observation.
-
-**Request body:** `{ "domain": "typescript", "signal": "Used advanced generics", "level": "advanced" }`
-**Response:** `{ "skill": SkillLevel }`
-
-### Decisions
-
-#### `POST /api/orchestrator/decisions`
-
-Record a decision with rationale and expected outcome.
-
-**Request body:** `{ "title": "...", "rationale": "...", "expectedOutcome": "...", "scope": "..." }`
-**Response:** `{ "decision": DecisionRecord }`
-
-#### `POST /api/orchestrator/decisions/:id/assess`
-
-Assess the actual outcome of a past decision.
-
-**Request body:** `{ "actualOutcome": "...", "success": true }`
-**Response:** `{ "decision": DecisionRecord }`
-
-#### `GET /api/orchestrator/decisions/pending`
-
-Get decisions older than 7 days that haven't been assessed yet.
-
-**Response:** `{ "decisions": DecisionRecord[] }`

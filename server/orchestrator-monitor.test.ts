@@ -38,7 +38,7 @@ describe('OrchestratorMonitor lifecycle', () => {
     vi.useRealTimers()
   })
 
-  it('registers poll and aging as engine tick tasks when an engine is attached', () => {
+  it('registers the poll as an engine tick task when an engine is attached', () => {
     monitor = new OrchestratorMonitor(makeSessions())
     const engine = makeEngine()
     monitor.setEngine(engine)
@@ -46,15 +46,13 @@ describe('OrchestratorMonitor lifecycle', () => {
     monitor.start()
 
     expect(engine.registerTickTask).toHaveBeenCalledWith('orchestrator-poll', 15 * 60 * 1000, expect.any(Function))
-    expect(engine.registerTickTask).toHaveBeenCalledWith('orchestrator-aging', 6 * 60 * 60 * 1000, expect.any(Function))
 
     // Idempotent start — no duplicate registrations.
     monitor.start()
-    expect(engine.registerTickTask).toHaveBeenCalledTimes(2)
+    expect(engine.registerTickTask).toHaveBeenCalledTimes(1)
 
     monitor.stop()
     expect(engine.unregisterTickTask).toHaveBeenCalledWith('orchestrator-poll')
-    expect(engine.unregisterTickTask).toHaveBeenCalledWith('orchestrator-aging')
   })
 
   it('falls back to setInterval without an engine', () => {

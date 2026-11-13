@@ -95,7 +95,6 @@ function fakeSessions(overrides: Partial<Record<string, unknown>> = {}): Session
   }
   const approvalManager = {
     getApprovals: vi.fn(() => ({ approvals: [] })),
-    getGlobalApprovals: vi.fn(() => ({ approvals: [] })),
     getAllApprovals: vi.fn(() => [{ workingDir: '/repos/x', tools: ['Read'], commands: [], patterns: [] }]),
     removeApproval: vi.fn(() => true),
     persistRepoApprovals: vi.fn(),
@@ -189,7 +188,6 @@ describe('createSessionRouter', () => {
       ['PUT', '/api/settings/prefs'],
       ['GET', '/api/browse-dirs'],
       ['GET', '/api/approvals?path=/repos/x'],
-      ['GET', '/api/approvals/global'],
       ['GET', '/api/approvals/all'],
     ]
 

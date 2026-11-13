@@ -29,7 +29,7 @@ import { existsSync } from 'fs'
 import { EventEmitter } from 'events'
 import { randomUUID } from 'crypto'
 import type { ClaudeProcessEvents } from './claude-process.js'
-import { GROK_CAPABILITIES, type CodingProcess, type CodingProvider, type ProviderCapabilities } from './coding-process.js'
+import type { CodingProcess, CodingProvider } from './coding-process.js'
 import { buildHarnessEnv } from './harness-env.js'
 import { resolveAttachmentPath } from './attachment-paths.js'
 import { summarizeToolInput } from './tool-labels.js'
@@ -181,7 +181,6 @@ interface OpenTool {
 
 export class GrokProcess extends EventEmitter<ClaudeProcessEvents> implements CodingProcess {
   readonly provider: CodingProvider = 'grok'
-  readonly capabilities: ProviderCapabilities = GROK_CAPABILITIES
 
   private proc: ChildProcess | null = null
   private rl: Interface | null = null

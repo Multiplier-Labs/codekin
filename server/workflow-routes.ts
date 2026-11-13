@@ -51,14 +51,6 @@ interface StartRunBody {
   input?: Record<string, unknown>
 }
 
-interface UpsertScheduleBody {
-  id: string
-  kind: string
-  cronExpression: string
-  input?: Record<string, unknown>
-  enabled?: boolean
-}
-
 interface PatchScheduleBody {
   cronExpression?: string
   input?: Record<string, unknown>
@@ -408,7 +400,6 @@ export function createWorkflowRouter(
     res.json({ success: true })
   }
   router.post('/runs/:runId/cancel', cancelHandler)
-  router.post('/runs/:runId/abort', cancelHandler)
 
   // -------------------------------------------------------------------------
   // Schedules
@@ -467,28 +458,6 @@ export function createWorkflowRouter(
     res.json({ signals: engine.listSignals({ status, limit }) })
   })
 
-  router.post('/schedules', userOnly, (req: Request<Record<string, string>, unknown, UpsertScheduleBody>, res) => {
-    const engine = getEngine(res)
-    if (!engine) return
-
-    const { id, kind, cronExpression, input, enabled } = req.body
-    if (!id || !kind || !cronExpression) {
-      return res.status(400).json({ error: 'Missing id, kind, or cronExpression' })
-    }
-    if (!isValidCron(cronExpression)) {
-      return res.status(400).json({ error: 'Invalid cron expression' })
-    }
-
-    const schedule = engine.upsertSchedule({
-      id,
-      kind,
-      cronExpression,
-      input: input || {},
-      enabled: enabled !== false,
-    })
-    res.json({ schedule })
-  })
-
   router.patch('/schedules/:id', userOnly, (req: Request<{ id: string }, unknown, PatchScheduleBody>, res) => {
     const engine = getEngine(res)
     if (!engine) return
@@ -512,15 +481,6 @@ export function createWorkflowRouter(
       catchUp: req.body.catchUp,
     })
     res.json({ schedule })
-  })
-
-  router.delete('/schedules/:id', userOnly, (req: Request<{ id: string }>, res) => {
-    const engine = getEngine(res)
-    if (!engine) return
-
-    const deleted = engine.deleteSchedule(req.params.id)
-    if (!deleted) return res.status(404).json({ error: 'Schedule not found' })
-    res.json({ success: true })
   })
 
   router.post('/schedules/:id/trigger', async (req, res) => {

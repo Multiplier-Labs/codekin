@@ -100,7 +100,6 @@ function makeSession(overrides: Partial<Session> = {}): Session {
     _claudeTurnCount: 0,
     _namingAttempts: 0,
     _apiRetryCount: 0,
-    _processGeneration: 0,
     _noOutputExitCount: 0,
     _lifetimeRestarts: 0,
     _lastActivityAt: Date.now(),
@@ -205,14 +204,12 @@ describe('SessionLifecycle', () => {
       expect(session.claudeProcess).not.toBe(oldProcess)
     })
 
-    it('clears _stoppedByUser and _restartTimer on start', () => {
+    it('clears _stoppedByUser on start', () => {
       session._stoppedByUser = true
-      session._restartTimer = setTimeout(() => {}, 10000) as any
 
       lifecycle.startClaude('sess-1')
 
       expect(session._stoppedByUser).toBe(false)
-      expect(session._restartTimer).toBeUndefined()
     })
 
     it('refuses to start an isolated session whose worktree is missing', () => {
@@ -281,15 +278,6 @@ describe('SessionLifecycle', () => {
       expect(result).toBe(false)
       expect(session._stoppedByUser).toBe(true)
       expect(deps.broadcast).toHaveBeenCalledWith(session, expect.objectContaining({ type: 'system_message', subtype: 'error' }))
-    })
-
-    it('bumps _processGeneration on each call', () => {
-      expect(session._processGeneration).toBe(0)
-      lifecycle.startClaude('sess-1')
-      expect(session._processGeneration).toBe(1)
-      // Second call kills existing process and bumps again
-      lifecycle.startClaude('sess-1')
-      expect(session._processGeneration).toBe(2)
     })
   })
 

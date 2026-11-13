@@ -138,7 +138,6 @@ export class SessionManager {
   /** All active (non-archived) sessions, keyed by session UUID. */
   private sessions = new Map<string, Session>()
   /** Reverse lookup: WebSocket → session ID for O(1) client-to-session resolution. */
-  private clientSessionMap = new Map<WebSocket, string>()
   /** SQLite archive for closed sessions (persists conversation summaries across restarts). */
   readonly archive: SessionArchive
   /** Exposed so ws-server can pass its port to child Claude processes. */
@@ -443,7 +442,6 @@ export class SessionManager {
       _turnCount: 0,
       _claudeTurnCount: 0,
       _namingAttempts: 0,
-      _processGeneration: 0,
       _noOutputExitCount: 0,
       _lifetimeRestarts: 0,
       isProcessing: false,
@@ -957,7 +955,6 @@ export class SessionManager {
     }
 
     session.clients.add(ws)
-    this.clientSessionMap.set(ws, sessionId)
     session._lastActivityAt = Date.now()
 
     // Re-broadcast pending tool approval prompts (PreToolUse hook path)
@@ -1007,7 +1004,6 @@ export class SessionManager {
     const session = this.sessions.get(sessionId)
     if (session) {
       session.clients.delete(ws)
-      this.clientSessionMap.delete(ws)
 
       // If no clients remain, wait a grace period before auto-denying.
       // This prevents false denials when the user is just refreshing the page.
@@ -1282,7 +1278,6 @@ export class SessionManager {
         text: `This session has ${turns} turns. Claude may begin compressing older messages from its context window. Earlier parts of the conversation may no longer be fully available to Claude.`,
       }
       this.broadcastAndHistory(session, msg)
-      session._contextWarningShown = true
     } else if (turns === CONTEXT_CRITICAL_TURN_THRESHOLD) {
       const msg: WsServerMessage = {
         type: 'system_message',
@@ -2071,24 +2066,6 @@ export class SessionManager {
         ws.send(data)
       }
     }
-  }
-
-  /** Find which session a WebSocket is connected to (O(1) via reverse map). */
-  findSessionForClient(ws: WebSocket): Session | undefined {
-    const sessionId = this.clientSessionMap.get(ws)
-    if (sessionId) return this.sessions.get(sessionId)
-    return undefined
-  }
-
-  /**
-   * Remove a client from all sessions (iterates for safety since a ws
-   * could theoretically appear in multiple session client sets).
-   */
-  removeClient(ws: WebSocket): void {
-    for (const session of this.sessions.values()) {
-      session.clients.delete(ws)
-    }
-    this.clientSessionMap.delete(ws)
   }
 
   // ---------------------------------------------------------------------------

@@ -396,49 +396,6 @@ export class ApprovalManager {
     return result.sort((a, b) => a.workingDir.localeCompare(b.workingDir))
   }
 
-  /**
-   * Return approvals that are effective globally via cross-repo inference
-   * (approved in CROSS_REPO_THRESHOLD+ repos). Each entry includes the
-   * repos that contributed to it.
-   */
-  getGlobalApprovals(): { tools: Record<string, string[]>; commands: Record<string, string[]>; patterns: Record<string, string[]> } {
-    const toolCounts = new Map<string, string[]>()
-    const commandCounts = new Map<string, string[]>()
-    const patternCounts = new Map<string, string[]>()
-
-    for (const [dir, entry] of this.repoApprovals) {
-      for (const tool of entry.tools) {
-        const dirs = toolCounts.get(tool) || []
-        dirs.push(dir)
-        toolCounts.set(tool, dirs)
-      }
-      for (const cmd of entry.commands) {
-        const dirs = commandCounts.get(cmd) || []
-        dirs.push(dir)
-        commandCounts.set(cmd, dirs)
-      }
-      for (const pattern of entry.patterns) {
-        const dirs = patternCounts.get(pattern) || []
-        dirs.push(dir)
-        patternCounts.set(pattern, dirs)
-      }
-    }
-
-    const filterAboveThreshold = (counts: Map<string, string[]>): Record<string, string[]> => {
-      const result: Record<string, string[]> = {}
-      for (const [key, dirs] of counts) {
-        if (dirs.length >= CROSS_REPO_THRESHOLD) result[key] = dirs.sort()
-      }
-      return result
-    }
-
-    return {
-      tools: filterAboveThreshold(toolCounts),
-      commands: filterAboveThreshold(commandCounts),
-      patterns: filterAboveThreshold(patternCounts),
-    }
-  }
-
   /** Remove an auto-approval rule for a repo (workingDir) and persist to disk.
    *  Returns 'invalid' if no tool/command provided, or boolean indicating if something was deleted.
    *  Pass skipPersist=true for bulk operations (caller must call persistRepoApprovals after). */

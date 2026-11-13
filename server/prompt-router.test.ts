@@ -49,7 +49,6 @@ function makeSession(overrides: Partial<Session> = {}): Session {
     _claudeTurnCount: 0,
     _namingAttempts: 0,
     _apiRetryCount: 0,
-    _processGeneration: 0,
     _noOutputExitCount: 0,
     _lifetimeRestarts: 0,
     _lastActivityAt: Date.now(),
