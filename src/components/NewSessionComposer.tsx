@@ -16,7 +16,7 @@ import { InputBar, type InputBarHandle } from './InputBar'
 import { PlacePicker } from './PlacePicker'
 import type { RepoGroup } from '../hooks/useRepos'
 import type { CodingProvider, ModelOption, PermissionMode } from '../types'
-import { placeHint, placeKey, samePlace, type DraftPlace } from '../lib/places'
+import { placeHint, placeKey, samePlace, tildify, type DraftPlace } from '../lib/places'
 import { browseDirs, getScratchRoot } from '../lib/ccApi'
 
 interface Props {
@@ -124,6 +124,8 @@ export function NewSessionComposer({
     closePicker()
   }, [onPlaceChange, closePicker])
 
+  /** Folder paths read as `~/…` once the home directory is known. */
+  const labelOf = (p: DraftPlace) => p.kind === 'folder' && p.path ? tildify(p.path, homeDir) : p.label
   const recentChips = recent.filter(p => !samePlace(p, place) && p.kind !== 'org').slice(0, RECENT_CHIPS)
   const showWorktree = place.git && place.kind !== 'org'
   const hint = progress ?? placeHint(place, useWorktree, { home: homeDir, scratchRoot: scratchDir })
@@ -143,7 +145,7 @@ export function NewSessionComposer({
         }`}
       >
         <PlaceIcon place={place} />
-        <span className={`truncate ${place.kind === 'folder' ? 'font-mono' : ''}`}>{place.label}</span>
+        <span className={`truncate ${place.kind === 'folder' ? 'font-mono' : ''}`}>{labelOf(place)}</span>
         <IconChevronDown size={12} stroke={2} className="shrink-0 opacity-70" />
       </button>
       {pickerOpen && (
@@ -223,7 +225,7 @@ export function NewSessionComposer({
                   className="flex max-w-[240px] items-center gap-1.5 rounded-control border border-edge-strong bg-surface px-2.5 py-1 text-meta text-ink-muted transition-colors hover:text-ink disabled:opacity-50"
                 >
                   <PlaceIcon place={p} />
-                  <span className={`truncate ${p.kind === 'folder' ? 'font-mono' : ''}`}>{p.label}</span>
+                  <span className={`truncate ${p.kind === 'folder' ? 'font-mono' : ''}`}>{labelOf(p)}</span>
                 </button>
               ))}
             </div>
