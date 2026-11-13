@@ -801,11 +801,19 @@ When a PR is closed, the handler runs synchronously — no workspace or Claude s
 - **No auto-restore**: Webhook sessions are one-shot; they are NOT restored on server restart, preventing finished reviews from consuming concurrency slots.
 - **Superseding**: When a new push arrives for the same PR, any active review session is marked `superseded` and deleted before the new one starts. Race condition guards check superseded status before workspace creation and session creation.
 
-### Review Prompt — 3-Tier Resolution
+### Which repos are reviewed
 
-1. **Repo-level**: `.codekin/pr-review-prompt.md` in the PR's repository
-2. **Global**: `~/.codekin/pr-review-prompt.md`
-3. **Built-in default**: Hardcoded fallback
+A `pull_request` event is matched to a PR Review automation (`kind: "pr-review"` in `~/.codekin/workflow-config.json`) through each automation repo's `origin` remote (`owner/name`, case-insensitive):
+
+- **No PR Review automation has ever been saved** (`prReviewAutomationsAdopted` unset and no such entries): every repo is reviewed with the default agent and model. This keeps webhook-only setups working.
+- **Otherwise:** the repo needs an enabled automation that its maintenance plan does not hold. If not, the event is answered `200` with `status: "filtered"` and a `filterReason` (visible in GitHub's delivery log), and no session starts. The automation's `provider` and `model` are used for the session, and its `customPrompt` for the review instructions.
+
+### Review Prompt — Resolution
+
+1. **Automation**: the PR Review automation's custom prompt
+2. **Repo-level**: `.codekin/pr-review-prompt.md` in the PR's repository
+3. **Global**: `~/.codekin/pr-review-prompt.md`
+4. **Built-in default**: Hardcoded fallback
 
 The shipped global prompt is configured with: expert council pattern (2–4 reviewers selected by tech stack), mandatory Codex cross-review before posting, practical-impact filter, signal-over-noise discipline, security/scalability as first-class concerns, existing-comment awareness (no duplicates), and never-approve (only COMMENT or REQUEST_CHANGES).
 

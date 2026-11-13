@@ -27,6 +27,7 @@ import { handleWsMessage } from './ws-message-handler.js'
 import { loadWebhookConfig } from './webhook-config.js'
 import { WebhookHandler } from './webhook-handler.js'
 import { createWebhookRateLimiter } from './webhook-rate-limiter.js'
+import { setPrReviewHold } from './pr-review-automation.js'
 import { initWorkflowEngine, getWorkflowEngine, shutdownWorkflowEngine, type WorkflowEvent } from './workflow-engine.js'
 import { initRepoActivityIndex, shutdownRepoActivityIndex } from './repo-activity.js'
 import { initDeploymentMonitor, shutdownDeploymentMonitor } from './deployment-monitor.js'
@@ -742,6 +743,7 @@ server.listen(port, BIND_HOST, () => {
     // Maintenance: paused/off plans hold the automations adopted into them,
     // and every finished run of a linked automation is observed once.
     engine.setDispatchGate((schedule) => maintenanceService.dispatchHold(schedule.id))
+    setPrReviewHold((automationId) => maintenanceService.dispatchHold(automationId))
     engine.on('workflow_event', (event: WorkflowEvent) => {
       if (event.eventType !== 'run_succeeded' && event.eventType !== 'run_failed' && event.eventType !== 'run_skipped') return
       try {

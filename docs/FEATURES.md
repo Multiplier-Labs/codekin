@@ -233,7 +233,8 @@ Codekin automatically reviews pull requests by responding to GitHub webhook even
 - **Inline and summary comments** — Claude posts a summary comment (updated in place on subsequent pushes) and individual inline code comments for specific findings.
 - **Per-PR context cache** — Prior review context is cached per PR so subsequent reviews (after new commits) are faster and more informed. Cache is archived on merge, deleted on close.
 - **Session superseding** — If a new push arrives while a review session is running, the old session is cancelled and a new one starts with the latest diff.
-- **3-tier prompt resolution** — The review prompt resolves from: repo-level `.codekin/pr-review-prompt.md` → global `~/.codekin/pr-review-prompt.md` → built-in default.
+- **Controlled by the PR Review automation** — Add a PR Review automation for a repo (Automations → Add) to review its PRs. The automation's agent, model and custom prompt are used for the review session; pausing or deleting it stops reviews for that repo, and a paused maintenance plan holds it. Repos without one are not reviewed. Until the first PR Review automation is saved, every repo the webhook reports is reviewed with the default agent, as before.
+- **Prompt resolution** — The review instructions come from the automation's custom prompt → repo-level `.codekin/pr-review-prompt.md` → global `~/.codekin/pr-review-prompt.md` → built-in default.
 - **Concurrency control** — Maximum concurrent PR review sessions is configurable (default 3, can be raised in `~/.codekin/webhook-config.json`).
 - **Cleanup on close/merge** — When a PR is closed, active sessions are killed and the context cache is archived (merged) or deleted (abandoned).
 

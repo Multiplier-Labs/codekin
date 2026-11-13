@@ -1,10 +1,11 @@
 /**
  * Builds the structured prompt sent to Claude for pull request code review.
  *
- * Supports a 3-tier custom prompt resolution for the review instructions:
- *   1. Repo-level: {workspacePath}/.codekin/pr-review-prompt.md
- *   2. Global:     ~/.codekin/pr-review-prompt.md
- *   3. Built-in default (hardcoded below)
+ * Review instructions resolve, first match wins:
+ *   1. The repo's PR Review automation's custom prompt (options.customPrompt)
+ *   2. Repo-level: {workspacePath}/.codekin/pr-review-prompt.md
+ *   3. Global:     ~/.codekin/pr-review-prompt.md
+ *   4. Built-in default (hardcoded below)
  *
  * The PR metadata and diff context are always prepended — custom prompts
  * only replace the review instructions section.
@@ -22,6 +23,8 @@ export interface PrPromptOptions {
   priorCache?: PrCacheData
   cachePath?: string
   existingCommentId?: number
+  /** The PR Review automation's custom prompt; takes precedence over the prompt files. */
+  customPrompt?: string
 }
 
 const CUSTOM_PROMPT_FILENAME = 'pr-review-prompt.md'
@@ -190,7 +193,7 @@ export function buildPrReviewPrompt(ctx: PullRequestContext, workspacePath: stri
   lines.push('')
   lines.push('## Instructions')
 
-  const customPrompt = loadCustomPrompt(workspacePath)
+  const customPrompt = options?.customPrompt?.trim() || loadCustomPrompt(workspacePath)
   if (customPrompt) {
     lines.push(customPrompt)
   } else {

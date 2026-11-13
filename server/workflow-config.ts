@@ -41,6 +41,13 @@ export interface ReviewRepoConfig {
 
 export interface WorkflowConfig {
   reviewRepos: ReviewRepoConfig[]
+  /**
+   * Set the first time a PR Review automation is saved. From then on, PR
+   * reviews run only for repos with an enabled PR Review automation. Before
+   * that, every repo the GitHub webhook reports is reviewed with the default
+   * agent, as it was before automations controlled PR review.
+   */
+  prReviewAutomationsAdopted?: boolean
 }
 
 // ---------------------------------------------------------------------------
@@ -67,6 +74,7 @@ export function loadWorkflowConfig(): WorkflowConfig {
 }
 
 export function saveWorkflowConfig(config: WorkflowConfig): void {
+  if (config.reviewRepos.some(r => r.kind === 'pr-review')) config.prReviewAutomationsAdopted = true
   if (!existsSync(CONFIG_DIR)) {
     mkdirSync(CONFIG_DIR, { recursive: true })
   }

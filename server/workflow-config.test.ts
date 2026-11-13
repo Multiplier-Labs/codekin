@@ -81,6 +81,17 @@ describe('workflow-config', () => {
       const written = vi.mocked(writeFileSync).mock.calls[0][1] as string
       expect(JSON.parse(written)).toEqual(config)
     })
+
+    it('records that PR Review automations are in use, and keeps the mark after they are removed', () => {
+      vi.mocked(existsSync).mockReturnValue(true)
+      saveWorkflowConfig({
+        reviewRepos: [{ id: 'p', name: 'PR', repoPath: '/tmp', cronExpression: 'event', enabled: true, kind: 'pr-review' }],
+      })
+      expect(JSON.parse(vi.mocked(writeFileSync).mock.calls[0][1] as string).prReviewAutomationsAdopted).toBe(true)
+
+      saveWorkflowConfig({ reviewRepos: [], prReviewAutomationsAdopted: true })
+      expect(JSON.parse(vi.mocked(writeFileSync).mock.calls[1][1] as string).prReviewAutomationsAdopted).toBe(true)
+    })
   })
 
   describe('addReviewRepo', () => {
