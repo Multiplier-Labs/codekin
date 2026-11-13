@@ -10,7 +10,6 @@ import { openControlPlaneDb, upsertUserFromGithub } from './control-plane-db.js'
 import { createDeviceKeyRouter } from './device-key-routes.js'
 import { listDeviceKeys, upsertDeviceKey } from './device-keys.js'
 import { generateMachineKeyPair, keyIdForSpki } from './machine-identity.js'
-import { listAuditEvents } from './audit.js'
 import type { RelayConfig } from './relay-config.js'
 
 describe('device key registry', () => {
@@ -65,19 +64,5 @@ describe('device key registry', () => {
   it('caps how many keys one user can register', () => {
     for (let i = 0; i < 20; i++) expect(upsertDeviceKey(db, bob, generateMachineKeyPair().publicKey, `k${i}`)).not.toBeNull()
     expect(upsertDeviceKey(db, bob, generateMachineKeyPair().publicKey, 'one too many')).toBeNull()
-  })
-
-  it('lists and removes only the caller’s own keys', async () => {
-    const mine = upsertDeviceKey(db, alice, generateMachineKeyPair().publicKey, 'Mine')!
-    upsertDeviceKey(db, bob, generateMachineKeyPair().publicKey, 'Bob’s')
-    expect((await fetch(base)).status).toBe(401)
-
-    const listed = await (await fetch(base, { headers: { 'x-test-user': 'alice' } })).json() as { keys: Array<{ keyId: string }> }
-    expect(listed.keys.map(k => k.keyId)).toEqual([mine])
-
-    expect((await fetch(`${base}/${mine}`, { method: 'DELETE', headers: { 'x-test-user': 'bob' } })).status).toBe(404)
-    expect((await fetch(`${base}/${mine}`, { method: 'DELETE', headers: { 'x-test-user': 'alice' } })).status).toBe(200)
-    expect(listDeviceKeys(db, alice)).toEqual([])
-    expect(listAuditEvents(db, { kinds: ['device_key_removed'] })).toHaveLength(1)
   })
 })

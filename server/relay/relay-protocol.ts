@@ -120,13 +120,6 @@ export interface BrowserHello {
   clientVersion?: string
 }
 
-/** Hub → browser on successful auth + ACL check. */
-export interface BrowserHelloAck {
-  machineId: string
-  displayName: string
-  online: boolean
-}
-
 /**
  * The caller's standing on a machine, attached by the hub to everything it
  * forwards. The connector re-checks against this rather than trusting that
@@ -208,11 +201,6 @@ export interface StreamOpen {
   intent?: SignedIntent
 }
 
-/** Connector → browser once the local socket is open and authenticated. */
-export interface StreamReady {
-  status: 'open'
-}
-
 /** One frame in either direction, passed through without interpretation. */
 export interface StreamData {
   /** The local Codekin protocol frame, verbatim JSON text. */
@@ -252,7 +240,6 @@ export const RELAY_ERROR = {
   localUnreachable: 'local_unreachable',
   localUnauthorized: 'local_unauthorized',
   tooManyChannels: 'too_many_channels',
-  unknownChannel: 'unknown_channel',
   notPermitted: 'not_permitted',
   connectorUpdateRequired: 'connector_update_required',
   /**

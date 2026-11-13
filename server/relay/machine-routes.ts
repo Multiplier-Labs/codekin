@@ -52,8 +52,6 @@ export function createMachineRouter(db: Database.Database, hub?: ConnectorHub, c
           access: m.owner_user_id === user.id ? 'owner' : 'shared',
           // Connected but refused traffic until its connector is updated.
           updateRequired: hub?.updateRequired(m.id) ?? null,
-          // Kept for clients older than updateRequired; same condition.
-          connectorOutdated: (hub?.updateRequired(m.id) ?? null) !== null,
           sessions: hub?.sessionSummary(m.id) ?? null,
           // The policy its connector reports (§6.8): whether the relay alone can control it.
           intentPolicy: hub?.intentPolicy(m.id) ?? m.intent_policy ?? null,

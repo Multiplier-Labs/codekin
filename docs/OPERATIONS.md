@@ -531,10 +531,9 @@ codekin relay devices policy warn  # off | warn | required (required needs a con
 **Connector version floors.** The relay keeps a base minimum connector version
 and, per security feature, the oldest connector it believes when the feature is
 advertised (`CONNECTOR_FLOORS` in `server/relay/connector-version.ts`). A
-workspace can require features of its machines (`workspaces.required_capabilities`,
-a JSON array, empty by default). A machine below a floor, or missing a required
-feature, stays connected and shows as **update required** in the hosted app,
-and every request and stream to it fails with `connector_update_required`.
+machine below the base floor stays connected and shows as **update required**
+in the hosted app, and every request and stream to it fails with
+`connector_update_required`.
 Before raising a floor, check `connectorVersions` in `GET /api/admin/stats`.
 Signed intents (`intents`) have a floor of 0.11.0.
 

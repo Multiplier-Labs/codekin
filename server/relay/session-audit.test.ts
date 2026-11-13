@@ -2,7 +2,7 @@
 import { describe, it, expect } from 'vitest'
 import { openControlPlaneDb, BOOTSTRAP_WORKSPACE_ID } from './control-plane-db.js'
 import { listAuditEvents, recordAuditEvent } from './audit.js'
-import { AuditBudget, classifyBrowserFrame, classifyRestRequest, decisionClass, sessionFromMachineFrame, SessionAuditState } from './session-audit.js'
+import { AuditBudget, classifyBrowserFrame, classifyRestRequest, decisionClass, SessionAuditState } from './session-audit.js'
 
 describe('classifyBrowserFrame', () => {
   it('audits prompts, approvals, stops and permission changes, and binds joins', () => {
@@ -37,11 +37,12 @@ describe('classifyBrowserFrame', () => {
   })
 })
 
-describe('sessionFromMachineFrame', () => {
+describe('SessionAuditState.observe', () => {
   it('reads the session from the head of join/create replies only', () => {
-    expect(sessionFromMachineFrame('{"type":"session_joined","sessionId":"s1","outputBuffer":[]}')).toEqual({ sessionId: 's1', created: false })
-    expect(sessionFromMachineFrame('{"type":"session_created","sessionId":"s2"}')).toEqual({ sessionId: 's2', created: true })
-    expect(sessionFromMachineFrame('{"type":"output","data":"{\\"type\\":\\"session_created\\",\\"sessionId\\":\\"x\\"}"}')).toBeNull()
+    const observe = (data: string) => new SessionAuditState().observe(data)
+    expect(observe('{"type":"session_joined","sessionId":"s1","outputBuffer":[]}')).toEqual({ sessionId: 's1', created: false })
+    expect(observe('{"type":"session_created","sessionId":"s2"}')).toEqual({ sessionId: 's2', created: true })
+    expect(observe('{"type":"output","data":"{\\"type\\":\\"session_created\\",\\"sessionId\\":\\"x\\"}"}')).toBeNull()
   })
 })
 
@@ -67,7 +68,7 @@ describe('confirmed session attribution', () => {
   it('audits valid whitespace-prefixed JSON and prompts larger than the old audit cap', () => {
     const data = '  ' + JSON.stringify({ type: 'input', data: 'x'.repeat(2 * 1024 * 1024 + 1) })
     expect(classifyBrowserFrame(data)).toMatchObject({ kind: 'prompt_sent', metadata: { payloadHash: expect.any(String) } })
-    expect(sessionFromMachineFrame(' {"outputBuffer":[],"sessionId":"b","type":"session_joined"} ')).toEqual({ sessionId: 'b', created: false })
+    expect(new SessionAuditState().observe(' {"outputBuffer":[],"sessionId":"b","type":"session_joined"} ')).toEqual({ sessionId: 'b', created: false })
   })
 })
 

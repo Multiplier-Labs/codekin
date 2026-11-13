@@ -14,8 +14,6 @@ import { randomUUID } from 'crypto'
 import type Database from 'better-sqlite3'
 import { BOOTSTRAP_WORKSPACE_ID } from './control-plane-db.js'
 import type { UserRow, WorkspaceRole } from './control-plane-db.js'
-import { isConnectorCapability } from './connector-version.js'
-import type { ConnectorCapability } from './connector-version.js'
 
 export type MembershipStatus = 'active' | 'suspended'
 
@@ -214,23 +212,6 @@ export function setConfirmedDevicesRule(db: Database.Database, workspaceId: stri
 /** Whether the rule refuses machines right now (required, and past any grace period). */
 export function confirmedDevicesEnforced(rule: ConfirmedDevicesRule | null | undefined, now = Date.now()): boolean {
   return !!rule?.required && (rule.graceUntil === null || now >= rule.graceUntil)
-}
-
-/**
- * Connector capabilities required of the machines in a workspace. Values the
- * relay doesn't know are dropped rather than trusted.
- */
-export function getRequiredCapabilities(db: Database.Database, workspaceId: string): ConnectorCapability[] {
-  const row = db.prepare('SELECT required_capabilities FROM workspaces WHERE id = ?').get(workspaceId) as
-    | { required_capabilities: string }
-    | undefined
-  if (!row) return []
-  try {
-    const parsed: unknown = JSON.parse(row.required_capabilities)
-    return Array.isArray(parsed) ? [...new Set(parsed.filter(isConnectorCapability))] : []
-  } catch {
-    return []
-  }
 }
 
 export function renameWorkspace(db: Database.Database, workspaceId: string, name: string): void {

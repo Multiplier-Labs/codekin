@@ -59,12 +59,12 @@ Supporting changes (**built**):
 
 **Built** (`server/relay/connector-version.ts`, `connector-hub.ts`). A connector below `MIN_SUPPORTED_CONNECTOR_VERSION` used to trigger only a warning. Features like signed intents need the relay to refuse machines that can't enforce them. No capability floor is set yet; each one is set when its feature ships.
 
-- **Floors.** `CONNECTOR_FLOORS` in `connector-version.ts` sets a `base` floor plus one floor per capability (`intents`, `e2e`, `credentialClass`). Connectors advertise capabilities in `ConnectorHello.capabilities.features`. A machine has a capability when it advertises it **and** meets that capability's floor.
-- **Below a floor, or missing a capability its workspace requires:**
+- **Floors.** `CONNECTOR_FLOORS` in `connector-version.ts` sets a `base` floor plus one floor per shipped capability (today `intents`). Connectors advertise capabilities in `ConnectorHello.capabilities.features`. A machine has a capability when it advertises it **and** meets that capability's floor.
+- **Below the base floor:**
   - The hub keeps the socket open. Closing it would put old connectors in a reconnect loop.
   - It sends `hello_ack.updateRequired: { minimum, missing, reason }`.
   - It refuses every request and stream to the machine with `connector_update_required`. The hosted app shows the machine as **update required**; the connector reports `update_required` in `codekin relay status` and the local Settings.
-- **Workspace setting.** `workspaces.required_capabilities` (JSON array). The default is empty. It is read when a machine connects; there is no API to change it yet, since no capability has shipped.
+- **Workspace setting.** The `workspaces.required_capabilities` column exists but is not read; nothing writes it.
 - **Floors only go up.** `/api/admin/stats` shows the version spread before a floor is raised.
 
 ## 5. Secret storage

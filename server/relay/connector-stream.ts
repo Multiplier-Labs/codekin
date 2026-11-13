@@ -36,7 +36,6 @@ const INTENT_REFUSAL_TEXT: Record<IntentRefusal, string> = {
   intent_out_of_order: 'The signed action arrived out of order',
   intent_rate_limited: 'Too many signed actions at once; slow down',
   intent_step_up_required: 'This action needs your passkey (Face ID, Touch ID or your security key)',
-  intent_local_only: 'This computer only accepts browsers confirmed on it, not added by passkey',
 }
 
 /** A sentence for the browser to show for an intent refusal. */

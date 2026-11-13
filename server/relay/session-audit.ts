@@ -89,10 +89,6 @@ export function classifyBrowserFrame(data: string): BrowserAuditFrame | null {
 }
 
 /** Read a machine acknowledgement independently of JSON property order. */
-export function sessionFromMachineFrame(data: string): { sessionId: string; created: boolean } | null {
-  return sessionAnnouncement(parseSessionFrame(data))
-}
-
 function sessionAnnouncement(msg: Record<string, unknown> | null): { sessionId: string; created: boolean } | null {
   if (!msg || (msg.type !== 'session_joined' && msg.type !== 'session_created') || typeof msg.sessionId !== 'string') return null
   return { sessionId: msg.sessionId.slice(0, 200), created: msg.type === 'session_created' }

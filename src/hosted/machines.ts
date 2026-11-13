@@ -21,8 +21,6 @@ export interface Machine {
   lastSeenAt: string | null
   /** 'shared' when reachable only through a session share. */
   access?: 'owner' | 'shared'
-  /** True when the machine's connector is behind the supported version. */
-  connectorOutdated?: boolean
   /**
    * Set when the machine is connected but the relay refuses its traffic until
    * Codekin on it is updated (a connector version floor).

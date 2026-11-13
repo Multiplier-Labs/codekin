@@ -44,10 +44,3 @@ export function listDeviceKeys(db: Database.Database, userId: string): DeviceKey
   ).all(userId) as Array<{ key_id: string; spki: string; label: string; created_at: string; last_seen_at: string | null }>)
     .map(r => ({ keyId: r.key_id, spki: r.spki, label: r.label, createdAt: r.created_at, lastSeenAt: r.last_seen_at }))
 }
-
-/** Mark a key removed in the registry. Machines that trust it are unaffected. */
-export function removeDeviceKey(db: Database.Database, userId: string, keyId: string): boolean {
-  return db.prepare(
-    `UPDATE device_keys SET revoked_at = datetime('now') WHERE user_id = ? AND key_id = ? AND revoked_at IS NULL`,
-  ).run(userId, keyId).changes > 0
-}
