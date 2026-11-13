@@ -109,4 +109,27 @@ describe('KeepThisWork', () => {
     await act(async () => { button('Move here')!.click() })
     expect(onMove).toHaveBeenCalledWith('/home/sam/projects')
   })
+
+  it('can publish when the GitHub owners arrive after it is shown', async () => {
+    const props = mount({ kind: 'scratch', git: false, hasFiles: true }, { owners: [] })
+    expect(button('Publish to GitHub')!.disabled).toBe(true)
+    act(() => { root!.render(<KeepThisWork {...props} owners={['sam']} />) })
+    act(() => { button('Publish to GitHub')!.click() })
+    expect(button('Publish')!.disabled).toBe(false)
+    await act(async () => { button('Publish')!.click() })
+    expect(props.onPublish).toHaveBeenCalledWith({ owner: 'sam', name: 'brisk-otter', visibility: 'private' })
+  })
+
+  it('enables Move here once a folder is picked in the folder browser', async () => {
+    const onMove = vi.fn(async () => {})
+    mount({ kind: 'scratch', git: false, hasFiles: true }, { onMove, token: 'tok' })
+    act(() => { button('Move to a folder')!.click() })
+    await act(async () => { (container!.querySelector('[aria-label="Browse folders"]') as HTMLButtonElement).click() })
+    await act(async () => { button('Select this folder')!.click() })
+    expect(onMove).not.toHaveBeenCalled()
+    expect(container!.textContent).toContain('/home/sam/brisk-otter')
+    await act(async () => { button('Move here')!.click() })
+    expect(onMove).toHaveBeenCalledWith('/home/sam')
+  })
 })
+

@@ -167,7 +167,7 @@ export async function getPrStatus(cwd: string, opts: { refresh?: boolean } = {})
 
   const key = `${repoKey}::${branch}`
   const cached = cache.get(key)
-  const dirty = await getFileStatuses(cwd).then(s => Object.keys(s).length > 0).catch(() => false)
+  const dirty = await getFileStatuses(cwd, undefined, { wholeRepo: true }).then(s => Object.keys(s).length > 0).catch(() => false)
 
   let status: PrStatus
   if (cached && !opts.refresh && Date.now() - Date.parse(cached.fetchedAt) < PR_STATUS_TTL_MS) {

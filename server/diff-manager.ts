@@ -60,12 +60,39 @@ export async function execGitChunked(baseArgs: string[], paths: string[], cwd: s
   return result
 }
 
-/** Get file statuses from `git status --porcelain` for given paths (or all). */
-export async function getFileStatuses(cwd: string, paths?: string[]): Promise<Record<string, DiffFileStatus>> {
+/**
+ * The path of `cwd` inside its repository ('' at the root, else 'sub/dir/').
+ * Porcelain status and `git diff` print paths from the repository root, while
+ * pathspecs (restore, rm, ls-files) are read from `cwd`: in a subfolder the
+ * two must be reconciled or a discard hits a different file.
+ */
+async function repoPrefix(cwd: string): Promise<string> {
+  return (await execGit(['rev-parse', '--show-prefix'], cwd)).trim()
+}
+
+/**
+ * Get file statuses from `git status --porcelain` for given paths (or all).
+ * Paths are relative to `cwd` and limited to its subtree, so they can be fed
+ * straight back to git or joined with `cwd`. `wholeRepo` reports the entire
+ * repository instead, with root-relative paths.
+ */
+export async function getFileStatuses(cwd: string, paths?: string[], opts: { wholeRepo?: boolean } = {}): Promise<Record<string, DiffFileStatus>> {
+  const prefix = opts.wholeRepo ? '' : await repoPrefix(cwd)
   const args = ['status', '--porcelain', '-z']
   if (paths) args.push('--', ...paths)
+  else if (prefix) args.push('--', '.')
   const raw = await execGit(args, cwd)
+  const all: Record<string, DiffFileStatus> = {}
+  parsePorcelain(raw, all)
+  if (!prefix) return all
   const result: Record<string, DiffFileStatus> = {}
+  for (const [p, status] of Object.entries(all)) {
+    if (p.startsWith(prefix)) result[p.slice(prefix.length)] = status
+  }
+  return result
+}
+
+function parsePorcelain(raw: string, result: Record<string, DiffFileStatus>): void {
   // git status --porcelain=v1 -z format: XY NUL path NUL
   const parts = raw.split('\0')
   let i = 0
@@ -93,7 +120,6 @@ export async function getFileStatuses(cwd: string, paths?: string[]): Promise<Re
       i++
     }
   }
-  return result
 }
 
 /** Max stdout for a diff (32 MB); the parser shows the first 2 MB and flags truncation. */
@@ -335,7 +361,9 @@ export class DiffManager {
     files: DiffFile[]; truncated: boolean; truncationReason?: string; incomplete: string[]
   }> {
     const incomplete: string[] = []
-    const diffArgs = ['diff', '--find-renames', '--no-color', '--unified=3']
+    // --relative: limit to cwd's subtree with cwd-relative paths, matching
+    // ls-files and the pathspecs discard hands to git.
+    const diffArgs = ['diff', '--relative', '--find-renames', '--no-color', '--unified=3']
     let rawDiff: string
     if (view === 'committed' && review) {
       rawDiff = await execGitDiff([...diffArgs, review.mergeBase, review.head], cwd)
