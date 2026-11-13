@@ -65,11 +65,6 @@ export function Row({ label, description, control, htmlFor, children }: {
   )
 }
 
-/** A heading for a group of rows or a list inside a block. */
-export function Subheading({ children }: { children: React.ReactNode }) {
-  return <h4 className="mb-2 text-body font-semibold text-ink">{children}</h4>
-}
-
 /* One button scale for every Settings page. */
 const buttonBase =
   'inline-flex items-center justify-center gap-2 rounded-control px-3 py-1.5 text-body transition disabled:opacity-50'

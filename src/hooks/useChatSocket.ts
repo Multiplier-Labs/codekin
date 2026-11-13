@@ -12,7 +12,7 @@
  */
 
 import { useRef, useCallback, useEffect, useState } from 'react'
-import type { WsClientMessage, WsServerMessage, ChatMessage, TaskItem, PermissionMode, SessionUsage } from '../types'
+import type { WsClientMessage, WsServerMessage, ChatMessage, TaskItem, PermissionMode } from '../types'
 import { usePromptState } from './usePromptState'
 import { useWsConnection } from './useWsConnection'
 import { getPref, setPref } from '../lib/prefs'
@@ -219,7 +219,6 @@ export function useChatSocket({
     getPref('permissionMode') ?? 'acceptEdits'
   )
   const [thinkingSummary, setThinkingSummary] = useState<string | null>(null)
-  const [usage, setUsage] = useState<SessionUsage | null>(null)
   const promptState = usePromptState()
   const currentSessionId = useRef<string | null>(null)
   /** True once a drop has been announced in the chat, until the session rejoins. */
@@ -344,10 +343,6 @@ export function useChatSocket({
         setTasks(msg.tasks)
         break
 
-      case 'usage':
-        setUsage({ inputTokens: msg.inputTokens, outputTokens: msg.outputTokens, costUsd: msg.costUsd })
-        break
-
       // Prompt handling: permission requests and questions from Claude's control protocol.
       // See server/types.ts:ClaudeControlRequest — prompt responses require a control_response
       // wrapper sent via the 'prompt_response' WsClientMessage type, not a regular 'input' message.
@@ -380,7 +375,6 @@ export function useChatSocket({
         setRenderSessionId(msg.sessionId)
         setMessages([])
         setTasks([])
-        setUsage(null)
         setIsProcessing(false)
         setThinkingSummary(null)
         // Adopt the new session's harness and model right away. Until the
@@ -410,7 +404,6 @@ export function useChatSocket({
         let rebuilt: ChatMessage[] = []
         let restoredPlanMode = false
         let restoredTasks: TaskItem[] = []
-        let restoredUsage: SessionUsage | null = null
         if (msg.outputBuffer?.length) {
           rebuilt = rebuildFromHistory(msg.outputBuffer)
           for (const bufferedMsg of msg.outputBuffer) {
@@ -419,9 +412,6 @@ export function useChatSocket({
             }
             if (bufferedMsg.type === 'todo_update') {
               restoredTasks = bufferedMsg.tasks
-            }
-            if (bufferedMsg.type === 'usage') {
-              restoredUsage = { inputTokens: bufferedMsg.inputTokens, outputTokens: bufferedMsg.outputTokens, costUsd: bufferedMsg.costUsd }
             }
           }
         }
@@ -440,7 +430,6 @@ export function useChatSocket({
         // reconstructed from (possibly truncated) history.
         setPlanningMode(msg.planState ? msg.planState !== 'idle' : restoredPlanMode)
         setTasks(restoredTasks)
-        setUsage(restoredUsage)
         setMessages(trimMessages(rebuilt))
         callbacksRef.current.onSessionJoined?.(msg.sessionId)
         break
@@ -619,11 +608,6 @@ export function useChatSocket({
     setMessages([])
   }, [])
 
-  /** Push a local-only system message (e.g. for built-in command feedback). */
-  const addSystemMessage = useCallback((text: string, subtype: 'notification' | 'init' | 'error' = 'notification') => {
-    setMessages(prev => trimMessages([...prev, { type: 'system', subtype, text, key: nextKey() }]))
-  }, [])
-
   /**
    * Switch the session's model. Pass `effort` to change effort in the same
    * restart (null = harness default); omit it to leave effort as it is.
@@ -689,7 +673,6 @@ export function useChatSocket({
     connState,
     messages,
     tasks,
-    usage,
     planningMode,
     isProcessing,
     thinkingSummary,
@@ -707,7 +690,6 @@ export function useChatSocket({
     sendPromptResponse,
     leaveSession,
     clearMessages,
-    addSystemMessage,
     disconnect,
     reconnect,
     restoreSession,

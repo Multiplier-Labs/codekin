@@ -68,21 +68,6 @@ export async function listSessions(token: string): Promise<Session[]> {
   return data.sessions ?? []
 }
 
-/** Create a new session. Returns the session ID and full session info. */
-export async function createSession(
-  token: string,
-  name: string,
-  workingDir: string,
-): Promise<{ sessionId: string; session: Session }> {
-  const res = await transport.authFetch(`/api/sessions/create`, {
-    method: 'POST',
-    headers: headers(token),
-    body: JSON.stringify({ name, workingDir }),
-  })
-  if (!res.ok) throw new Error(`Failed to create session: ${res.status}`)
-  return jsonBody<{ sessionId: string; session: Session }>(res)
-}
-
 /** Rename a session. */
 export async function renameSession(token: string, sessionId: string, name: string): Promise<void> {
   const res = await transport.authFetch(`/api/sessions/${sessionId}/rename`, {
@@ -653,11 +638,6 @@ export function getNativeFolderPickerAvailable(token: string): Promise<boolean> 
       return false
     })
   return nativeFolderPickerAvailable
-}
-
-/** Test hook: forget the cached availability. */
-export function resetNativeFolderPickerCache(): void {
-  nativeFolderPickerAvailable = null
 }
 
 /** Open the native macOS folder dialog; resolves with the chosen path, or null if cancelled. */

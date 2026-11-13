@@ -114,10 +114,6 @@ export function addResponsibility(token: string, input: { repo: string; name: st
   return call(token, '/responsibilities', { method: 'POST', body: input })
 }
 
-export function updateResponsibility(token: string, id: string, patch: Partial<Pick<Responsibility, 'name' | 'scope' | 'automationIds' | 'policy' | 'maxActiveTasks' | 'requiredDecision' | 'enabled'>>): Promise<unknown> {
-  return call(token, `/responsibilities/${encodeURIComponent(id)}`, { method: 'PATCH', body: patch })
-}
-
 export function removeResponsibility(token: string, id: string): Promise<unknown> {
   return call(token, `/responsibilities/${encodeURIComponent(id)}/remove`, { method: 'POST' })
 }

@@ -6,7 +6,6 @@
  */
 
 import { IconMenu2, IconPlus, IconSettings } from '@tabler/icons-react'
-import type { Repo } from '../types'
 import AppIcon from './AppIcon'
 
 interface Props {
@@ -15,7 +14,6 @@ interface Props {
   onMenuOpen: () => void
   onNewSession: () => void
   onSettingsOpen: () => void
-  activeRepo: Repo | null
 }
 
 export function MobileTopBar({ repoName, sessionName, onMenuOpen, onNewSession, onSettingsOpen }: Props) {

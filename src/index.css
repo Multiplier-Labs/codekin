@@ -401,7 +401,6 @@
 /* The sidebars are level-1 surfaces; they used to borrow neutral-9/7 because
    those were the only light steps with any weight, which coupled the chrome
    background to the border colour. */
-[data-scheme="light"] .app-right-sidebar,
 [data-scheme="light"] .app-left-sidebar {
   background-color: var(--color-surface);
 }
@@ -410,15 +409,6 @@
    own hover:bg-surface-raised, and painting every nested button drew a second,
    darker box inside an already-highlighted row. The spread light ramp gives
    raised enough weight to read on its own. */
-
-[data-scheme="light"] .app-session-tab:hover {
-  background-color: color-mix(in srgb, var(--color-neutral-5) 18%, transparent);
-}
-
-/* Settings section cards — stronger contrast in light mode */
-[data-scheme="light"] .settings-section-card {
-  background-color: var(--color-page);
-}
 
 /* Workflow panel cards — match settings contrast in light mode */
 [data-scheme="light"] .workflow-card {
@@ -512,8 +502,7 @@
 /* Sidebar text — pure grayscale overrides so fonts render without teal tint.
    Only the lower stops (used for text/icons) are overridden;
    higher stops (backgrounds, borders) keep the ink-gray palette. */
-[data-theme="dark"] .app-left-sidebar,
-[data-theme="dark"] .app-right-sidebar {
+[data-theme="dark"] .app-left-sidebar {
   --color-neutral-1: #e0e0e0;
   --color-neutral-2: #cccccc;
   --color-neutral-3: #c0c0c0;
@@ -525,8 +514,7 @@
 /* Light mode sidebar text — dark text on light background */
 /* Sidebar text, darkened to stay ahead of the darker sidebar surface above:
    ink 12.33:1, ink-muted 7.72:1, ink-faint 5.56:1. */
-[data-theme="light"] .app-left-sidebar,
-[data-theme="light"] .app-right-sidebar {
+[data-theme="light"] .app-left-sidebar {
   --color-neutral-1: #1a1a1a;
   --color-neutral-2: #2b2b2b;
   --color-neutral-3: #383838;
@@ -722,16 +710,6 @@ html, body, #root {
   font-family: 'Lato', sans-serif;
 }
 
-/* ── Orchestrator variant — accent-themed agent chat ───────────────────── */
-
-/* Composer card — accent edge for the orchestrator variant. The composer is
-   a card in the transcript column, not a band across the pane, so the accent
-   lives on the card's own border rather than a full-width top edge. */
-.orchestrator-input-bar .composer-card {
-  border-color: var(--color-accent-7);
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-accent-7) 25%, transparent);
-}
-
 /* ── Composer tone by permission mode ──────────────────────────────────── */
 
 /* Plan mode: the card sinks a step darker, so a read-only session reads
@@ -743,10 +721,7 @@ html, body, #root {
   background-color: color-mix(in srgb, var(--color-surface), black 7%);
 }
 
-/* Orchestrator badge pill */
-.orchestrator-badge {
-  letter-spacing: 0.08em;
-}
+/* ── Orchestrator variant — accent-themed agent chat ───────────────────── */
 
 /* Assistant message — subtle left accent bar */
 .orchestrator-assistant-msg {
@@ -760,18 +735,11 @@ html, body, #root {
   color: var(--color-accent-5);
 }
 
-[data-scheme="light"] .orchestrator-input-bar .composer-card {
-  border-color: var(--color-accent-5);
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-accent-5) 20%, transparent);
-}
-
 /* Bypass / skip permissions: the card keeps its everyday look, and only its
    top-right corner turns red — a thicker error stroke that follows the
    rounded corner and fades into the normal edge along the top and down the
    side. The mode chip carries the same red, so the two read as one signal.
-   One pseudo-element draws the corner; two intersected masks fade its arms.
-   Placed after the orchestrator rules (and one class more specific) so it
-   also wins on Joe's composer. */
+   One pseudo-element draws the corner; two intersected masks fade its arms. */
 .app-input-bar .composer-card[data-mode-tone="danger"]::before {
   content: '';
   position: absolute;
@@ -819,21 +787,6 @@ html, body, #root {
   border-radius: 3px;
 }
 .chat-scroll::-webkit-scrollbar-thumb:hover {
-  background: var(--color-neutral-6);
-}
-
-/* Approvals scrollbar */
-.approvals-scroll::-webkit-scrollbar {
-  width: 5px;
-}
-.approvals-scroll::-webkit-scrollbar-track {
-  background: transparent;
-}
-.approvals-scroll::-webkit-scrollbar-thumb {
-  background: color-mix(in srgb, var(--color-neutral-8), black 10%);
-  border-radius: 3px;
-}
-.approvals-scroll::-webkit-scrollbar-thumb:hover {
   background: var(--color-neutral-6);
 }
 
@@ -947,96 +900,6 @@ html, body, #root {
   --tw-prose-th-borders: var(--color-neutral-7);
   --tw-prose-td-borders: var(--color-neutral-8);
   color: var(--color-neutral-2);
-}
-
-/* Keep prose-invert alias working (used elsewhere by Tailwind Typography) */
-.prose.prose-invert {
-  --tw-prose-body: var(--color-neutral-2);
-  --tw-prose-headings: var(--color-neutral-2);
-  --tw-prose-links: var(--color-accent-5);
-  --tw-prose-bold: var(--color-neutral-2);
-  --tw-prose-code: var(--color-accent-4);
-  --tw-prose-pre-bg: var(--color-neutral-11);
-  --tw-prose-pre-code: var(--color-neutral-2);
-  --tw-prose-quotes: var(--color-neutral-3);
-  --tw-prose-quote-borders: var(--color-neutral-8);
-  --tw-prose-hr: var(--color-neutral-9);
-  --tw-prose-th-borders: var(--color-neutral-8);
-  --tw-prose-td-borders: var(--color-neutral-9);
-}
-
-.prose.prose-invert code {
-  font-family: 'Inconsolata Variable', 'Inconsolata', monospace;
-}
-
-.prose.prose-invert h1 { font-size: 1.4em; font-weight: 700; }
-.prose.prose-invert h2 { font-size: 1.2em; font-weight: 600; }
-.prose.prose-invert h3 { font-size: 1.05em; font-weight: 600; }
-.prose.prose-invert h4 { font-size: 1em; font-weight: 600; }
-
-.prose.prose-invert ul { list-style: disc; padding-left: 1.5em; }
-.prose.prose-invert ol { list-style: decimal; padding-left: 1.5em; }
-.prose.prose-invert li { margin: 0.2em 0; }
-.prose.prose-invert li > ul,
-.prose.prose-invert li > ol { margin: 0.1em 0; }
-
-.prose.prose-invert blockquote {
-  border-left: 3px solid var(--tw-prose-quote-borders);
-  padding-left: 1em;
-  margin: 0.5em 0;
-  color: var(--tw-prose-quotes);
-}
-
-.prose.prose-invert hr {
-  border: none;
-  border-top: 1px solid var(--tw-prose-hr);
-  margin: 1em 0;
-}
-
-.prose.prose-invert strong { color: var(--tw-prose-bold); font-weight: 700; }
-.prose.prose-invert h1, .prose.prose-invert h2,
-.prose.prose-invert h3, .prose.prose-invert h4 { color: var(--tw-prose-headings); }
-.prose.prose-invert a { color: var(--tw-prose-links); }
-.prose.prose-invert :not(pre) > code { color: var(--tw-prose-code); }
-.prose.prose-invert th { font-weight: 600; }
-
-.prose.prose-invert pre {
-  background: var(--color-neutral-11);
-  border: 1px solid var(--color-neutral-9);
-}
-
-.prose.prose-invert a {
-  text-decoration: underline;
-  text-underline-offset: 2px;
-}
-
-.prose.prose-invert p {
-  margin-top: 0.5em;
-  margin-bottom: 0.5em;
-}
-
-.prose.prose-invert h1,
-.prose.prose-invert h2,
-.prose.prose-invert h3,
-.prose.prose-invert h4 {
-  margin-top: 1em;
-  margin-bottom: 0.5em;
-}
-
-.prose.prose-invert ul,
-.prose.prose-invert ol {
-  margin-top: 0.25em;
-  margin-bottom: 0.25em;
-}
-
-.prose.prose-invert table {
-  border-collapse: collapse;
-}
-
-.prose.prose-invert th,
-.prose.prose-invert td {
-  padding: 0.25em 0.75em;
-  border: 1px solid var(--color-neutral-9);
 }
 
 /* ── highlight.js syntax token colors ──────────────────────────────────── */

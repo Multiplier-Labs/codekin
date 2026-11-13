@@ -102,6 +102,5 @@ export function useRepos(token?: string) {
     setRefreshCount(c => c + 1)
   }, [])
 
-  const ghMissing = ghStatus === 'missing'
-  return { groups, repos, globalSkills, globalModules, loading, error, ghMissing, ghStatus, ghError, refresh }
+  return { groups, repos, globalSkills, globalModules, loading, error, ghStatus, ghError, refresh }
 }

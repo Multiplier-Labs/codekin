@@ -42,12 +42,6 @@ export interface RepoDrawerProps {
   onToggleStarDoc?: (filePath: string) => void
   /** Archive tab */
   archiveRefreshKey: number
-  /**
-   * Notification that a row opened the transcript. The drawer hosts the
-   * fullscreen viewer itself, so this is for bookkeeping/deep-link state only —
-   * do not mount a second `ArchivedSessionViewer` from it.
-   */
-  onViewArchivedSession: (id: string) => void
   onNewSessionFromArchive: (workingDir: string, context: string) => void
   /** Open an archived session that was just resumed. */
   onResumeSession?: (sessionId: string) => void
@@ -97,7 +91,6 @@ export function RepoDrawer({
   onSelectDoc,
   onToggleStarDoc,
   archiveRefreshKey,
-  onViewArchivedSession,
   onNewSessionFromArchive,
   onResumeSession,
   fontSize,
@@ -179,11 +172,6 @@ export function RepoDrawer({
     document.addEventListener('keydown', handleKey)
     return () => { document.removeEventListener('keydown', handleKey) }
   }, [open, viewingId, onClose])
-
-  const handleView = useCallback((id: string) => {
-    setViewingId(id)
-    onViewArchivedSession(id)
-  }, [onViewArchivedSession])
 
   const handleNewSessionFromArchive = useCallback((dir: string, context: string) => {
     setViewingId(null)
@@ -300,7 +288,7 @@ export function RepoDrawer({
             workingDir={workingDir}
             refreshKey={archiveRefreshKey}
             filter={filter}
-            onView={handleView}
+            onView={setViewingId}
             onNewSessionFromArchive={handleNewSessionFromArchive}
             onResumed={onResumeSession}
           />

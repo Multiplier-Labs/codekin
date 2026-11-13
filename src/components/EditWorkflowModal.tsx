@@ -25,8 +25,6 @@ const btnClass = (selected: boolean) =>
 interface Props {
   token: string
   repo: ReviewRepoConfig
-  schedules?: unknown[]
-  recentRuns?: unknown[]
   onClose: () => void
   onSave: (id: string, patch: Partial<ReviewRepoConfig>) => Promise<void>
 }

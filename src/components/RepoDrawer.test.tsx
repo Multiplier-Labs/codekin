@@ -48,7 +48,6 @@ const baseProps: RepoDrawerProps = {
   starredDocs: [],
   onSelectDoc: () => {},
   archiveRefreshKey: 0,
-  onViewArchivedSession: () => {},
   onNewSessionFromArchive: () => {},
   fontSize: 14,
 }
