@@ -496,7 +496,7 @@ if (pathname === '/orchestrator') return { sessionId: null, view: 'orchestrator'
 | Sub-router | File | Concerns |
 |---|---|---|
 | Sessions | `server/orchestrator-session-router.ts` | Status & lifecycle, child sessions, reports, dashboard, pending prompts, session cleanup |
-| Memory & Trust | `server/orchestrator-memory-router.ts` | Memory CRUD, trust records, notifications |
+| Memory & Trust | `server/orchestrator-memory-router.ts` | Memory CRUD, trust records |
 | Learning | `server/orchestrator-learning-router.ts` | Finding outcomes, skill levels, decisions, memory extraction/aging |
 
 Each sub-router shares the same `verifyOrchestratorAuth` callback (master Bearer token OR the orchestrator session's scoped token).
@@ -533,7 +533,7 @@ DELETE /api/orchestrator/sessions/cleanup           — delete all automated ses
 DELETE /api/orchestrator/sessions/:id               — delete a managed session
 ```
 
-**Memory, trust, notifications** (`orchestrator-memory-router.ts`):
+**Memory, trust** (`orchestrator-memory-router.ts`):
 
 ```
 GET    /api/orchestrator/memory                     — query memory store (FTS)
@@ -545,11 +545,9 @@ POST   /api/orchestrator/trust/approve              — record approval
 POST   /api/orchestrator/trust/reject               — record rejection (resets to ASK)
 POST   /api/orchestrator/trust/pin                  — pin trust level (override)
 POST   /api/orchestrator/trust/reset                — clear all learned trust
-GET    /api/orchestrator/notifications              — list pending notifications
-POST   /api/orchestrator/notifications/mark-delivered
 ```
 
-The learning endpoints (memory extraction and aging, finding outcomes, skill profile, decision records) were removed in November 2026: nothing called them, and Joe's prompt never named them.
+The learning endpoints (memory extraction and aging, finding outcomes, skill profile, decision records) were removed in November 2026: nothing called them, and Joe's prompt never named them. The notification list and mark-delivered endpoints went at the same time, for the same reason: notifications are delivered in chat, and the dashboard's `pendingNotifications` count is the outbox queue.
 
 ### 10.3 Session Lifecycle Hooks & Approval Endpoints
 
@@ -562,6 +560,8 @@ sessions.onSessionResult((sessionId, isError) => { ... })  // returns disposer
 ```
 
 Agent Joe subscribes to these on startup, replacing the previous polling loop. Combined with the new approval endpoints — `GET /api/orchestrator/sessions/pending-prompts` and `POST /api/orchestrator/sessions/:id/respond` — Agent Joe can discover stuck child sessions and respond to permission/question prompts on the user's behalf (subject to trust level — see §12).
+
+All notifications to Joe go through one path, `server/orchestrator-notify.ts`: sent at once if Joe is idle, otherwise (mid-turn, not running, or rate-limited) held in the persistent outbox and replayed as a digest. Prompts are reported once: Joe's children by the child manager, loop makers and reviewers as `session_blocked` run events, and every other session by the prompt listener.
 
 ### 10.4 WebSocket Messages
 

@@ -1,11 +1,10 @@
 /**
- * Tests for createMemoryRouter — the orchestrator memory/trust/notification
- * HTTP routes.
+ * Tests for createMemoryRouter — the orchestrator memory/trust HTTP routes.
  *
  * The router is mounted on a throwaway Express app (port 0) and exercised with
  * fetch, matching the convention in orchestrator-routes.test.ts. A real
  * in-memory OrchestratorMemory backs the memory/trust routes so the handlers
- * are tested end-to-end; the monitor is a lightweight fake.
+ * are tested end-to-end.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import express from 'express'
@@ -19,18 +18,9 @@ vi.mock('./orchestrator-manager.js', () => ({
 
 import { createMemoryRouter } from './orchestrator-memory-router.js'
 import { OrchestratorMemory } from './orchestrator-memory.js'
-import type { OrchestratorMonitor } from './orchestrator-monitor.js'
 
 const TOKEN = 'good-token'
 const verifyAuth = (req: Request) => req.headers['authorization'] === `Bearer ${TOKEN}`
-
-function makeMonitor(): OrchestratorMonitor & { markDelivered: ReturnType<typeof vi.fn> } {
-  return {
-    getPending: vi.fn(() => [{ id: 'n1' }]),
-    getAll: vi.fn(() => [{ id: 'n1' }, { id: 'n2' }]),
-    markDelivered: vi.fn(),
-  } as unknown as OrchestratorMonitor & { markDelivered: ReturnType<typeof vi.fn> }
-}
 
 async function startApp(router: express.Router): Promise<{ baseUrl: string; close: () => Promise<void> }> {
   const app = express()
@@ -49,17 +39,13 @@ async function startApp(router: express.Router): Promise<{ baseUrl: string; clos
 
 describe('createMemoryRouter', () => {
   let mem: OrchestratorMemory
-  let monitor: ReturnType<typeof makeMonitor>
-  let monitorRef: { current: OrchestratorMonitor | null }
   let server: { baseUrl: string; close: () => Promise<void> }
 
   const auth = { Authorization: `Bearer ${TOKEN}`, 'Content-Type': 'application/json' }
 
   beforeEach(async () => {
     mem = new OrchestratorMemory(':memory:')
-    monitor = makeMonitor()
-    monitorRef = { current: monitor }
-    server = await startApp(createMemoryRouter(verifyAuth, mem, monitorRef))
+    server = await startApp(createMemoryRouter(verifyAuth, mem))
   })
 
   afterEach(async () => {
@@ -208,60 +194,6 @@ describe('createMemoryRouter', () => {
   it('resets all trust', async () => {
     const res = await fetch(url('/api/orchestrator/trust/reset'), { method: 'POST', headers: auth })
     expect(res.status).toBe(200)
-    expect((await res.json()).ok).toBe(true)
-  })
-
-  // -------------------------------------------------------------------------
-  // Notifications
-  // -------------------------------------------------------------------------
-
-  it('returns pending notifications from the monitor', async () => {
-    const res = await fetch(url('/api/orchestrator/notifications'), { headers: auth })
-    const body = await res.json()
-    expect(body.notifications).toHaveLength(1)
-    expect(monitor.getPending).toHaveBeenCalled()
-  })
-
-  it('returns all notifications when ?all=true', async () => {
-    const res = await fetch(url('/api/orchestrator/notifications?all=true'), { headers: auth })
-    const body = await res.json()
-    expect(body.notifications).toHaveLength(2)
-    expect(monitor.getAll).toHaveBeenCalled()
-  })
-
-  it('returns an empty list when no monitor is attached', async () => {
-    monitorRef.current = null
-    const res = await fetch(url('/api/orchestrator/notifications'), { headers: auth })
-    expect((await res.json()).notifications).toEqual([])
-  })
-
-  it('marks notifications delivered for an array of ids', async () => {
-    const res = await fetch(url('/api/orchestrator/notifications/mark-delivered'), {
-      method: 'POST',
-      headers: auth,
-      body: JSON.stringify({ ids: ['n1', 'n2'] }),
-    })
-    expect(res.status).toBe(200)
-    expect(monitor.markDelivered).toHaveBeenCalledWith(['n1', 'n2'])
-  })
-
-  it('ignores a non-array ids payload when marking delivered', async () => {
-    const res = await fetch(url('/api/orchestrator/notifications/mark-delivered'), {
-      method: 'POST',
-      headers: auth,
-      body: JSON.stringify({ ids: 'nope' }),
-    })
-    expect(res.status).toBe(200)
-    expect(monitor.markDelivered).not.toHaveBeenCalled()
-  })
-
-  it('returns ok for mark-delivered when no monitor is attached', async () => {
-    monitorRef.current = null
-    const res = await fetch(url('/api/orchestrator/notifications/mark-delivered'), {
-      method: 'POST',
-      headers: auth,
-      body: JSON.stringify({ ids: ['n1'] }),
-    })
     expect((await res.json()).ok).toBe(true)
   })
 })

@@ -1026,21 +1026,6 @@ Reset all learned trust records back to ASK.
 
 **Response:** `{ "success": true, "cleared": number }`
 
-### Notifications
-
-#### `GET /api/orchestrator/notifications`
-
-Get pending orchestrator notifications.
-
-**Response:** `{ "notifications": Notification[] }`
-
-#### `POST /api/orchestrator/notifications/mark-delivered`
-
-Mark notifications as delivered.
-
-**Request body:** `{ "ids": ["..."] }`
-**Response:** `{ "success": true }`
-
 ### Dashboard
 
 #### `GET /api/orchestrator/dashboard`

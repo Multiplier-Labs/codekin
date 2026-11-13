@@ -1,9 +1,10 @@
 /**
  * Orchestrator proactive monitor — watches for new reports, idle repos,
- * and workflow events, then queues notifications for the orchestrator session.
+ * and workflow events, then notifies the orchestrator session.
  *
- * Runs a periodic poll and subscribes to workflow engine events.
- * Notifications are delivered in-chat via the orchestrator session.
+ * Runs a periodic poll and subscribes to workflow engine events. Delivery
+ * goes through the shared notify path (orchestrator-notify): sent now if the
+ * orchestrator is idle, otherwise held in the persistent outbox.
  */
 
 import { readdirSync, statSync, existsSync } from 'fs'
@@ -12,10 +13,9 @@ import type { SessionManager } from './session-manager.js'
 import type { WorkflowEngine, WorkflowEvent } from './workflow-engine.js'
 import type { LoopEvent } from './loop-store.js'
 import { scanRepoReports } from './orchestrator-reports.js'
-import { getOrchestratorSessionId } from './orchestrator-manager.js'
-import { getOrchestratorOutbox } from './orchestrator-outbox.js'
+import { notifyOrchestrator } from './orchestrator-notify.js'
 import { tryGetRepoActivityIndex } from './repo-activity.js'
-import { REPOS_ROOT, getAgentDisplayName } from './config.js'
+import { REPOS_ROOT } from './config.js'
 import { loadWorkflowConfig, type ReviewRepoConfig } from './workflow-config.js'
 
 // ---------------------------------------------------------------------------
@@ -23,12 +23,9 @@ import { loadWorkflowConfig, type ReviewRepoConfig } from './workflow-config.js'
 // ---------------------------------------------------------------------------
 
 export interface OrchestratorNotification {
-  id: string
   severity: 'info' | 'action' | 'alert'
   title: string
   body: string
-  timestamp: string
-  delivered: boolean
 }
 
 // ---------------------------------------------------------------------------
@@ -42,7 +39,6 @@ const MAX_NOTED_LOOP_EVENTS = 500
 export class OrchestratorMonitor {
   private sessions: SessionManager
   private pollTimer: ReturnType<typeof setInterval> | null = null
-  private notifications: OrchestratorNotification[] = []
   private seenReports = new Set<string>()
   /** (runId:event) keys already notified — see handleLoopEvent. */
   private notedLoopEvents = new Set<string>()
@@ -104,38 +100,11 @@ export class OrchestratorMonitor {
   }
 
   /**
-   * Queue a notification from outside the monitor's own checks (e.g. a
-   * deployment probe breach delivered via the signal queue).
+   * Notify from outside the monitor's own checks (e.g. a deployment probe
+   * breach delivered via the signal queue).
    */
   notify(severity: OrchestratorNotification['severity'], title: string, body: string): void {
     this.addNotification({ severity, title, body })
-  }
-
-  /** Get pending (undelivered) notifications. */
-  getPending(): OrchestratorNotification[] {
-    return this.notifications.filter(n => !n.delivered)
-  }
-
-  /** Mark notifications as delivered. */
-  markDelivered(ids: string[]): void {
-    for (const n of this.notifications) {
-      if (ids.includes(n.id)) n.delivered = true
-    }
-  }
-
-  /**
-   * Get all notifications (including delivered), newest first.
-   *
-   * Timestamps only have millisecond resolution, so two notifications raised
-   * in the same tick compare equal; the insertion index breaks the tie so the
-   * later one still sorts first instead of the order flipping depending on
-   * which side of a millisecond boundary the pair happened to land.
-   */
-  getAll(): OrchestratorNotification[] {
-    return this.notifications
-      .map((notification, index) => ({ notification, index }))
-      .sort((a, b) => b.notification.timestamp.localeCompare(a.notification.timestamp) || b.index - a.index)
-      .map(({ notification }) => notification)
   }
 
   // -------------------------------------------------------------------------
@@ -340,55 +309,13 @@ export class OrchestratorMonitor {
     this.addNotification(notification)
   }
 
-  /** Add a notification. */
-  private addNotification(opts: Omit<OrchestratorNotification, 'id' | 'timestamp' | 'delivered'>): void {
-    const notification: OrchestratorNotification = {
-      id: `notif-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      timestamp: new Date().toISOString(),
-      delivered: false,
-      ...opts,
-    }
-    this.notifications.push(notification)
-
-    // Keep last 100 notifications
-    if (this.notifications.length > 100) {
-      this.notifications = this.notifications.slice(-100)
-    }
-
-    // Deliver to orchestrator session if active
-    this.deliverToOrchestrator(notification)
-  }
-
-  /** Deliver a notification to the orchestrator chat session. */
-  private deliverToOrchestrator(notification: OrchestratorNotification): void {
-    // Don't push more API work at the orchestrator while the rate-limit
-    // circuit breaker is open. The notification stays in the buffer and
-    // can still be inspected via the API; it just isn't replayed as a
-    // chat message until the cooldown expires.
-    if (this.sessions.isRateLimited()) return
-
-    const orchestratorId = getOrchestratorSessionId(this.sessions)
-    if (!orchestratorId) return
-
-    const session = this.sessions.get(orchestratorId)
-    if (!session?.claudeProcess?.isAlive() || session.isProcessing) {
-      // Orchestrator not running, or mid-turn (injecting now would derail
-      // its active turn — audit item A5): hand the notification to the
-      // persistent outbox, whose flusher retries under the same idle gate,
-      // instead of letting it rot in the in-memory buffer.
-      getOrchestratorOutbox().enqueue({
-        label: notification.severity.toUpperCase(),
-        title: notification.title,
-        body: notification.body,
-      })
-      notification.delivered = true
-      return
-    }
-
-    // Send as a system message that the orchestrator will see and respond to
-    const message = `[Agent ${getAgentDisplayName()} Notification — ${notification.severity.toUpperCase()}]\n${notification.title}\n${notification.body}`
-    this.sessions.sendInput(orchestratorId, message)
-    notification.delivered = true
+  /** Hand a notification to the shared orchestrator notify path. */
+  private addNotification(notification: OrchestratorNotification): void {
+    notifyOrchestrator(this.sessions, {
+      label: notification.severity.toUpperCase(),
+      title: notification.title,
+      body: notification.body,
+    })
   }
 
   /** Discover repo paths from REPOS_ROOT (see discoverRepoPathsUnder). */

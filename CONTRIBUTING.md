@@ -74,7 +74,7 @@ npm run build
 - **TailwindCSS utility classes** for styling, using the semantic color tokens, five type steps and three surfaces described under "Styling Rules" in [CLAUDE.md](CLAUDE.md) (an ESLint guard enforces most of this)
 - **Color themes** — Dark and Light live in `src/index.css`; the other themes are generated into `src/themes/palettes.css` by `node scripts/generate-themes.mjs` (Node 23.6+). Edit the theme sources in that script and re-run it rather than editing the generated CSS
 - **Monospace font**: Inconsolata; **Sans font**: Lato
-- WebSocket message types are defined in `src/types.ts`
+- WebSocket message types are defined once in `server/protocol.ts` and re-exported by `src/types.ts` and `server/types.ts`
 
 ## Branching & Release Policy
 

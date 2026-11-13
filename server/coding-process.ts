@@ -12,16 +12,10 @@
 
 import type { EventEmitter } from 'events'
 import type { ClaudeProcessEvents } from './claude-process.js'
-import type { TaskItem } from './types.js'
+import type { CodingProvider, TaskItem } from './protocol.js'
 
-/**
- * Supported AI coding assistant providers.
- * - 'claude': Claude Code CLI (subprocess, NDJSON on stdin/stdout)
- * - 'opencode': OpenCode server (HTTP REST + SSE)
- * - 'codex': OpenAI Codex CLI (subprocess, `codex app-server` JSON-RPC on stdin/stdout)
- * - 'grok': Grok Build CLI (subprocess, `grok agent stdio` ACP JSON-RPC on stdin/stdout)
- */
-export type CodingProvider = 'claude' | 'opencode' | 'codex' | 'grok'
+/** Supported AI coding assistant providers; defined with the wire protocol in protocol.ts. */
+export type { CodingProvider }
 
 /**
  * Minimum process interface consumed by SessionManager.

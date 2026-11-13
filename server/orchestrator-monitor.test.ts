@@ -12,6 +12,14 @@ vi.mock('./config.js', () => ({
   getAgentDisplayName: () => 'TestAgent',
 }))
 
+const notified = vi.hoisted(() => [] as Array<{ label: string; title: string; body: string }>)
+vi.mock('./orchestrator-notify.js', () => ({
+  notifyOrchestrator: (_sessions: unknown, args: { label: string; title: string; body: string }) => {
+    notified.push(args)
+    return true
+  },
+}))
+
 import { hasEnabledWorkflowForRepo, discoverRepoPathsUnder, OrchestratorMonitor } from './orchestrator-monitor.js'
 import type { SessionManager } from './session-manager.js'
 import type { WorkflowEngine } from './workflow-engine.js'
@@ -164,49 +172,33 @@ describe('discoverRepoPathsUnder', () => {
 })
 
 describe('handleLoopEvent', () => {
-  // isRateLimited: true short-circuits delivery — notifications stay in the
-  // buffer where getAll() can observe them, without touching fs or the outbox.
-  const fakeSessions = { isRateLimited: () => true } as unknown as SessionManager
+  const fakeSessions = { isRateLimited: () => false } as unknown as SessionManager
 
   function monitor(): OrchestratorMonitor {
+    notified.length = 0
     return new OrchestratorMonitor(fakeSessions)
   }
 
   const base = { runId: 'r1', sequence: 1, at: '2026-08-30T12:00:00.000Z', actor: { type: 'system' as const } }
 
-  it('notifies once (severity action) when a session blocks, pointing at pending_prompts', () => {
+  it('notifies once (label ACTION) when a session blocks, pointing at pending_prompts', () => {
     const m = monitor()
     const blocked = { ...base, type: 'session_blocked', payload: { requestId: 'req-1', toolName: 'Bash' } }
     m.handleLoopEvent(blocked)
     m.handleLoopEvent(blocked)
 
-    const all = m.getAll()
-    expect(all).toHaveLength(1)
-    expect(all[0].severity).toBe('action')
-    expect(all[0].body).toContain('pending_prompts')
+    expect(notified).toHaveLength(1)
+    expect(notified[0].label).toBe('ACTION')
+    expect(notified[0].body).toContain('pending_prompts')
   })
 
-  // getAll() is newest-first, so the later 'failed' notification leads.
   it('notifies separately for a later event of the same run', () => {
     const m = monitor()
     m.handleLoopEvent({ ...base, type: 'session_blocked', payload: { requestId: 'req-1' } })
     m.handleLoopEvent({ ...base, sequence: 2, type: 'run_completed', payload: { outcome: 'failed', reason: 'budget exhausted' } })
 
-    const all = m.getAll()
-    expect(all).toHaveLength(2)
-    expect(all.map(n => n.severity)).toEqual(['alert', 'action'])
-  })
-
-  /** Regression: the pair used to flip order when it straddled a millisecond
-   * tick, because equal timestamps fell back to insertion order. */
-  it('keeps newest-first order when notifications cross a millisecond boundary', () => {
-    const m = monitor()
-    m.handleLoopEvent({ ...base, type: 'session_blocked', payload: { requestId: 'req-1' } })
-    const until = Date.now() + 2
-    while (Date.now() < until) { /* busy-wait past a millisecond tick */ }
-    m.handleLoopEvent({ ...base, sequence: 2, type: 'run_completed', payload: { outcome: 'failed' } })
-
-    expect(m.getAll().map(n => n.severity)).toEqual(['alert', 'action'])
+    expect(notified.map(n => n.label)).toEqual(['ACTION', 'ALERT'])
+    expect(notified[1].body).toContain('budget exhausted')
   })
 
   it('ignores progress events and non-failure completions', () => {
@@ -215,7 +207,7 @@ describe('handleLoopEvent', () => {
     m.handleLoopEvent({ ...base, sequence: 2, type: 'evaluation_completed', payload: { status: 'fail' } })
     m.handleLoopEvent({ ...base, sequence: 3, type: 'run_completed', payload: { outcome: 'completed' } })
     m.handleLoopEvent({ ...base, sequence: 4, type: 'run_completed', payload: { outcome: 'canceled' } })
-    expect(m.getAll()).toHaveLength(0)
+    expect(notified).toHaveLength(0)
   })
 
   it('notifies on a pending intervention with its decision title', () => {
@@ -226,9 +218,17 @@ describe('handleLoopEvent', () => {
       type: 'intervention_created',
       payload: { interventionId: 'iv-1', purpose: 'escalation', title: 'Approve completion of "Coverage Increase"?' },
     })
-    const all = m.getAll()
-    expect(all).toHaveLength(1)
-    expect(all[0].title).toContain('needs a decision')
-    expect(all[0].title).toContain('Coverage Increase')
+    expect(notified).toHaveLength(1)
+    expect(notified[0].title).toContain('needs a decision')
+    expect(notified[0].title).toContain('Coverage Increase')
+  })
+})
+
+describe('notify', () => {
+  it('maps severity to the notification label on the shared path', () => {
+    notified.length = 0
+    new OrchestratorMonitor({ isRateLimited: () => false } as unknown as SessionManager)
+      .notify('alert', 'Probe breach', 'p95 over budget')
+    expect(notified).toEqual([{ label: 'ALERT', title: 'Probe breach', body: 'p95 over budget' }])
   })
 })
