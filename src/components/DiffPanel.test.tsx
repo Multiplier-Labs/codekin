@@ -192,3 +192,69 @@ describe('DiffPanel for a folder without git', () => {
     expect(c.querySelector('[role="alert"]')!.textContent).toBe('git init failed: permission denied')
   })
 })
+
+describe('DiffPanel with attached folders', () => {
+  function mountAttached(notRepo = false) {
+    const sent: WsClientMessage[] = []
+    let deliver: (msg: WsServerMessage) => void = () => {}
+    container = document.createElement('div')
+    document.body.appendChild(container)
+    act(() => {
+      root = createRoot(container!)
+      root.render(
+        <DiffPanel
+          isOpen
+          onClose={vi.fn()}
+          send={(m) => { sent.push(m) }}
+          onHandleMessage={(fn) => { deliver = fn }}
+          onHandleToolDone={vi.fn()}
+          onHandleTurnDone={vi.fn()}
+          sessionId="s1"
+          defaultView="branch"
+          notRepo={notRepo}
+          attachedRoots={[{ path: '/home/sam/repos/acme-co/api', label: 'api' }]}
+        />,
+      )
+    })
+    const select = container.querySelector('select#diff-root') as HTMLSelectElement
+    const choose = (value: string) => {
+      act(() => {
+        select.value = value
+        select.dispatchEvent(new Event('change', { bubbles: true }))
+      })
+    }
+    return { c: container, sent, choose, deliver: (m: WsServerMessage) => { act(() => { deliver(m) }) } }
+  }
+
+  it('switches to an attached repository, uncommitted first, and discards there', () => {
+    const { c, sent, choose, deliver } = mountAttached()
+    const lastDiff = () => sent.filter(m => m.type === 'get_diff').at(-1) as Extract<WsClientMessage, { type: 'get_diff' }>
+    expect(lastDiff()).toMatchObject({ type: 'get_diff', scope: 'branch' })
+    expect(lastDiff()).not.toHaveProperty('root')
+    choose('/home/sam/repos/acme-co/api')
+    const req = lastDiff()
+    expect(req).toMatchObject({ type: 'get_diff', scope: 'all', root: '/home/sam/repos/acme-co/api' })
+
+    // A result for the session's own folder is not this view's.
+    deliver({ type: 'diff_result', files: [file('own.ts')], branch: 'b', scope: 'all', sessionId: 's1', requestId: req.requestId, summary: { filesChanged: 1, insertions: 1, deletions: 0, truncated: false } })
+    expect(c.textContent).not.toContain('own.ts')
+    deliver({ type: 'diff_result', files: [file('src/a.ts')], branch: 'main', scope: 'all', sessionId: 's1', requestId: req.requestId, root: '/home/sam/repos/acme-co/api', summary: { filesChanged: 1, insertions: 1, deletions: 0, truncated: false } })
+    expect(c.textContent).toContain('a.ts')
+
+    act(() => { buttonWith(c, 'Discard all')!.click() })
+    act(() => { buttonWith(c.querySelector('[role="alertdialog"]') as HTMLElement, 'Discard 1 file')!.click() })
+    expect(sent.at(-1)).toMatchObject({ type: 'discard_changes', scope: 'all', root: '/home/sam/repos/acme-co/api' })
+
+    choose('')
+    expect(lastDiff()).toMatchObject({ type: 'get_diff', scope: 'branch' })
+    expect(lastDiff()).not.toHaveProperty('root')
+  })
+
+  it('lets a session without git look at an attached repository', () => {
+    const { c, sent, choose } = mountAttached(true)
+    expect(c.textContent).toContain('Not a git repository')
+    expect(sent.filter(m => m.type === 'get_diff')).toHaveLength(0)
+    choose('/home/sam/repos/acme-co/api')
+    expect(sent.filter(m => m.type === 'get_diff').at(-1)).toMatchObject({ type: 'get_diff', root: '/home/sam/repos/acme-co/api' })
+  })
+})

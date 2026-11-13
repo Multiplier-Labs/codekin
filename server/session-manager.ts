@@ -2000,10 +2000,20 @@ export class SessionManager {
   // Diff viewer — delegates to DiffManager
   // ---------------------------------------------------------------------------
 
-  /** Run git diff in a session's workingDir and return structured results. */
-  async getDiff(sessionId: string, view: DiffView = 'all'): Promise<WsServerMessage> {
+  /**
+   * Run git diff in a session's workingDir and return structured results.
+   * `root` names one of the session's attached folders to diff instead; it
+   * has no review base, review comments or PR (those belong to the session's
+   * own repository).
+   */
+  async getDiff(sessionId: string, view: DiffView = 'all', root?: string): Promise<WsServerMessage> {
     const session = this.sessions.get(sessionId)
     if (!session) return { type: 'diff_error', message: 'Session not found', scope: view }
+    if (root !== undefined) {
+      const attached = this.attachedDiffRoot(session, root)
+      if (!attached.ok) return { type: 'diff_error', message: attached.error, scope: view }
+      return attached.org ? getOrgDiff(this.diffManager, root, session.id, view) : this.diffManager.getDiff(root, view)
+    }
     if (this.isOrgSession(session)) return getOrgDiff(this.diffManager, session.workingDir, session.id, view)
     return this.diffManager.getDiff(session.workingDir, view, await this.reviewBaseFor(session, view))
   }
@@ -2123,8 +2133,20 @@ export class SessionManager {
   async getChangeSummary(sessionId: string): Promise<{ uncommittedFiles: number; branchCommits: number | null } | null> {
     const session = this.sessions.get(sessionId)
     if (!session) return null
-    if (this.isOrgSession(session)) return getOrgChangeSummary(this.diffManager, session.workingDir, session.id)
-    return this.diffManager.getChangeSummary(session.workingDir, await this.reviewBaseFor(session, 'branch'))
+    const own = this.isOrgSession(session)
+      ? await getOrgChangeSummary(this.diffManager, session.workingDir, session.id)
+      : await this.diffManager.getChangeSummary(session.workingDir, await this.reviewBaseFor(session, 'branch'))
+    // Uncommitted files in attached repositories count too; their branches are not this session's.
+    let attachedFiles = 0
+    for (const root of session.addDirs ?? []) {
+      const attached = this.attachedDiffRoot(session, root)
+      if (!attached.ok) continue
+      const s = attached.org
+        ? await getOrgChangeSummary(this.diffManager, root, session.id)
+        : await this.diffManager.getChangeSummary(root)
+      attachedFiles += s.uncommittedFiles
+    }
+    return attachedFiles ? { ...own, uncommittedFiles: own.uncommittedFiles + attachedFiles } : own
   }
 
   /** Pull request status for the session's branch (cached; `refresh` forces a lookup). */
@@ -2155,11 +2177,28 @@ export class SessionManager {
     scope: DiffScope,
     paths?: string[],
     statuses?: Record<string, DiffFileStatus>,
+    root?: string,
   ): Promise<WsServerMessage> {
     const session = this.sessions.get(sessionId)
     if (!session) return { type: 'diff_error', message: 'Session not found' }
+    if (root !== undefined) {
+      const attached = this.attachedDiffRoot(session, root)
+      if (!attached.ok) return { type: 'diff_error', message: attached.error, scope }
+      return attached.org
+        ? discardOrgChanges(this.diffManager, root, session.id, scope, paths, statuses)
+        : this.diffManager.discardChanges(root, scope, paths, statuses)
+    }
     if (this.isOrgSession(session)) return discardOrgChanges(this.diffManager, session.workingDir, session.id, scope, paths, statuses)
     return this.diffManager.discardChanges(session.workingDir, scope, paths, statuses)
+  }
+
+  /** An attached folder Changes can show: a git repository, or an org folder (its clones). */
+  private attachedDiffRoot(session: Session, root: string): { ok: true; org: boolean } | { ok: false; error: string } {
+    if (!session.addDirs?.includes(root)) return { ok: false, error: 'That folder is not attached to this session' }
+    const place = describePlace(root)
+    if (place.kind === 'org') return { ok: true, org: true }
+    if (!place.git) return { ok: false, error: 'That folder is not a git repository' }
+    return { ok: true, org: false }
   }
 
   /** An org session (<repos root>/<owner>): its Changes span the repositories in its folder. */

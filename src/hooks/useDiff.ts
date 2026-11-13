@@ -33,9 +33,11 @@ interface UseDiffOptions {
   sessionId: string | null
   /** View to start each session on ('branch' for isolated sessions). */
   defaultView: DiffView
+  /** An attached folder to diff instead of the session's own (phase 3). */
+  root?: string
 }
 
-export function useDiff({ send, isOpen, sessionId, defaultView }: UseDiffOptions) {
+export function useDiff({ send, isOpen, sessionId, defaultView, root }: UseDiffOptions) {
   const [files, setFiles] = useState<DiffFile[]>([])
   const [summary, setSummary] = useState(EMPTY_SUMMARY)
   const [branch, setBranch] = useState('')
@@ -48,6 +50,7 @@ export function useDiff({ send, isOpen, sessionId, defaultView }: UseDiffOptions
   const scopeRef = useRef(scope)
   const isOpenRef = useRef(isOpen)
   const sessionIdRef = useRef(sessionId)
+  const rootRef = useRef(root)
   const lastRequestIdRef = useRef(0)
   const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -58,8 +61,9 @@ export function useDiff({ send, isOpen, sessionId, defaultView }: UseDiffOptions
     const requestId = ++lastRequestIdRef.current
     setLoading(true)
     setError(null)
-    if (reviewBase !== undefined) send({ type: 'set_review_base', base: reviewBase, scope: view, requestId })
-    else send({ type: 'get_diff', scope: view, requestId })
+    // The review base belongs to the session's own repository, never an attached one.
+    if (reviewBase !== undefined && !rootRef.current) send({ type: 'set_review_base', base: reviewBase, scope: view, requestId })
+    else send({ type: 'get_diff', scope: view, requestId, ...(rootRef.current ? { root: rootRef.current } : {}) })
   }, [send])
 
   const refresh = useCallback(() => {
@@ -85,12 +89,13 @@ export function useDiff({ send, isOpen, sessionId, defaultView }: UseDiffOptions
     // The discard reply is a fresh diff for this view; newer requests still win.
     lastRequestIdRef.current++
     setLoading(true)
-    send({ type: 'discard_changes', scope: view, paths, statuses })
+    send({ type: 'discard_changes', scope: view, paths, statuses, ...(rootRef.current ? { root: rootRef.current } : {}) })
   }, [send])
 
-  // Each session starts on its default view with a clean slate.
+  // Each session (and each attached folder) starts on its default view with a clean slate.
   useEffect(() => {
     sessionIdRef.current = sessionId
+    rootRef.current = root
     setFiles([]) // eslint-disable-line react-hooks/set-state-in-effect -- reset on session switch
     setSummary(EMPTY_SUMMARY)
     setBranch('')
@@ -100,12 +105,13 @@ export function useDiff({ send, isOpen, sessionId, defaultView }: UseDiffOptions
     setScope(defaultView)
     scopeRef.current = defaultView
     if (isOpenRef.current && sessionId) request(defaultView)
-  }, [sessionId, defaultView, request])
+  }, [sessionId, defaultView, root, request])
 
   /** Handle incoming diff_result / diff_error messages. */
   const handleMessage = useCallback((msg: WsServerMessage) => {
     if (msg.type !== 'diff_result' && msg.type !== 'diff_error') return
     if (msg.sessionId && msg.sessionId !== sessionIdRef.current) return
+    if ((msg.root ?? undefined) !== rootRef.current) return
     if (msg.requestId !== undefined && msg.requestId !== lastRequestIdRef.current) return
     if (msg.type === 'diff_result') {
       setFiles(msg.files)

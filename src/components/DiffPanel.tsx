@@ -59,13 +59,15 @@ interface DiffPanelProps {
   notRepo?: boolean
   /** Make the session's folder a git repository. */
   onInitGit?: () => Promise<void>
+  /** Attached git repositories and org folders (phase 3); Changes can switch to one. */
+  attachedRoots?: Array<{ path: string; label: string }>
 }
 
 function matchesFilter(file: DiffFile, query: string): boolean {
   return file.path.toLowerCase().includes(query) || !!file.oldPath?.toLowerCase().includes(query)
 }
 
-export function DiffPanel({ isOpen, onClose, send, onHandleMessage, onHandleToolDone, onHandleTurnDone, sessionId, defaultView, isMobile = false, notRepo = false, onInitGit }: DiffPanelProps) {
+export function DiffPanel({ isOpen, onClose, send, onHandleMessage, onHandleToolDone, onHandleTurnDone, sessionId, defaultView, isMobile = false, notRepo: ownNotRepo = false, onInitGit, attachedRoots = [] }: DiffPanelProps) {
   const [width, setWidth] = useState(() => {
     const stored = getPref('diffPanelWidth')
     return stored ? Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, stored)) : DEFAULT_WIDTH
@@ -75,9 +77,17 @@ export function DiffPanel({ isOpen, onClose, send, onHandleMessage, onHandleTool
     return stored ? Math.max(MIN_LIST_HEIGHT, Math.min(MAX_LIST_HEIGHT, stored)) : DEFAULT_LIST_HEIGHT
   })
 
+  // Which folder Changes shows: the session's own (undefined) or an attached
+  // one, remembered per session. Review comments, the review base and the PR
+  // belong to the session's own repository only.
+  const [rootBySession, setRootBySession] = useState<Record<string, string>>({})
+  const picked = sessionId ? rootBySession[sessionId] : undefined
+  const root = picked && attachedRoots.some(r => r.path === picked) ? picked : undefined
+  const notRepo = ownNotRepo && !root
+
   // A folder without git has nothing to diff and no PR; don't ask the server.
-  const diff = useDiff({ send, isOpen: isOpen && !notRepo, sessionId, defaultView })
-  const pr = usePrStatus({ send, isOpen: isOpen && !notRepo, sessionId })
+  const diff = useDiff({ send, isOpen: isOpen && !notRepo, sessionId, defaultView: root ? 'all' : defaultView, root })
+  const pr = usePrStatus({ send, isOpen: isOpen && !notRepo && !root, sessionId })
   const { handleMessage: diffHandleMessage, handleTurnDone: diffTurnDone, refresh: refreshDiff, changeScope } = diff
   const { handleMessage: prHandleMessage, refresh: refreshPr } = pr
   const review = useReviewComments({ send, isOpen, sessionId })
@@ -267,13 +277,13 @@ export function DiffPanel({ isOpen, onClose, send, onHandleMessage, onHandleTool
 
   const canDiscard = isDiscardableView(diff.scope)
   const compact = narrow || isMobile
-  const viewComments = review.comments.filter(c => c.anchor.view === diff.scope)
+  const viewComments = root ? [] : review.comments.filter(c => c.anchor.view === diff.scope)
   const commentsOn = (file: DiffFile) => viewComments.filter(c => c.anchor.path === file.path || c.anchor.path === file.oldPath)
   const filesWithComments = diff.files.filter(f => commentsOn(f).length > 0).length
 
   /** Line selection and inline comments for one file in the current view. */
   const commentingFor = (file: DiffFile): DiffCommenting | undefined => {
-    if (diff.error || file.isBinary) return undefined
+    if (diff.error || file.isBinary || root) return undefined
     return {
       comments: commentsOn(file),
       onAdd: (range, body) => {
@@ -483,11 +493,30 @@ export function DiffPanel({ isOpen, onClose, send, onHandleMessage, onHandleTool
         </button>
       </div>
 
+      {attachedRoots.length > 0 && sessionId && (
+        <div className="flex shrink-0 items-center gap-2 border-b border-edge px-4 py-1.5 text-meta text-ink-muted">
+          <label htmlFor="diff-root">Folder</label>
+          <select
+            id="diff-root"
+            value={root ?? ''}
+            onChange={(e) => {
+              const value = e.target.value
+              // '' = the session's own folder.
+              setRootBySession(prev => ({ ...prev, [sessionId]: value }))
+            }}
+            className="min-w-0 flex-1 rounded-control border border-edge bg-surface px-2 py-0.5 text-meta text-ink focus:border-focus"
+          >
+            <option value="">This session's folder</option>
+            {attachedRoots.map(r => <option key={r.path} value={r.path}>{r.label} (attached)</option>)}
+          </select>
+        </div>
+      )}
+
       <DiffToolbar
         branch={diff.branch}
         scope={diff.scope}
         summary={diff.summary}
-        review={diff.review}
+        review={root ? null : diff.review}
         narrow={compact}
         onScopeChange={changeView}
         onReviewBaseChange={diff.changeReviewBase}
@@ -497,7 +526,7 @@ export function DiffPanel({ isOpen, onClose, send, onHandleMessage, onHandleTool
         <DiscardConfirm files={confirmFiles} single={confirm.kind === 'file'} onCancel={() => { setConfirm(null) }} onConfirm={runDiscard} />
       )}
 
-      <PrStatusCard key={sessionId ?? 'none'} status={pr.status} narrow={compact} />
+      {!root && <PrStatusCard key={sessionId ?? 'none'} status={pr.status} narrow={compact} />}
 
       {diff.summary.truncated && (
         <div className="shrink-0 border-b border-edge bg-warning-11 px-4 py-2 text-micro text-warning-5" title={diff.summary.truncationReason}>

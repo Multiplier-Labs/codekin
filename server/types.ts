@@ -466,8 +466,8 @@ export type WsServerMessage =
   | { type: 'workflow_event'; eventType: string; runId: string; kind: string; stepKey?: string; status?: string; payload?: unknown; engine?: 'workflow' | 'loop' | 'agent' }
   | { type: 'worktree_created'; worktreePath: string; workingDir: string }
   | { type: 'sessions_updated' }
-  | { type: 'diff_result'; files: DiffFile[]; summary: DiffSummary; branch: string; scope: DiffView; requestId?: number; sessionId?: string; review?: DiffReview; incomplete?: string[] }
-  | { type: 'diff_error'; message: string; scope?: DiffView; requestId?: number; sessionId?: string }
+  | { type: 'diff_result'; files: DiffFile[]; summary: DiffSummary; branch: string; scope: DiffView; requestId?: number; sessionId?: string; review?: DiffReview; incomplete?: string[]; root?: string }
+  | { type: 'diff_error'; message: string; scope?: DiffView; requestId?: number; sessionId?: string; root?: string }
   | { type: 'pr_status'; status: PrStatus; requestId?: number; sessionId?: string }
   | { type: 'review_comments'; sessionId: string; comments: ReviewComment[] }
   /** How much there is to review: files with uncommitted changes, and commits on the branch since its base (null when unknown). */
@@ -492,7 +492,8 @@ export type WsClientMessage =
   | { type: 'prompt_response'; value: string | string[]; requestId?: string }
   | { type: 'resize'; cols: number; rows: number }
   | { type: 'ping' }
-  | { type: 'get_diff'; scope?: DiffView; requestId?: number }
+  /** `root`: an attached folder to diff instead of the session's own (phase 3). */
+  | { type: 'get_diff'; scope?: DiffView; requestId?: number; root?: string }
   /** Choose the ref branch views compare against (null = automatic), then return the diff for `scope`. */
   | { type: 'set_review_base'; base: string | null; scope: DiffView; requestId?: number }
   /** Look up the pull request for the session's branch (cached ~60s unless refresh). */
@@ -507,7 +508,7 @@ export type WsClientMessage =
   | { type: 'review_comment_delete'; id: string; relayUser?: string; relayRole?: 'owner' | 'grantee' }
   /** Send drafts (all, or `ids`) to the agent as one prompt; stale ones only with includeStale. */
   | { type: 'review_feedback_send'; ids?: string[]; includeStale?: boolean; relayUser?: string; relayRole?: 'owner' | 'grantee' }
-  | { type: 'discard_changes'; scope: DiffScope; paths?: string[]; statuses?: Record<string, DiffFileStatus> }
+  | { type: 'discard_changes'; scope: DiffScope; paths?: string[]; statuses?: Record<string, DiffFileStatus>; root?: string }
   | { type: 'move_to_worktree' }
   | { type: 'retry_worktree' }
   | { type: 'use_existing_checkout' }

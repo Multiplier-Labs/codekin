@@ -50,7 +50,7 @@ import { CommandPalette } from './components/CommandPalette'
 import type { InputBarHandle } from './components/InputBar'
 import { NewSessionComposer } from './components/NewSessionComposer'
 import { EnvironmentChecklist } from './components/EnvironmentChecklist'
-import { defaultPlace, getRecentPlaces, isNotRepoPlace, placeFromSession, rememberPlace, type DraftPlace } from './lib/places'
+import { defaultPlace, getRecentPlaces, isNotRepoPlace, placeFromSession, rememberPlace, sessionPlaceLabel, type DraftPlace } from './lib/places'
 import { resolvePlacePath, startDraftSession } from './lib/startDraftSession'
 import { useDraftPermissionMode, useDraftState } from './hooks/useDraftState'
 import { DiffPanel } from './components/DiffPanel'
@@ -974,6 +974,10 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
   const [shareSessionId, setShareSessionId] = useState<string | null>(null)
   const shareSession = sessions.find(s => s.id === shareSessionId)
   const hostedMachineId = (transport as { machineId?: string }).machineId ?? ''
+  // Attached repositories and org folders Changes can switch to (phase 3).
+  const attachedDiffRoots = useMemo(() => (activeSession?.attached ?? [])
+    .filter(a => a.place.git || a.place.kind === 'org')
+    .map(a => ({ path: a.path, label: sessionPlaceLabel(a.path, a.place) })), [activeSession?.attached])
 
   // Session input change handler for extracted components
   const handleSessionInputChange = useCallback((sessionId: string, value: string) => {
@@ -1337,6 +1341,7 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
           defaultView={activeSession?.worktreePath ? 'branch' : 'all'}
           isMobile={isMobile}
           notRepo={isNotRepoPlace(activeSession?.place)}
+          attachedRoots={attachedDiffRoots}
           onInitGit={settings.token && activeSessionId ? async () => {
             await gitInit(settings.token, activeSessionId)
             await refreshSessions()

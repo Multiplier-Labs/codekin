@@ -753,8 +753,16 @@ describe('handleWsMessage', () => {
 
       await vi.waitFor(() => expect(ctx.sent.length).toBeGreaterThan(0))
 
-      expect(ctx.sessions.getDiff).toHaveBeenCalledWith('sess-1', 'branch')
+      expect(ctx.sessions.getDiff).toHaveBeenCalledWith('sess-1', 'branch', undefined)
       expect(ctx.sent[0]).toEqual({ ...diffResult, requestId: 7, sessionId: 'sess-1' })
+    })
+
+    it('forwards an attached root and echoes it on the result', async () => {
+      ;(ctx.sessions.getDiff as ReturnType<typeof vi.fn>).mockResolvedValue({ type: 'diff_result', files: [] })
+      handleWsMessage({ type: 'get_diff', scope: 'all', requestId: 8, root: '/home/u/api' } as WsClientMessage, ctx)
+      await vi.waitFor(() => expect(ctx.sent.length).toBeGreaterThan(0))
+      expect(ctx.sessions.getDiff).toHaveBeenCalledWith('sess-1', 'all', '/home/u/api')
+      expect(ctx.sent[0]).toMatchObject({ requestId: 8, sessionId: 'sess-1', root: '/home/u/api' })
     })
 
     it('rejects an unknown view without touching git', () => {
@@ -907,7 +915,7 @@ describe('handleWsMessage', () => {
 
       await vi.waitFor(() => expect(ctx.sent.length).toBeGreaterThan(0))
 
-      expect(ctx.sessions.discardChanges).toHaveBeenCalledWith('sess-1', 'worktree', ['a.ts'], ['modified'])
+      expect(ctx.sessions.discardChanges).toHaveBeenCalledWith('sess-1', 'worktree', ['a.ts'], ['modified'], undefined)
       expect(ctx.sent[0]).toEqual({ ...result, sessionId: 'sess-1' })
     })
 
