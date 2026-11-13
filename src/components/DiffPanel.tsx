@@ -501,12 +501,8 @@ export function DiffPanel({ isOpen, onClose, send, onHandleMessage, onHandleTool
             value={root ?? ''}
             onChange={(e) => {
               const value = e.target.value
-              setRootBySession(prev => {
-                const next = { ...prev }
-                if (value) next[sessionId] = value
-                else delete next[sessionId]
-                return next
-              })
+              // '' = the session's own folder.
+              setRootBySession(prev => ({ ...prev, [sessionId]: value }))
             }}
             className="min-w-0 flex-1 rounded-control border border-edge bg-surface px-2 py-0.5 text-meta text-ink focus:border-focus"
           >
