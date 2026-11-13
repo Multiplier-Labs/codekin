@@ -28,9 +28,16 @@ interface Props {
   groups: RepoGroup[]
   token?: string
   onOpen: (repo: Repo, provider?: CodingProvider) => void
+  /**
+   * Open the new-session composer instead. When set, the button navigates
+   * there and the repo popover is not used.
+   */
+  onNewSession?: () => void
+  /** The composer is the current screen (marks the button aria-current). */
+  current?: boolean
 }
 
-export function NewSessionButton({ groups, token, onOpen }: Props) {
+export function NewSessionButton({ groups, token, onOpen, onNewSession, current = false }: Props) {
   const health = useAgentHealth()
   const [open, setOpen] = useState(false)
   const [cloning, setCloning] = useState<string | null>(null)
@@ -123,16 +130,17 @@ export function NewSessionButton({ groups, token, onOpen }: Props) {
           in the sidebar, so it says what it does. Height comes from --row-h
           so it is a real target on touch rather than a fixed 26px pill. */}
       <button
-        onClick={() => setOpen(!open)}
-        aria-expanded={open}
-        className={`app-new-session-btn density-row flex items-center gap-1.5 rounded-control bg-surface-raised px-2.5 text-body text-ink transition-colors hover:bg-edge ${open ? 'bg-edge' : ''}`}
+        onClick={() => { if (onNewSession) onNewSession(); else setOpen(!open) }}
+        aria-expanded={onNewSession ? undefined : open}
+        aria-current={onNewSession && current ? 'page' : undefined}
+        className={`app-new-session-btn density-row flex items-center gap-1.5 rounded-control bg-surface-raised px-2.5 text-body text-ink transition-colors hover:bg-edge ${open || (onNewSession && current) ? 'bg-edge' : ''}`}
         title="New session"
       >
         <IconPlus size={14} stroke={2.5} className="flex-shrink-0" />
         <span>New</span>
       </button>
 
-      {open && (
+      {open && !onNewSession && (
         <div
           ref={popupRef}
           style={{ right: -shiftRight, maxWidth: `calc(100vw - ${2 * VIEWPORT_GUTTER}px)` }}

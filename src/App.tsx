@@ -15,7 +15,7 @@
 import { useState, useCallback, useEffect, useRef, useMemo, lazy, Suspense } from 'react'
 import { transport } from './lib/transport'
 import { useSettings } from './hooks/useSettings'
-import { getPref, loadPrefs, setPref } from './lib/prefs'
+import { getPref, loadPrefs, setPref, usePref } from './lib/prefs'
 import { useRepos } from './hooks/useRepos'
 import { useSessions } from './hooks/useSessions'
 import { useAttentionNotifications } from './hooks/useAttentionNotifications'
@@ -39,7 +39,7 @@ import { deriveActivityLabel } from './lib/deriveActivityLabel'
 import { emitWorkflowEvent } from './lib/workflowEvents'
 import { setAgentHealth, getAgentHealth, resolveDefaultProvider } from './lib/agentHealth'
 import { useAgentHealth } from './hooks/useAgentHealth'
-import { getQueueMessages, getAgentName, listArchivedSessions, type ArchivedSessionInfo } from './lib/ccApi'
+import { getQueueMessages, getAgentName, listArchivedSessions, type ArchivedSessionInfo, cloneRepo, createScratch, uploadAndBuildMessage } from './lib/ccApi'
 import { SettingsView } from './components/settings/SettingsView'
 import { LeftSidebar } from './components/LeftSidebar'
 import { MobileTopBar } from './components/MobileTopBar'
@@ -47,6 +47,10 @@ import { AutomationsView } from './components/AutomationsView'
 import { CommandPalette } from './components/CommandPalette'
 import type { InputBarHandle } from './components/InputBar'
 import { RepoSelector } from './components/RepoSelector'
+import { NewSessionComposer } from './components/NewSessionComposer'
+import { EnvironmentChecklist } from './components/EnvironmentChecklist'
+import { defaultPlace, getRecentPlaces, rememberPlace, type DraftPlace } from './lib/places'
+import { draftModeFor, startDraftSession } from './lib/startDraftSession'
 import { DiffPanel } from './components/DiffPanel'
 import { OrchestratorContent } from './components/OrchestratorContent'
 import { TasksView } from './components/TasksView'
@@ -229,6 +233,21 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
   // the create was asked for, and hand anything typed since to the new session.
   const pendingCreateDraftRef = useRef<{ fromId: string | null; before: string } | null>(null)
 
+  // --- New-session composer (draft) -----------------------------------------
+  // The draft screen holds what the next session will be — where it runs,
+  // which agent — before anything exists on the server. Send creates it; the
+  // first message follows once session_created arrives.
+  const composerEnabled = usePref('newSessionComposer') === true
+  const recentPlacesPref = usePref('recentPlaces')
+  const [draftPlace, setDraftPlace] = useState<DraftPlace>(() => defaultPlace(getRecentPlaces()))
+  const [draftProviderChoice, setDraftProviderChoice] = useState<CodingProvider | null>(null)
+  const [draftText, setDraftText] = useState('')
+  const [draftResetKey, setDraftResetKey] = useState(0)
+  const [draftProgress, setDraftProgress] = useState<string | null>(null)
+  const [draftError, setDraftError] = useState<string | null>(null)
+  /** Set while a draft's create is in flight: what to send once it exists, and what to restore if it fails. */
+  const pendingDraftRef = useRef<{ firstMessage: string; text: string; place: DraftPlace } | null>(null)
+
   const {
     connState,
     messages,
@@ -277,6 +296,17 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
       }
       setActiveSessionId(sessionId)
       void refreshSessions()
+      const draft = pendingDraftRef.current
+      if (draft) {
+        pendingDraftRef.current = null
+        // The server holds input until the agent (and any worktree) is ready.
+        sendInputRef.current(draft.firstMessage)
+        rememberPlace(draft.place)
+        setDraftText('')
+        setDraftProgress(null)
+        setDraftError(null)
+        return
+      }
       if (pendingContextRef.current) {
         const ctx = pendingContextRef.current
         pendingContextRef.current = null
@@ -294,6 +324,16 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
       setArchiveRefreshKey(k => k + 1)
     },
     onError: (msg) => {
+      const draft = pendingDraftRef.current
+      if (draft) {
+        // A draft's create failed: keep the draft, text included, and say why there.
+        pendingDraftRef.current = null
+        setDraftProgress(null)
+        setDraftError(msg)
+        setDraftText(draft.text)
+        setDraftResetKey(k => k + 1)
+        return
+      }
       showError(msg)
       if (msg.toLowerCase().includes('not found')) {
         setActiveSessionId(null)
@@ -362,7 +402,10 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
   // from session_created/session_joined beats the new-session default, which
   // would otherwise sync another harness's model onto it.
   const listedProvider = sessions.find(s => s.id === activeSessionId)?.provider
-  const activeSessionProvider = view === 'orchestrator'
+  // The composer is up on /new, and on the landing page once the preview is on.
+  const showComposer = view === 'new' || (composerEnabled && view === 'chat' && !activeSessionId)
+  const draftProvider = draftProviderChoice ?? currentProvider
+  const activeSessionProvider = showComposer ? draftProvider : view === 'orchestrator'
     ? sessionProvider ?? 'claude'
     : listedProvider
       ?? (activeSessionId ? sessionProvider : null)
@@ -371,13 +414,13 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
   // harness is not known yet — right after a reload the session id is restored
   // before the sessions list or session_joined arrive, and acting on the
   // new-session default then would push e.g. a Codex model onto a Claude session.
-  const syncProvider: CodingProvider | null = view === 'orchestrator'
+  const syncProvider: CodingProvider | null = showComposer ? draftProvider : view === 'orchestrator'
     ? sessionProvider
     : activeSessionId && !listedProvider && !sessionProvider ? null : activeSessionProvider
 
-  const activeOpenCodeWd = activeSessionProvider === 'opencode'
-    ? sessions.find(s => s.id === activeSessionId)?.workingDir
-    : undefined
+  const activeOpenCodeWd = activeSessionProvider !== 'opencode' ? undefined
+    : showComposer ? draftPlace.path
+    : sessions.find(s => s.id === activeSessionId)?.workingDir
 
   const { openCodeModels, openCodeConnected, setOpenCodeConnected, reconnect: reconnectOpenCode } = useOpenCodeModelSync({
     token: settings.token,
@@ -543,6 +586,63 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
     setPref('provider', provider)
     void refreshSessions()
   }, [setProvider, refreshSessions])
+
+  // --- Draft handlers ---
+
+  // A create can't be confirmed over a dropped connection: hand the draft back.
+  useEffect(() => {
+    if (connState === 'connected' || !pendingDraftRef.current) return
+    const draft = pendingDraftRef.current
+    pendingDraftRef.current = null
+    setDraftProgress(null)
+    setDraftError('The connection dropped before the session started. Try again once it is back.')
+    setDraftText(draft.text)
+    setDraftResetKey(k => k + 1)
+  }, [connState])
+
+  /** Open the composer; `preset` picks the place (the sidebar's group +), else the last one used. */
+  const openNewSession = useCallback((preset?: DraftPlace) => {
+    setDraftPlace(preset ?? defaultPlace(getRecentPlaces()))
+    setDraftError(null)
+    navigate('/new')
+  }, [navigate])
+
+  /** Choose the draft's agent. Skip permissions is Claude-only, so other agents fall back to Bypass. */
+  const handleDraftProviderChange = useCallback((provider: CodingProvider) => {
+    setDraftProviderChoice(provider)
+    setPref('provider', provider)
+    const mode = draftModeFor(provider, currentPermissionMode)
+    if (mode !== currentPermissionMode) handlePermissionModeChange(mode)
+  }, [currentPermissionMode, handlePermissionModeChange])
+
+  const handleDraftSend = useCallback((text: string, files: File[]) => {
+    const token = settings.token
+    if (!token || pendingDraftRef.current) return
+    setDraftError(null)
+    setDraftText(text)
+    // Only pass a model that belongs to the chosen agent's list; the sync may still be catching up.
+    const model = currentModel && availableModels.some(m => m.id === currentModel) ? currentModel : null
+    startDraftSession({
+      place: draftPlace, text, files, provider: draftProvider, model, effort: currentEffort,
+      permissionMode: currentPermissionMode, useWorktree,
+    }, {
+      createScratch: () => createScratch(token),
+      cloneRepo: (owner, name) => cloneRepo(token, owner, name),
+      uploadAndBuildMessage: (f, t) => uploadAndBuildMessage(token, f, t),
+      createSession: (name, workingDir, worktree, mode, provider, explicit, start) => {
+        // From here a server error lands in onError, which restores the draft;
+        // session_created sends the first message.
+        pendingDraftRef.current = { firstMessage: start.firstMessage, text, place: start.place }
+        wsCreateSession(name, workingDir, worktree, mode, provider, explicit)
+      },
+      onProgress: setDraftProgress,
+    }).catch((err: unknown) => {
+      pendingDraftRef.current = null
+      setDraftProgress(null)
+      setDraftError(err instanceof Error ? err.message : String(err))
+      setDraftResetKey(k => k + 1)
+    })
+  }, [settings.token, currentModel, availableModels, draftPlace, draftProvider, currentEffort, currentPermissionMode, useWorktree, wsCreateSession])
 
   // Handle built-in slash commands locally (not sent to Claude)
   const handleBuiltinCommand = useCallback((command: string, args: string) => {
@@ -910,6 +1010,7 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
         onRenameSession={renameSession}
         onNewSessionInRepo={handleNewSessionInRepo}
         onOpenSession={handleOpenSession}
+        onNewSession={composerEnabled ? () => { docsBrowser.close(); openNewSession() } : undefined}
         onSelectRepo={handleSelectRepo}
         onDeleteRepo={handleDeleteRepo}
         onSettingsOpen={() => { openSettings() }}
@@ -1052,6 +1153,41 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
               navigate(`/s/${sessionId}`)
             }}
           />
+        ) : showComposer ? (
+          <NewSessionComposer
+            token={settings.token}
+            groups={groups}
+            isMobile={isMobile}
+            disabled={!settings.token || connState !== 'connected'}
+            place={draftPlace}
+            onPlaceChange={(p) => { setDraftPlace(p); setDraftError(null) }}
+            recent={recentPlacesPref ?? []}
+            initialText={draftText}
+            onTextChange={setDraftText}
+            resetKey={draftResetKey}
+            provider={draftProvider}
+            onProviderChange={handleDraftProviderChange}
+            currentModel={currentModel}
+            onModelChange={handleModelChange}
+            currentEffort={currentEffort}
+            onEffortChange={handleEffortChange}
+            availableModels={availableModels}
+            permissionMode={currentPermissionMode}
+            onPermissionModeChange={handlePermissionModeChange}
+            useWorktree={useWorktree}
+            onWorktreeChange={setUseWorktree}
+            progress={draftProgress}
+            error={draftError}
+            onSend={handleDraftSend}
+          >
+            <EnvironmentChecklist
+              ghStatus={ghStatus}
+              ghError={ghError}
+              repoCount={groups.reduce((n, g) => n + g.repos.length, 0)}
+              reposLoading={reposLoading}
+              reposError={reposError}
+            />
+          </NewSessionComposer>
         ) : docsBrowser.isOpen ? (
           <DocsBrowserContent
             docsRepoName={docsRepoName}

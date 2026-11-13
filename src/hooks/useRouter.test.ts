@@ -36,6 +36,11 @@ describe('parsePath', () => {
     expect(parsePath('/maintenance/%E0%A4%A').view).toBe('chat')
   })
 
+  it('parses the new-session composer route', () => {
+    expect(parsePath('/new')).toMatchObject({ view: 'new', sessionId: null })
+    expect(parsePath('/new/')).toMatchObject({ view: 'new' })
+  })
+
   it('parses the Tasks view', () => {
     expect(parsePath('/tasks')).toMatchObject({ view: 'tasks', sessionId: null })
     expect(parsePath('/tasks/')).toMatchObject({ view: 'tasks' })

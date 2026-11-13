@@ -10,6 +10,7 @@ import {
   getReposPath, setReposPath as setReposPathApi,
   getWorktreePrefix, setWorktreePrefix as setWorktreePrefixApi,
   getQueueMessages, setQueueMessages as setQueueMessagesApi,
+  getScratchRoot, setScratchRoot as setScratchRootApi,
 } from '../../lib/ccApi'
 import { FolderPicker } from '../FolderPicker'
 import { Block, Row, Rows, button, checkbox, input } from './Block'
@@ -27,6 +28,9 @@ export function SessionPreferences({ token, autoWorktree, onAutoWorktreeChange, 
   const [reposPath, setReposPath] = useState('')
   const [worktreePrefix, setWorktreePrefix] = useState('wt/')
   const [queueMessages, setQueueMessages] = useState(false)
+  const [scratchRoot, setScratchRoot] = useState('')
+  const [scratchEffective, setScratchEffective] = useState('')
+  const composer = usePref('newSessionComposer') === true
 
   useEffect(() => {
     if (!token) return
@@ -34,6 +38,7 @@ export function SessionPreferences({ token, autoWorktree, onAutoWorktreeChange, 
     getReposPath(token).then(setReposPath).catch(() => {})
     getWorktreePrefix(token).then(setWorktreePrefix).catch(() => {})
     getQueueMessages(token).then(setQueueMessages).catch(() => {})
+    getScratchRoot(token).then(r => { setScratchRoot(r.path); setScratchEffective(r.effective) }).catch(() => {})
   }, [token])
 
   return (
@@ -139,6 +144,44 @@ export function SessionPreferences({ token, autoWorktree, onAutoWorktreeChange, 
               />
             }
           />
+        </Rows>
+      </Block>
+
+      <Block title="New sessions">
+        <Rows>
+          <Row
+            label="Start from a blank composer (preview)"
+            htmlFor="settings-new-session-composer"
+            description="New opens an empty composer: type first, then choose where the session runs: a scratch folder, any folder, or a repository."
+            control={
+              <input
+                id="settings-new-session-composer"
+                type="checkbox"
+                checked={composer}
+                onChange={e => { setPref('newSessionComposer', e.target.checked) }}
+                className={checkbox}
+              />
+            }
+          />
+          <Row
+            label="Scratch folder location"
+            description={<>Scratch sessions each get a new folder here. They are never deleted automatically. Leave empty for the default{scratchEffective && !scratchRoot ? <> (<code className="font-mono">{scratchEffective}</code>)</> : null}.</>}
+          >
+            <div className="mt-2">
+              <FolderPicker
+                value={scratchRoot}
+                token={token}
+                placeholder="~/codekin/scratch (default)"
+                hideLabel
+                inputClass="text-body"
+                onSave={async (p) => {
+                  const saved = await setScratchRootApi(token, p)
+                  setScratchRoot(saved.path)
+                  setScratchEffective(saved.effective)
+                }}
+              />
+            </div>
+          </Row>
         </Rows>
       </Block>
     </div>

@@ -66,6 +66,11 @@ describe('root view', () => {
     expect(rows[1].tag).toBe('org')
   })
 
+  it('calls the section Repositories when there are only local checkouts', () => {
+    const local = data({ groups: GROUPS.filter(g => g.source === 'local') })
+    expect(pickerModel(INITIAL_PICKER_STATE, local).sections.map(s => s.title)).toEqual(['Recent', 'Start fresh', 'Repositories'])
+  })
+
   it('drops the Recent section with no history', () => {
     expect(pickerModel(INITIAL_PICKER_STATE, data({ recent: [] })).sections[0].title).toBe('Start fresh')
   })

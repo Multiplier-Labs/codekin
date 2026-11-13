@@ -174,10 +174,14 @@ function DangerModeNote({ label, onDismiss, onSwitchToDefault }: {
 }
 
 /** Desktop permission mode dropdown with full descriptions. */
-function PermissionModeDropdown({ currentMode, modes, isOpen, menuRef, onToggle, onSelect }: {
+function PermissionModeDropdown({ currentMode, modes, isOpen, menuRef, onToggle, onSelect, below = false, note }: {
   currentMode: PermissionMode; modes: typeof PERMISSION_MODES; isOpen: boolean
   menuRef: React.RefObject<HTMLDivElement | null>
   onToggle: () => void; onSelect: (mode: PermissionMode) => void
+  /** Open the menu under the chip (the new-session composer sits near the top). */
+  below?: boolean
+  /** A line under the list (e.g. why a mode is missing for this agent). */
+  note?: string
 }) {
   const mode = PERMISSION_MODES.find(m => m.id === currentMode)
   const ModeIcon = PERMISSION_MODE_ICONS[mode?.icon ?? 'shield']
@@ -195,7 +199,7 @@ function PermissionModeDropdown({ currentMode, modes, isOpen, menuRef, onToggle,
         <IconChevronDown size={12} stroke={2} className="opacity-70" />
       </StateItem>
       {isOpen && (
-        <div className="absolute bottom-full mb-1 left-0 z-50 min-w-[260px] rounded-floating border border-edge-strong bg-surface-raised shadow-floating py-1">
+        <div className={`absolute ${below ? 'top-full mt-1' : 'bottom-full mb-1'} left-0 z-50 min-w-[260px] rounded-floating border border-edge-strong bg-surface-raised shadow-floating py-1`}>
           {modes.map(m => {
             const ModeIcon = PERMISSION_MODE_ICONS[m.icon]
             const isActive = m.id === currentMode
@@ -226,6 +230,7 @@ function PermissionModeDropdown({ currentMode, modes, isOpen, menuRef, onToggle,
               </button>
             )
           })}
+          {note && <div className="border-t border-edge-strong px-3 pt-1.5 pb-1 text-meta text-ink-muted">{note}</div>}
         </div>
       )}
     </div>
@@ -391,8 +396,15 @@ function ModelRow({ model, effort, isCurrent, isActive, buttonRef, onClick }: {
  * harness is a session handoff, not a peer of picking a model, so it lives
  * behind a CTA that opens a second pane.
  */
-function AgentDropdown({ provider, handoffTargets, currentModel, currentEffort, models, isOpen, menuRef, onToggle, onModelChange, onEffortChange, onProviderChange }: {
+function AgentDropdown({ provider, handoffTargets, currentModel, currentEffort, models, isOpen, menuRef, onToggle, onModelChange, onEffortChange, onProviderChange, pickProvider = false, below = false }: {
   provider?: import('../types').CodingProvider
+  /**
+   * Choose the agent directly (a session not started yet) instead of handing
+   * a running session off to another agent.
+   */
+  pickProvider?: boolean
+  /** Open the menu under the chip. */
+  below?: boolean
   handoffTargets: typeof PROVIDERS
   currentModel?: string | null
   /** Session's reasoning effort (null = harness default). */
@@ -406,6 +418,7 @@ function AgentDropdown({ provider, handoffTargets, currentModel, currentEffort, 
   onEffortChange?: (effort: string | null) => void
   onProviderChange?: (provider: import('../types').CodingProvider, carryContext: boolean) => void
 }) {
+  const health = useAgentHealth()
   const [query, setQuery] = useState('')
   const [activeIndex, setActiveIndex] = useState(0)
   const [showHandoff, setShowHandoff] = useState(false)
@@ -488,7 +501,7 @@ function AgentDropdown({ provider, handoffTargets, currentModel, currentEffort, 
     <div className="relative" ref={menuRef}>
       <StateItem
         onClick={onToggle}
-        title={`${harnessLabel ?? 'Agent'}${modelLabel ? ` · ${modelLabel}` : ''}${chipEffort ? ` · ${effortLabel(chipEffort)} effort` : ''} — change model, effort, or hand off`}
+        title={`${harnessLabel ?? 'Agent'}${modelLabel ? ` · ${modelLabel}` : ''}${chipEffort ? ` · ${effortLabel(chipEffort)} effort` : ''} — ${pickProvider ? 'choose the agent, model, or effort' : 'change model, effort, or hand off'}`}
       >
         {/* Harness and model are one fact, so they carry one tone — the
             separator included. StateItem's muted colour (and its hover
@@ -500,7 +513,31 @@ function AgentDropdown({ provider, handoffTargets, currentModel, currentEffort, 
         <IconChevronDown size={12} stroke={2} className="opacity-70" />
       </StateItem>
       {isOpen && (
-        <div className="absolute bottom-full mb-1 right-0 z-50 flex max-h-[380px] w-[280px] flex-col rounded-floating border border-edge-strong bg-surface-raised shadow-floating">
+        <div className={`absolute ${below ? 'top-full mt-1' : 'bottom-full mb-1'} right-0 z-50 flex max-h-[380px] w-[280px] flex-col rounded-floating border border-edge-strong bg-surface-raised shadow-floating`}>
+          {pickProvider && onProviderChange && !showEffort && (
+            <div className="border-b border-edge-strong py-1" role="group" aria-label="Agent">
+              <div className="px-3 py-1 text-micro text-ink-muted">Agent</div>
+              {handoffTargets.map(p => {
+                const { available, hint } = providerAvailability(health, p.id)
+                const isCurrent = p.id === provider
+                return (
+                  <button
+                    key={p.id}
+                    disabled={!available}
+                    onClick={() => { if (!isCurrent) onProviderChange(p.id, false) }}
+                    className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-body transition-colors ${
+                      available ? 'text-ink hover:bg-edge' : 'cursor-not-allowed text-ink-muted'
+                    }`}
+                    title={hint ?? p.description}
+                  >
+                    <span className={isCurrent ? 'text-primary-4' : undefined}>{p.label}</span>
+                    <span className="truncate text-meta text-ink-muted">{available ? p.description : 'not installed'}</span>
+                    {isCurrent && <IconCheck size={14} stroke={2.5} className="ml-auto flex-shrink-0 text-primary-4" />}
+                  </button>
+                )
+              })}
+            </div>
+          )}
           {showHandoff && provider && onProviderChange ? (
             <HandoffPane
               current={provider}
@@ -599,7 +636,7 @@ function AgentDropdown({ provider, handoffTargets, currentModel, currentEffort, 
                 </div>
               )}
 
-              {provider && onProviderChange && (
+              {provider && onProviderChange && !pickProvider && (
                 <div className="border-t border-edge-strong p-1">
                   <button
                     onClick={() => setShowHandoff(true)}
@@ -632,7 +669,8 @@ export interface InputBarHandle {
   insertText: (text: string) => void
 }
 
-export type InputBarVariant = 'default' | 'orchestrator'
+/** `draft`: the composer of a session not created yet (agent picked, not handed off; menus open downward). */
+export type InputBarVariant = 'default' | 'orchestrator' | 'draft'
 
 interface InputBarProps {
   /** Called with the raw text when the user sends a message (Enter key or send button). */
@@ -699,10 +737,15 @@ interface InputBarProps {
   joeName?: string
   /** Why ordinary messages are paused (Joe controls the session); @Joe still sends. */
   lockedReason?: string
+  /** Rendered in the toolbar after the attach button (the draft's place chip). */
+  placeSlot?: React.ReactNode
+  /** A line under the permission menu (draft: why Skip is missing for this agent). */
+  permissionNote?: string
 }
 
-export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function InputBar({ onSendInput, isWaiting, disabled, onEscape, pendingFiles, onAddFiles, onRemoveFile, skillGroups, slashCommands, initialValue = '', onValueChange, currentModel, onModelChange, currentEffort = null, onEffortChange, availableModels = [], sessionProvider, onProviderChange, placeholder, isMobile = false, showWorktreeToggle = false, useWorktree = false, onWorktreeChange, currentPermissionMode, onPermissionModeChange, onMoveToWorktree, worktreePath, variant = 'default', joeName, lockedReason }, ref) {
+export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function InputBar({ onSendInput, isWaiting, disabled, onEscape, pendingFiles, onAddFiles, onRemoveFile, skillGroups, slashCommands, initialValue = '', onValueChange, currentModel, onModelChange, currentEffort = null, onEffortChange, availableModels = [], sessionProvider, onProviderChange, placeholder, isMobile = false, showWorktreeToggle = false, useWorktree = false, onWorktreeChange, currentPermissionMode, onPermissionModeChange, onMoveToWorktree, worktreePath, variant = 'default', joeName, lockedReason, placeSlot, permissionNote }, ref) {
   const isOrchestrator = variant === 'orchestrator'
+  const isDraft = variant === 'draft'
   const enabledModes = resolveEnabledModes(usePref('enabledPermissionModes'))
   const providerModes = permissionModesFor(sessionProvider)
   const visibleModes = offeredModes(providerModes, enabledModes, currentPermissionMode)
@@ -1040,6 +1083,7 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
               dangerous mode must be visible everywhere. */}
           <div className="flex items-center gap-3">
             <AttachButton onClick={handleFileSelect} disabled={disabled} accent={isOrchestrator} />
+            {placeSlot}
 
             <div className="flex-1" />
 
@@ -1052,6 +1096,8 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
                   menuRef={permMenuRef}
                   onToggle={() => { closeAllPopups('perm'); setPermMenuOpen(!permMenuOpen) }}
                   onSelect={handlePermissionModeSelect}
+                  below={isDraft}
+                  note={permissionNote}
                 />
               )}
               {showWorktree && (
@@ -1101,6 +1147,8 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
                     onModelChange={showModel ? (id) => { onModelChange(id); setAgentMenuOpen(false) } : undefined}
                     onEffortChange={showModel ? onEffortChange : undefined}
                     onProviderChange={showProvider ? (provider, carryContext) => { onProviderChange(provider, carryContext); setAgentMenuOpen(false) } : undefined}
+                    pickProvider={isDraft}
+                    below={isDraft}
                   />
                 </div>
               )}
@@ -1114,7 +1162,7 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
                     <IconDots className="density-icon" stroke={2} />
                   </ToolbarAction>
                   {mobileMenuOpen && (
-                    <div className="absolute bottom-full mb-1 right-0 z-50 min-w-[220px] rounded-floating border border-edge-strong bg-surface-raised shadow-floating py-1">
+                    <div className={`absolute ${isDraft ? 'top-full mt-1' : 'bottom-full mb-1'} right-0 z-50 min-w-[220px] rounded-floating border border-edge-strong bg-surface-raised shadow-floating py-1`}>
                       {showWorktree && (
                         <>
                           <div className="px-3 py-1.5 text-meta text-ink-muted uppercase tracking-wider">Worktree</div>
@@ -1162,7 +1210,7 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
                       {showProvider && (
                         <>
                           {showModel && <div className="my-1 border-t border-edge-strong" />}
-                          <div className="px-3 py-1.5 text-meta text-ink-muted uppercase tracking-wider">Hand off to</div>
+                          <div className="px-3 py-1.5 text-meta text-ink-muted uppercase tracking-wider">{isDraft ? 'Agent' : 'Hand off to'}</div>
                           {handoffTargets.filter(p => p.id !== sessionProvider).map(p => (
                             <button
                               key={p.id}

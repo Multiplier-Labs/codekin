@@ -139,6 +139,8 @@ interface Props {
   onNewSessionInRepo: (workingDir: string, provider?: import('../types').CodingProvider) => void
   /** Open a repo's latest session, or create a new one when a provider is chosen. */
   onOpenSession: (repo: Repo, provider?: import('../types').CodingProvider) => void
+  /** Open the new-session composer. When set, New is a plain button instead of the repo popover. */
+  onNewSession?: () => void
   /** Switch the active repo (expands its tree node). */
   onSelectRepo: (workingDir: string) => void
   /** Close every session in a repo, dropping it from the sidebar. */
@@ -201,6 +203,7 @@ export function LeftSidebar({
   onRenameSession,
   onNewSessionInRepo,
   onOpenSession,
+  onNewSession,
   onSelectRepo,
   onDeleteRepo,
   onSettingsOpen,
@@ -384,7 +387,13 @@ export function LeftSidebar({
             <IconChevronLeft size={16} stroke={2} />
           </button>
         )}
-        <NewSessionButton groups={groups} token={token} onOpen={(repo, provider) => { onOpenSession(repo, provider); if (isMobile) onMobileClose?.() }} />
+        <NewSessionButton
+          groups={groups}
+          token={token}
+          onOpen={(repo, provider) => { onOpenSession(repo, provider); if (isMobile) onMobileClose?.() }}
+          onNewSession={onNewSession ? () => { onNewSession(); if (isMobile) onMobileClose?.() } : undefined}
+          current={view === 'new'}
+        />
       </div>
 
       {/* Scrollable nav tree */}
