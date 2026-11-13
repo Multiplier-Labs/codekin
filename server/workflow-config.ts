@@ -65,7 +65,7 @@ export function loadWorkflowConfig(): WorkflowConfig {
   try {
     if (existsSync(CONFIG_PATH)) {
       const raw = readFileSync(CONFIG_PATH, 'utf-8')
-      return JSON.parse(raw) as WorkflowConfig
+      return markPrReviewAdoption(JSON.parse(raw) as WorkflowConfig)
     }
   } catch (err) {
     console.error('[workflow-config] Failed to load config:', err)
@@ -73,8 +73,21 @@ export function loadWorkflowConfig(): WorkflowConfig {
   return { reviewRepos: [] }
 }
 
+/**
+ * A config holding a PR Review automation has adopted automation-controlled
+ * PR review, even if it was written before the flag existed. Marking this on
+ * load (not only on save) means that deleting or re-kinding the last PR
+ * Review row keeps the flag instead of falling back to reviewing every repo.
+ */
+function markPrReviewAdoption(config: WorkflowConfig): WorkflowConfig {
+  if (Array.isArray(config.reviewRepos) && config.reviewRepos.some(r => r.kind === 'pr-review')) {
+    config.prReviewAutomationsAdopted = true
+  }
+  return config
+}
+
 export function saveWorkflowConfig(config: WorkflowConfig): void {
-  if (config.reviewRepos.some(r => r.kind === 'pr-review')) config.prReviewAutomationsAdopted = true
+  markPrReviewAdoption(config)
   if (!existsSync(CONFIG_DIR)) {
     mkdirSync(CONFIG_DIR, { recursive: true })
   }

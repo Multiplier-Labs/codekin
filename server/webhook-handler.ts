@@ -611,8 +611,22 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
     }
     if (this.sessions.get(sessionId)) return
 
+    // The automation may have been paused, deleted, held or edited while the
+    // signal sat in the queue: decide again now, and use its current settings.
+    let current: PrReviewSettings | undefined = settings
+    const repoName = payload.repository?.full_name
+    if (repoName) {
+      const decision = resolvePrReviewAutomation(repoName)
+      if (decision.kind === 'skip') {
+        console.log(`[webhook] Dropping queued PR review for ${repoName}: ${decision.reason}`)
+        this.updateEventStatus(webhookEvent.id, 'filtered', decision.reason)
+        return
+      }
+      current = decision.kind === 'review' ? decision.settings : undefined
+    }
+
     try {
-      await this.processPrReviewAsync(payload, webhookEvent, sessionId, settings)
+      await this.processPrReviewAsync(payload, webhookEvent, sessionId, current)
     } catch (err) {
       console.error('[webhook] Queued PR review processing error:', err)
       this.updateEventStatus(webhookEvent.id, 'error', String(err))

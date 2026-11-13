@@ -94,6 +94,24 @@ describe('workflow-config', () => {
     })
   })
 
+  it('keeps PR Review adoption when the last pre-flag PR Review row is deleted', () => {
+    vi.mocked(existsSync).mockReturnValue(true)
+    vi.mocked(readFileSync).mockReturnValue(JSON.stringify({ reviewRepos: [
+      { id: 'old', name: 'Old', repoPath: '/repo', cronExpression: 'event', enabled: true, kind: 'pr-review' },
+    ] }))
+    const after = removeReviewRepo('old')
+    expect(after.reviewRepos).toEqual([])
+    expect(after.prReviewAutomationsAdopted).toBe(true)
+  })
+
+  it('keeps PR Review adoption when the last PR Review row changes kind', () => {
+    vi.mocked(existsSync).mockReturnValue(true)
+    vi.mocked(readFileSync).mockReturnValue(JSON.stringify({ reviewRepos: [
+      { id: 'old', name: 'Old', repoPath: '/repo', cronExpression: 'event', enabled: true, kind: 'pr-review' },
+    ] }))
+    expect(updateReviewRepo('old', { kind: 'code-review.daily' }).prReviewAutomationsAdopted).toBe(true)
+  })
+
   describe('addReviewRepo', () => {
     it('adds a new repo', () => {
       vi.mocked(existsSync).mockReturnValue(true)

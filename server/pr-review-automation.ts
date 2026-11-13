@@ -34,7 +34,28 @@ export interface PrReviewDeps {
   holdReason?: (automationId: string) => string | null
 }
 
-const slugCache = new Map<string, string | null>()
+/**
+ * repoPath → origin slug. Entries expire so a changed remote is picked up. A
+ * failed lookup (repo missing, no origin yet) is not cached, so reviews resume
+ * as soon as the repo is fixed.
+ */
+const SLUG_TTL_MS = 5 * 60 * 1000
+const slugCache = new Map<string, { slug: string; expiresAt: number }>()
+
+function cachedSlug(repoPath: string): string | null {
+  const now = Date.now()
+  const hit = slugCache.get(repoPath)
+  if (hit && hit.expiresAt > now) return hit.slug
+  const slug = repoSlugFromRemote(repoPath)
+  if (slug) slugCache.set(repoPath, { slug, expiresAt: now + SLUG_TTL_MS })
+  else slugCache.delete(repoPath)
+  return slug
+}
+
+/** Forget cached origin slugs (tests; or after an automation's repo changes). */
+export function clearPrReviewSlugCache(): void {
+  slugCache.clear()
+}
 let holdReason: ((automationId: string) => string | null) | null = null
 
 /** Wire the maintenance hold, so a paused plan pauses its PR Review automation too. */
@@ -44,10 +65,7 @@ export function setPrReviewHold(fn: ((automationId: string) => string | null) | 
 
 const defaultDeps: PrReviewDeps = {
   load: loadWorkflowConfig,
-  slugOf: (repoPath) => {
-    if (!slugCache.has(repoPath)) slugCache.set(repoPath, repoSlugFromRemote(repoPath))
-    return slugCache.get(repoPath) ?? null
-  },
+  slugOf: cachedSlug,
   holdReason: (id) => holdReason?.(id) ?? null,
 }
 
