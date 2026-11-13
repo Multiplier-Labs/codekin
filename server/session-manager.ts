@@ -45,6 +45,7 @@ import {
 import { ProcessCoordinator } from './process-coordinator.js'
 import { inspectWorktree, prepareWorktree, removeWorktree, type WorktreeResult } from './worktree-ops.js'
 import { describePlace } from './places.js'
+import { discardOrgChanges, getOrgChangeSummary, getOrgDiff } from './org-diff.js'
 
 /** Max messages retained in a session's output history buffer. */
 const MAX_HISTORY = 2000
@@ -1950,6 +1951,7 @@ export class SessionManager {
   async getDiff(sessionId: string, view: DiffView = 'all'): Promise<WsServerMessage> {
     const session = this.sessions.get(sessionId)
     if (!session) return { type: 'diff_error', message: 'Session not found', scope: view }
+    if (this.isOrgSession(session)) return getOrgDiff(this.diffManager, session.workingDir, session.id, view)
     return this.diffManager.getDiff(session.workingDir, view, await this.reviewBaseFor(session, view))
   }
 
@@ -2068,6 +2070,7 @@ export class SessionManager {
   async getChangeSummary(sessionId: string): Promise<{ uncommittedFiles: number; branchCommits: number | null } | null> {
     const session = this.sessions.get(sessionId)
     if (!session) return null
+    if (this.isOrgSession(session)) return getOrgChangeSummary(this.diffManager, session.workingDir, session.id)
     return this.diffManager.getChangeSummary(session.workingDir, await this.reviewBaseFor(session, 'branch'))
   }
 
@@ -2102,7 +2105,13 @@ export class SessionManager {
   ): Promise<WsServerMessage> {
     const session = this.sessions.get(sessionId)
     if (!session) return { type: 'diff_error', message: 'Session not found' }
+    if (this.isOrgSession(session)) return discardOrgChanges(this.diffManager, session.workingDir, session.id, scope, paths, statuses)
     return this.diffManager.discardChanges(session.workingDir, scope, paths, statuses)
+  }
+
+  /** An org session (REPOS_ROOT/<owner>): its Changes span the repositories in its folder. */
+  private isOrgSession(session: Session): boolean {
+    return describePlace(session.groupDir ?? session.workingDir).kind === 'org'
   }
 
   /** Graceful shutdown: complete in-progress tasks, persist state, kill all processes.
