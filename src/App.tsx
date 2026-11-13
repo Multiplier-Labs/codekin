@@ -456,6 +456,10 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
     return () => { if (changeSummaryTimerRef.current) clearTimeout(changeSummaryTimerRef.current) }
   }, [wsSend])
 
+  // Ctrl+C in the composer while the agent works: stop its turn. The next
+  // message restarts the agent and resumes the conversation.
+  const handleInterrupt = useCallback(() => { wsSend({ type: 'stop' }) }, [wsSend])
+
   // Reset file-change tracking when switching sessions, then ask what the new one has to review.
   useEffect(() => {
     setHasFileChanges(false) // eslint-disable-line react-hooks/set-state-in-effect -- sync with session change
@@ -1297,6 +1301,7 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
             onDiscardTentative={() => handleDiscardTentative(activeSessionId)}
             inputBarRef={inputBarRef}
             onSendInput={handleSendWithFiles}
+            onInterrupt={handleInterrupt}
             pendingFiles={pendingFiles}
             onAddFiles={addFiles}
             onRemoveFile={removeFile}

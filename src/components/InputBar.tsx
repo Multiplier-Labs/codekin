@@ -3,7 +3,7 @@
  * inline slash-command autocomplete.
  *
  * Supports Enter to send, Shift+Enter for newline, Shift+Tab to cycle the
- * enabled permission modes, Ctrl+C to interrupt, Escape to blur. The textarea sizes itself to its content, from two lines up
+ * enabled permission modes, Ctrl+C (nothing selected) to stop the agent's turn, Escape to blur. The textarea sizes itself to its content, from two lines up
  * to 40% of the pane; the toolbar below it is one row, split into session
  * state (left, unboxed monospace) and actions (right, exactly one filled).
  */
@@ -681,6 +681,12 @@ interface InputBarProps {
   disabled: boolean
   /** Called when the user presses Escape — parent uses this to deselect the session. */
   onEscape: () => void
+  /**
+   * Stop the agent's current turn. Pass it only while the agent is working:
+   * Ctrl+C with no text selected then calls it. Otherwise Ctrl+C is left to
+   * the browser (copy on Linux and Windows).
+   */
+  onInterrupt?: () => void
   /** Files queued for upload alongside the next message. */
   pendingFiles: File[]
   /** Append files to the pending upload queue. */
@@ -743,7 +749,7 @@ interface InputBarProps {
   permissionNote?: string
 }
 
-export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function InputBar({ onSendInput, isWaiting, disabled, onEscape, pendingFiles, onAddFiles, onRemoveFile, skillGroups, slashCommands, initialValue = '', onValueChange, currentModel, onModelChange, currentEffort = null, onEffortChange, availableModels = [], sessionProvider, onProviderChange, placeholder, isMobile = false, showWorktreeToggle = false, useWorktree = false, onWorktreeChange, currentPermissionMode, onPermissionModeChange, onMoveToWorktree, worktreePath, variant = 'default', joeName, lockedReason, placeSlot, permissionNote }, ref) {
+export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function InputBar({ onSendInput, isWaiting, disabled, onEscape, onInterrupt, pendingFiles, onAddFiles, onRemoveFile, skillGroups, slashCommands, initialValue = '', onValueChange, currentModel, onModelChange, currentEffort = null, onEffortChange, availableModels = [], sessionProvider, onProviderChange, placeholder, isMobile = false, showWorktreeToggle = false, useWorktree = false, onWorktreeChange, currentPermissionMode, onPermissionModeChange, onMoveToWorktree, worktreePath, variant = 'default', joeName, lockedReason, placeSlot, permissionNote }, ref) {
   const isOrchestrator = variant === 'orchestrator'
   const isDraft = variant === 'draft'
   const enabledModes = resolveEnabledModes(usePref('enabledPermissionModes'))
@@ -906,15 +912,19 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
         e.preventDefault()
         handleSend()
       }
-    } else if (e.key === 'c' && e.ctrlKey) {
-      e.preventDefault()
-      onSendInput('\x03')
+    } else if (e.key === 'c' && e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey && onInterrupt) {
+      // With text selected, Ctrl+C copies; only an empty selection interrupts.
+      const el = e.currentTarget
+      if (el.selectionStart === el.selectionEnd) {
+        e.preventDefault()
+        onInterrupt()
+      }
     } else if (e.key === 'Escape') {
       e.preventDefault()
       textareaRef.current?.blur()
       onEscape()
     }
-  }, [slashMenuOpen, handleSend, onSendInput, onEscape])
+  }, [slashMenuOpen, handleSend, onInterrupt, onEscape])
 
   const handleFileSelect = useCallback(() => {
     fileInputRef.current?.click()

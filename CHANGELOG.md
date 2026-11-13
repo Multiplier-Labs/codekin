@@ -21,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The Stepflow webhook integration (`POST /api/webhooks/stepflow`, `GET /api/stepflow/events*`, `STEPFLOW_WEBHOOK_*`) and the standalone `workflows/` package. It was off by default and had no UI; scheduled and event-driven automations use the built-in workflow engine and are unaffected. Archived sessions with source `stepflow` still load.
 
 ### Fixed
+- **Ctrl+C in the composer** now stops the agent's turn while it is working, as the shortcut always promised; your next message continues the conversation. With text selected it copies, as on any text field (it used to block copying on Linux and Windows), and when the agent is idle it does nothing. Before, it sent an invisible control character to the agent as a message.
 - Org sessions follow the repositories folder set in Settings, so they open where the repo list and cloning put that owner's clones, instead of always under `REPOS_ROOT`.
 - The first org session on a machine with no repositories folder yet creates it instead of failing.
 - A `.github` repository in an org folder shows up in **Changes** and the change count.
