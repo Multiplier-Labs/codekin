@@ -1,6 +1,6 @@
 /**
  * Tests for createOrchestratorRouter — the thin wrapper that mounts the
- * session, memory, and learning sub-routers and provides shared auth.
+ * session and memory sub-routers and provides shared auth.
  *
  * These tests verify the wrapper's three responsibilities:
  *   1. Sub-routers are reachable through the mounted prefix.
@@ -25,22 +25,6 @@ vi.mock('./orchestrator-manager.js', () => ({
   ensureOrchestratorRunning: vi.fn(() => 'orch-session-id'),
   getOrchestratorProvider: vi.fn(() => 'codex'),
   setOrchestratorProvider: vi.fn(),
-}))
-
-// Mock the orchestrator-learning module — these helpers are exercised via
-// the dedicated learning router test.  Here we just need them to exist.
-vi.mock('./orchestrator-learning.js', () => ({
-  extractMemoryCandidates: vi.fn(() => []),
-  smartUpsert: vi.fn(),
-  runAgingCycle: vi.fn(() => ({ aged: 0, expired: 0 })),
-  recordFindingOutcome: vi.fn(() => 'finding-1'),
-  getTriageRecommendation: vi.fn(() => ({ recommendation: 'review' })),
-  loadSkillProfile: vi.fn(() => ({})),
-  updateSkillLevel: vi.fn(() => ({})),
-  getGuidanceStyle: vi.fn(() => ({})),
-  recordDecision: vi.fn(() => 'dec-1'),
-  assessDecisionOutcome: vi.fn(() => false),
-  getPendingOutcomeAssessments: vi.fn(() => []),
 }))
 
 // Avoid pulling in real config / repos-root resolution
@@ -159,15 +143,6 @@ describe('createOrchestratorRouter', () => {
       const body = await res.json()
       expect(body.items).toEqual([])
     })
-
-    it('mounts the learning router (GET /api/orchestrator/skills)', async () => {
-      const res = await fetch(`${server.baseUrl}/api/orchestrator/skills`, {
-        headers: { Authorization: `Bearer ${TOKEN}` },
-      })
-      expect(res.status).toBe(200)
-      const body = await res.json()
-      expect(body.profile).toBeDefined()
-    })
   })
 
   // -------------------------------------------------------------------------
@@ -189,21 +164,21 @@ describe('createOrchestratorRouter', () => {
     })
 
     it('accepts the master token', async () => {
-      const res = await fetch(`${server.baseUrl}/api/orchestrator/skills`, {
+      const res = await fetch(`${server.baseUrl}/api/orchestrator/trust`, {
         headers: { Authorization: `Bearer ${TOKEN}` },
       })
       expect(res.status).toBe(200)
     })
 
     it('rejects an unknown token with 401', async () => {
-      const res = await fetch(`${server.baseUrl}/api/orchestrator/skills`, {
+      const res = await fetch(`${server.baseUrl}/api/orchestrator/trust`, {
         headers: { Authorization: 'Bearer wrong' },
       })
       expect(res.status).toBe(401)
     })
 
     it('rejects requests with no Authorization header', async () => {
-      const res = await fetch(`${server.baseUrl}/api/orchestrator/skills`)
+      const res = await fetch(`${server.baseUrl}/api/orchestrator/trust`)
       expect(res.status).toBe(401)
     })
   })
@@ -234,7 +209,7 @@ describe('createOrchestratorRouter', () => {
     })
 
     it('accepts the master token without consulting the session verifier', async () => {
-      const res = await fetch(`${server.baseUrl}/api/orchestrator/skills`, {
+      const res = await fetch(`${server.baseUrl}/api/orchestrator/trust`, {
         headers: { Authorization: `Bearer ${TOKEN}` },
       })
       expect(res.status).toBe(200)
@@ -242,7 +217,7 @@ describe('createOrchestratorRouter', () => {
     })
 
     it('accepts a session-scoped token bound to the orchestrator session', async () => {
-      const res = await fetch(`${server.baseUrl}/api/orchestrator/skills`, {
+      const res = await fetch(`${server.baseUrl}/api/orchestrator/trust`, {
         headers: { Authorization: `Bearer ${SESSION_TOKEN}` },
       })
       expect(res.status).toBe(200)
@@ -250,7 +225,7 @@ describe('createOrchestratorRouter', () => {
     })
 
     it('rejects when neither the master nor session-scoped token matches', async () => {
-      const res = await fetch(`${server.baseUrl}/api/orchestrator/skills`, {
+      const res = await fetch(`${server.baseUrl}/api/orchestrator/trust`, {
         headers: { Authorization: 'Bearer rogue-token' },
       })
       expect(res.status).toBe(401)

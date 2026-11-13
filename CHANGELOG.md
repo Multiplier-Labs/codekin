@@ -19,6 +19,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 - The Stepflow webhook integration (`POST /api/webhooks/stepflow`, `GET /api/stepflow/events*`, `STEPFLOW_WEBHOOK_*`) and the standalone `workflows/` package. It was off by default and had no UI; scheduled and event-driven automations use the built-in workflow engine and are unaffected. Archived sessions with source `stepflow` still load.
+- Agent Joe's unused learning endpoints (`/api/orchestrator/memory/extract`, `/memory/age`, `/findings/*`, `/skills`, `/decisions/*`) and the prompt sections that promised a skill profile and decision reviews it had no tool for. Joe's trust records and memory files are unchanged.
+- `POST` and `DELETE /api/workflows/schedules`, which the next automation config change undid anyway (schedules are generated from the repo automation config), the `/abort` alias of `POST /api/workflows/runs/:id/cancel`, and `GET /api/approvals/global`. `PATCH /api/workflows/schedules/:id` stays: it is how the catch-up policy is set.
 
 ### Fixed
 - **Ctrl+C in the composer** now stops the agent's turn while it is working, as the shortcut always promised; your next message continues the conversation. With text selected it copies, as on any text field (it used to block copying on Linux and Windows), and when the agent is idle it does nothing. Before, it sent an invisible control character to the agent as a message.

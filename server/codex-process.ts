@@ -30,7 +30,7 @@ import { resolveAttachmentPath } from './attachment-paths.js'
 import { EventEmitter } from 'events'
 import { randomUUID } from 'crypto'
 import type { ClaudeProcessEvents } from './claude-process.js'
-import { CODEX_CAPABILITIES, type CodingProcess, type CodingProvider, type ProviderCapabilities } from './coding-process.js'
+import type { CodingProcess, CodingProvider } from './coding-process.js'
 import type { PermissionMode, TaskItem } from './types.js'
 import { summarizeToolInput } from './tool-labels.js'
 import { buildHarnessEnv } from './harness-env.js'
@@ -272,7 +272,6 @@ function policyForMode(mode: PermissionMode | undefined): { approvalPolicy: stri
 
 export class CodexProcess extends EventEmitter<ClaudeProcessEvents> implements CodingProcess {
   readonly provider: CodingProvider = 'codex'
-  readonly capabilities: ProviderCapabilities = CODEX_CAPABILITIES
 
   private proc: ChildProcess | null = null
   private rl: Interface | null = null

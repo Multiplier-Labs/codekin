@@ -367,18 +367,12 @@ describe('workflow routes', () => {
   })
 
   // -------------------------------------------------------------------------
-  // POST /runs/:runId/cancel (+ /abort alias)
+  // POST /runs/:runId/cancel
   // -------------------------------------------------------------------------
 
   describe('stop verbs', () => {
     it('cancels via /cancel', async () => {
       const res = await fetch(`${harness.baseUrl}/runs/run-1/cancel`, { method: 'POST', headers: authHeader() })
-      expect(res.status).toBe(200)
-      expect(mocks.cancelRun).toHaveBeenCalledWith('run-1')
-    })
-
-    it('accepts /abort as an alias for /cancel', async () => {
-      const res = await fetch(`${harness.baseUrl}/runs/run-1/abort`, { method: 'POST', headers: authHeader() })
       expect(res.status).toBe(200)
       expect(mocks.cancelRun).toHaveBeenCalledWith('run-1')
     })
@@ -444,56 +438,6 @@ describe('workflow routes', () => {
     })
   })
 
-  describe('POST /schedules', () => {
-    it('upserts a schedule on happy path', async () => {
-      const res = await fetch(`${harness.baseUrl}/schedules`, {
-        method: 'POST',
-        headers: authHeader(),
-        body: JSON.stringify({
-          id: 'sched-new',
-          kind: 'code-review.daily',
-          cronExpression: '0 9 * * 1-5',
-          input: { repoPath: '/r' },
-          enabled: true,
-        }),
-      })
-      expect(res.status).toBe(200)
-      expect(mocks.upsertSchedule).toHaveBeenCalledWith({
-        id: 'sched-new',
-        kind: 'code-review.daily',
-        cronExpression: '0 9 * * 1-5',
-        input: { repoPath: '/r' },
-        enabled: true,
-      })
-    })
-
-    it('returns 400 when required fields are missing', async () => {
-      const res = await fetch(`${harness.baseUrl}/schedules`, {
-        method: 'POST',
-        headers: authHeader(),
-        body: JSON.stringify({ kind: 'code-review.daily' }),
-      })
-      expect(res.status).toBe(400)
-      const body = await res.json() as { error: string }
-      expect(body.error).toMatch(/Missing/)
-    })
-
-    it('returns 400 for invalid cron expression', async () => {
-      const res = await fetch(`${harness.baseUrl}/schedules`, {
-        method: 'POST',
-        headers: authHeader(),
-        body: JSON.stringify({
-          id: 'sched-bad',
-          kind: 'code-review.daily',
-          cronExpression: 'not a cron',
-        }),
-      })
-      expect(res.status).toBe(400)
-      const body = await res.json() as { error: string }
-      expect(body.error).toBe('Invalid cron expression')
-    })
-  })
-
   describe('PATCH /schedules/:id', () => {
     it('patches an existing schedule', async () => {
       mocks.getSchedule.mockReturnValueOnce({
@@ -545,29 +489,6 @@ describe('workflow routes', () => {
         body: JSON.stringify({ cronExpression: '99 99 99 99 99' }),
       })
       expect(res.status).toBe(400)
-    })
-  })
-
-  describe('DELETE /schedules/:id', () => {
-    it('deletes an existing schedule', async () => {
-      mocks.deleteSchedule.mockReturnValueOnce(true)
-      const res = await fetch(`${harness.baseUrl}/schedules/sched-1`, {
-        method: 'DELETE',
-        headers: authHeader(),
-      })
-      expect(res.status).toBe(200)
-      const body = await res.json() as { success: boolean }
-      expect(body.success).toBe(true)
-      expect(mocks.deleteSchedule).toHaveBeenCalledWith('sched-1')
-    })
-
-    it('returns 404 when schedule does not exist', async () => {
-      mocks.deleteSchedule.mockReturnValueOnce(false)
-      const res = await fetch(`${harness.baseUrl}/schedules/missing`, {
-        method: 'DELETE',
-        headers: authHeader(),
-      })
-      expect(res.status).toBe(404)
     })
   })
 

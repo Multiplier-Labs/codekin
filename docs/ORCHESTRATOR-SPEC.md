@@ -549,19 +549,7 @@ GET    /api/orchestrator/notifications              — list pending notificatio
 POST   /api/orchestrator/notifications/mark-delivered
 ```
 
-**Learning** (`orchestrator-learning-router.ts`):
-
-```
-POST   /api/orchestrator/memory/extract             — extract memory candidates from interaction
-POST   /api/orchestrator/memory/age                 — run aging/decay cycle
-POST   /api/orchestrator/findings/outcome           — record audit finding outcome
-GET    /api/orchestrator/findings/recommend         — triage recommendation
-GET    /api/orchestrator/skills                     — user skill profile
-POST   /api/orchestrator/skills                     — record skill signal
-POST   /api/orchestrator/decisions                  — record a decision
-POST   /api/orchestrator/decisions/:id/assess       — assess past decision outcome
-GET    /api/orchestrator/decisions/pending          — decisions awaiting assessment
-```
+The learning endpoints (memory extraction and aging, finding outcomes, skill profile, decision records) were removed in November 2026: nothing called them, and Joe's prompt never named them.
 
 ### 10.3 Session Lifecycle Hooks & Approval Endpoints
 

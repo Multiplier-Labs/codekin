@@ -21,7 +21,7 @@ import { SCREENSHOTS_DIR, CLAUDE_BINARY } from './config.js'
 import { summarizeToolInput } from './tool-labels.js'
 import { redactSecrets } from './crypto-utils.js'
 import { jsonParse } from './json-parse.js'
-import { CLAUDE_CAPABILITIES, type CodingProcess, type CodingProvider, type ProviderCapabilities } from './coding-process.js'
+import type { CodingProcess, CodingProvider } from './coding-process.js'
 import { buildHarnessEnv } from './harness-env.js'
 
 /** Options for constructing a ClaudeProcess. Replaces positional constructor parameters. */
@@ -61,7 +61,6 @@ interface ToolState {
 
 /** Typed event map for ClaudeProcess. Each key maps to the listener argument tuple. */
 export interface ClaudeProcessEvents {
-  event: [ClaudeEvent]
   text: [string]
   tool_output: [content: string, isError: boolean]
   system_init: [model: string]
@@ -89,7 +88,6 @@ const TOOL_DEBUG = process.env.NODE_ENV !== 'production'
  */
 export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> implements CodingProcess {
   readonly provider: CodingProvider = 'claude'
-  readonly capabilities: ProviderCapabilities = CLAUDE_CAPABILITIES
 
   private proc: ChildProcess | null = null
   private rl: Interface | null = null
@@ -340,8 +338,6 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> implements 
       clearTimeout(this.startupTimer)
       this.startupTimer = null
     }
-
-    this.emit('event', event)
 
     // Log non-streaming event types for diagnostics
     if (event.type !== 'stream_event') {

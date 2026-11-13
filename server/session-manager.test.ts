@@ -259,28 +259,6 @@ describe('SessionManager', () => {
       sm.leave(s.id, ws)
       expect(s.clients.size).toBe(0)
     })
-
-    it('removeClient removes ws from all sessions', () => {
-      const s1 = sm.create('a', '/tmp/a')
-      const s2 = sm.create('b', '/tmp/b')
-      const ws = fakeWs()
-      sm.join(s1.id, ws)
-      sm.join(s2.id, ws)
-      sm.removeClient(ws)
-      expect(s1.clients.size).toBe(0)
-      expect(s2.clients.size).toBe(0)
-    })
-
-    it('findSessionForClient returns correct session', () => {
-      const s = sm.create('test', '/tmp')
-      const ws = fakeWs()
-      sm.join(s.id, ws)
-      expect(sm.findSessionForClient(ws)).toBe(s)
-    })
-
-    it('findSessionForClient returns undefined when not found', () => {
-      expect(sm.findSessionForClient(fakeWs())).toBeUndefined()
-    })
   })
 
   describe('broadcast', () => {

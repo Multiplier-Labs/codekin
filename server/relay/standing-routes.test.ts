@@ -63,7 +63,6 @@ const EXPECTED_NOT_STANDING = new Set([
   'POST /api/workflows/commit-event',
   'POST /api/workflows/runs',
   'POST /api/workflows/runs/x1/cancel',
-  'POST /api/workflows/runs/x1/abort',
 ])
 
 const split = (r: string) => r.split(' ') as [string, string]
@@ -72,7 +71,7 @@ describe('standing-authority classification (§6.2)', () => {
   it('found the routers it walks', () => {
     expect(mutating).toContain('POST /api/orchestrator/automations')
     expect(mutating).toContain('POST /api/orchestrator/maintenance/enable')
-    expect(mutating).toContain('POST /api/workflows/schedules')
+    expect(mutating).toContain('PATCH /api/workflows/schedules/x1')
     expect(mutating).toContain('POST /api/deployments/')
     expect(mutating).toContain('POST /api/integrations/github/pr-review/setup')
   })
