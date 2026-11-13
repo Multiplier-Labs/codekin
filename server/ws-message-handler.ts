@@ -18,8 +18,8 @@ import type { SessionManager } from './session-manager.js'
 import { VALID_PERMISSION_MODES, VALID_PROVIDERS } from './types.js'
 import type { CodingProvider } from './coding-process.js'
 import type { WsClientMessage, WsServerMessage } from './types.js'
-import { describePlace, isGitWorkTree } from './places.js'
-import { buildOrgManifest } from './org-manifest.js'
+import { isGitWorkTree } from './places.js'
+import { orgManifestFor } from './org-manifest.js'
 import { randomUUID } from 'crypto'
 
 /** Closure state passed to handleWsMessage from the ws.on('connection') scope. */
@@ -128,13 +128,7 @@ export function handleWsMessage(msg: WsClientMessage, ctx: WsHandlerContext): vo
       // An org session learns where it is from its first message. Its worktree
       // preference becomes one worktree per repository, made by the agent.
       const id = randomUUID()
-      const place = describePlace(resolvedDir)
-      const orgManifest = place.kind === 'org' && place.owner
-        ? buildOrgManifest({
-          owner: place.owner, dir: resolvedDir, sessionId: id,
-          worktrees: !!msg.useWorktree, branchPrefix: sessions.getWorktreeBranchPrefix(),
-        })
-        : undefined
+      const orgManifest = orgManifestFor(resolvedDir, id, !!msg.useWorktree, sessions.getWorktreeBranchPrefix())
       const session = sessions.create(msg.name, resolvedDir, { id, model, effort: validEffort(msg.effort, provider) ? msg.effort : undefined, permissionMode: msg.permissionMode, allowedTools: msg.allowedTools, provider: msg.provider, useWorktree, orgManifest })
       session.clients.add(ws)
       clientSessions.set(ws, session.id)

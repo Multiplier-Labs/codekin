@@ -12,7 +12,7 @@ import type { Session, SessionPlace } from '../types'
 import type { ApiRepo } from '../hooks/useRepos'
 import { getPref, setPref } from './prefs'
 
-/** `org`: every repository of a GitHub owner, from `REPOS_ROOT/<owner>`. */
+/** `org`: every repository of a GitHub owner, from `<repos root>/<owner>`. */
 export type DraftPlaceKind = 'scratch' | 'folder' | 'repo' | 'org'
 
 export interface DraftPlace {

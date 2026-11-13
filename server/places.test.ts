@@ -20,7 +20,7 @@ vi.mock('./config.js', () => ({
 }))
 
 import {
-  configureScratchRoot, createScratchDir, describePlace, detectPlace, ensureOrgFolder, findWorkTreeRoot, getScratchRoot,
+  configureReposPath, configureScratchRoot, createScratchDir, describePlace, detectPlace, ensureOrgFolder, findWorkTreeRoot, getReposRoot, getScratchRoot,
   isValidOwner,
   invalidatePlace, scratchName, validateScratchRoot,
 } from './places.js'
@@ -155,6 +155,30 @@ describe('org places', () => {
     expect(dir).toBe(join(REPOS, 'acme-co'))
     expect(existsSync(dir)).toBe(true)
     expect(ensureOrgFolder('acme-co')).toBe(dir)
+  })
+
+  it('creates a missing repositories root on first use', () => {
+    rmSync(REPOS, { recursive: true, force: true })
+    const dir = ensureOrgFolder('acme-co')
+    expect(dir).toBe(join(REPOS, 'acme-co'))
+    expect(existsSync(dir)).toBe(true)
+  })
+
+  it('uses the repositories folder from Settings for detection and creation', () => {
+    const custom = join(HOME, 'code')
+    mkdirSync(custom)
+    configureReposPath(custom)
+    try {
+      expect(getReposRoot()).toBe(custom)
+      const dir = ensureOrgFolder('acme-co')
+      expect(dir).toBe(join(custom, 'acme-co'))
+      expect(detectPlace(dir)).toEqual({ kind: 'org', git: false, owner: 'acme-co' })
+      mkdirSync(join(REPOS, 'other-co'))
+      expect(detectPlace(join(REPOS, 'other-co')).kind).toBe('folder')
+    } finally {
+      configureReposPath('')
+    }
+    expect(getReposRoot()).toBe(REPOS)
   })
 
   it('refuses an invalid owner, a symlinked owner folder and a file', () => {

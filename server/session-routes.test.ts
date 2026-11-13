@@ -263,6 +263,20 @@ describe('createSessionRouter', () => {
         body: JSON.stringify({ name: 'x', workingDir: join(HOME_DIR, 'ok') }),
       })
       expect(res.status).toBe(200)
+      const opts = vi.mocked(sessions.create).mock.calls[0][2]
+      expect(opts?.orgManifest).toBeUndefined()
+    })
+
+    it('gives an org session its manifest, as the WebSocket route does', async () => {
+      mkdirSync(join(REPOS_DIR, 'acme-co'), { recursive: true })
+      const res = await fetch(`${server.baseUrl}/api/sessions/create`, {
+        method: 'POST', headers: auth(),
+        body: JSON.stringify({ name: 'x', workingDir: join(REPOS_DIR, 'acme-co') }),
+      })
+      expect(res.status).toBe(200)
+      const opts = vi.mocked(sessions.create).mock.calls[0][2]
+      expect(opts?.orgManifest).toContain('GitHub owner "acme-co"')
+      expect(opts?.id).toEqual(expect.any(String))
     })
   })
 

@@ -28,8 +28,10 @@ import { fetchGrokModels } from './grok-process.js'
 import { isNativeFolderPickerAvailable, isFolderDialogOpen, pickFolderNative } from './native-folder-picker.js'
 import { execFile } from 'child_process'
 import { promisify } from 'util'
+import { randomUUID } from 'crypto'
+import { orgManifestFor } from './org-manifest.js'
 import {
-  allowedRoots as allowedRootsOf, configureScratchRoot, createScratchDir, describePlace, getScratchRoot, invalidatePlace,
+  allowedRoots as allowedRootsOf, configureReposPath, configureScratchRoot, createScratchDir, describePlace, getScratchRoot, invalidatePlace,
   ensureOrgFolder, findWorkTreeRoot, isGitWorkTree, isValidOwner, validateScratchRoot,
 } from './places.js'
 
@@ -283,7 +285,10 @@ export function createSessionRouter(
     if (permissionMode && !VALID_PERMISSION_MODES.has(permissionMode)) {
       return res.status(400).json({ error: `Invalid permissionMode: ${permissionMode}` })
     }
-    const session = sessions.create(name, resolvedDir, { provider, model, permissionMode })
+    // An org session learns where it is from its first message, as over WebSocket.
+    const id = randomUUID()
+    const orgManifest = orgManifestFor(resolvedDir, id, false, sessions.getWorktreeBranchPrefix())
+    const session = sessions.create(name, resolvedDir, { id, provider, model, permissionMode, orgManifest })
     res.json({
       sessionId: session.id,
       session: {
@@ -480,6 +485,7 @@ export function createSessionRouter(
       toPersist = result.path
     }
     sessions.archive.setSetting('repos_path', toPersist)
+    configureReposPath(toPersist)
     res.json({ path: toPersist })
   })
 
@@ -520,7 +526,7 @@ export function createSessionRouter(
     }
   })
 
-  // The folder an org session runs in, REPOS_ROOT/<owner>, created on first
+  // The folder an org session runs in, <repos root>/<owner>, created on first
   // use. Clones of that owner's repositories land inside it.
   router.post('/api/orgs/:owner/folder', (req, res) => {
     const token = extractToken(req)

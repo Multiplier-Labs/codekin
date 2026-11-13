@@ -385,7 +385,7 @@ Create a new, empty scratch folder for a session (`<scratch root>/<adjective-nou
 
 ### `POST /api/orgs/:owner/folder`
 
-Prepare the folder for an org session, `REPOS_ROOT/<owner>`, creating it on first use. Clones of that owner's repositories land inside it (`REPOS_ROOT/<owner>/<name>`), and a session started there is an **org** session: its `place` is `{ "kind": "org", "git": false, "owner": "<owner>" }`. Any folder directly under `REPOS_ROOT` that is not in a repository is detected as an org.
+Prepare the folder for an org session, `<repos root>/<owner>`, creating it (and the repositories root) on first use. The repositories root is the `repos_path` setting (`PUT /api/settings/repos-path`), else `REPOS_ROOT`. Clones of that owner's repositories land inside it (`<repos root>/<owner>/<name>`), and a session started there is an **org** session: its `place` is `{ "kind": "org", "git": false, "owner": "<owner>" }`. Any folder directly under the repositories root that is not in a repository is detected as an org. A session created there over WebSocket or `POST /api/sessions/create` gets the org instructions in its first message.
 
 **Response:** `{ "path": "/home/user/repos/acme-co" }`; `400` for an invalid owner name, an owner folder that is a symlink or a file, or one inside a repository.
 

@@ -66,7 +66,7 @@ import { ensureHookConfig, syncCommitHooks } from './commit-event-hooks.js'
 import { createAuthRouter, createPingRouter } from './auth-routes.js'
 import { serverLifecycle } from './server-lifecycle.js'
 import { createSessionRouter } from './session-routes.js'
-import { configureScratchRoot } from './places.js'
+import { configureReposPath, configureScratchRoot } from './places.js'
 import { createWebhookRouter } from './webhook-routes.js'
 import { createWebhookSetupRouter } from './webhook-setup-routes.js'
 import { createUploadRouter } from './upload-routes.js'
@@ -378,6 +378,8 @@ app.use(createPingRouter(codekinPackageVersion()))
 app.use(createAuthRouter(verifyToken, extractToken, sessions, claudeAvailable, claudeVersion, apiKeySet))
 // The Settings value for the scratch root wins over SCRATCH_ROOT (see places.ts).
 configureScratchRoot(sessions.archive.getSetting('scratch_root', ''))
+// Org folders sit under the same repositories root the repo list and cloning use.
+configureReposPath(sessions.archive.getSetting('repos_path', ''))
 app.use(createSessionRouter(verifyToken, extractToken, sessions, verifyTokenOrSessionToken))
 app.use(createWebhookRouter(verifyToken, extractToken, webhookHandler, stepflowHandler))
 app.use(createWebhookSetupRouter(verifyToken, extractToken, () => loadWebhookConfig()))

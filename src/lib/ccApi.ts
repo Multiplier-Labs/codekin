@@ -526,7 +526,7 @@ export async function createScratch(token: string): Promise<string> {
   return (await jsonBody<{ path: string }>(res)).path
 }
 
-/** The folder an org session runs in (`REPOS_ROOT/<owner>`), created on first use. */
+/** The folder an org session runs in (`<repos root>/<owner>`), created on first use. */
 export async function orgFolder(token: string, owner: string): Promise<string> {
   const res = await transport.authFetch(`/api/orgs/${encodeURIComponent(owner)}/folder`, {
     method: 'POST',
