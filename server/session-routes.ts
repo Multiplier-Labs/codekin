@@ -26,6 +26,14 @@ import { fetchOpenCodeModels, fetchOpenCodeCommands } from './opencode-process.j
 import { fetchCodexModels } from './codex-process.js'
 import { fetchGrokModels } from './grok-process.js'
 import { isNativeFolderPickerAvailable, isFolderDialogOpen, pickFolderNative } from './native-folder-picker.js'
+import { execFile } from 'child_process'
+import { promisify } from 'util'
+import {
+  allowedRoots as allowedRootsOf, configureScratchRoot, createScratchDir, describePlace, getScratchRoot, invalidatePlace,
+  isGitWorkTree, validateScratchRoot,
+} from './places.js'
+
+const execFileAsync = promisify(execFile)
 
 // ---------------------------------------------------------------------------
 // Request body interfaces for route handlers
@@ -475,6 +483,72 @@ export function createSessionRouter(
     res.json({ path: toPersist })
   })
 
+  // --- Scratch folders ---
+  // A scratch folder is an empty directory Codekin creates for a session that
+  // has no other place yet. The root defaults to ~/codekin/scratch.
+
+  router.get('/api/settings/scratch-root', (req, res) => {
+    const token = extractToken(req)
+    if (!verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' })
+    res.json({ path: sessions.archive.getSetting('scratch_root', ''), effective: getScratchRoot() })
+  })
+
+  router.put('/api/settings/scratch-root', (req: Request<Record<string, string>, unknown, ReposPathBody>, res) => {
+    const token = extractToken(req)
+    if (!verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' })
+    const { path: rawPath } = req.body
+    if (typeof rawPath !== 'string') return res.status(400).json({ error: 'path must be a string' })
+    let toPersist = ''
+    if (rawPath.trim()) {
+      const checked = validateScratchRoot(rawPath)
+      if (!checked.ok) return res.status(400).json({ error: checked.error })
+      toPersist = checked.path
+    }
+    sessions.archive.setSetting('scratch_root', toPersist)
+    configureScratchRoot(toPersist)
+    invalidatePlace()
+    res.json({ path: toPersist, effective: getScratchRoot() })
+  })
+
+  router.post('/api/scratch', (req, res) => {
+    const token = extractToken(req)
+    if (!verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' })
+    try {
+      res.json({ path: createScratchDir() })
+    } catch (err) {
+      res.status(500).json({ error: `Could not create a scratch folder: ${err instanceof Error ? err.message : String(err)}` })
+    }
+  })
+
+  // Turn a session's folder into a git repository. The user's click is the
+  // consent (as with cloning); the agent keeps running in the same directory.
+  router.post('/api/sessions/:id/git-init', async (req, res) => {
+    const token = extractToken(req)
+    if (!verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' })
+    const session = sessions.get(req.params.id)
+    if (!session) return res.status(404).json({ error: 'Session not found' })
+    const root = session.groupDir ?? session.workingDir
+    if (isGitWorkTree(root)) return res.status(409).json({ error: 'This folder is already a git repository' })
+    let realRoot: string
+    try {
+      realRoot = fsRealpathSync(root)
+    } catch {
+      return res.status(400).json({ error: 'The session folder no longer exists' })
+    }
+    if (!allowedRootsOf().some(r => realRoot === r || realRoot.startsWith(r + '/'))) {
+      return res.status(403).json({ error: 'Session folder is outside allowed directories' })
+    }
+    try {
+      await execFileAsync('git', ['init'], { cwd: realRoot, timeout: 15_000 })
+    } catch (err) {
+      const stderr = (err as { stderr?: string }).stderr?.trim()
+      return res.status(500).json({ error: `git init failed${stderr ? `: ${stderr}` : ''}` })
+    }
+    invalidatePlace(root)
+    sessions.notifySessionsUpdated()
+    res.json({ place: describePlace(root) })
+  })
+
   // --- UI preferences ---
   // One JSON blob of client preferences (theme, new-session defaults, layout,
   // drafts). The server does not interpret the values; it stores whatever the
@@ -580,7 +654,10 @@ export function createSessionRouter(
         })
         .map(d => d.name)
         .sort((a, b) => a.localeCompare(b))
-      res.json({ path: base, dirs: entries })
+      // Which entries (and the folder itself) are git work trees, so the
+      // place picker can tag them. Additive: older clients ignore these.
+      const gitDirs = entries.filter(name => isGitWorkTree(pathJoin(base, name)))
+      res.json({ path: base, dirs: entries, gitDirs, git: isGitWorkTree(base), roots: allowedRoots, home })
     } catch {
       res.status(400).json({ error: 'Cannot read directory' })
     }
