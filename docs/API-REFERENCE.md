@@ -276,7 +276,7 @@ Set the session retention period.
 
 Run `git init` in a session's folder. The session keeps running; its `place` becomes `git: true`, and a `sessions_updated` broadcast tells clients.
 
-**Response:** `{ "place": { "kind": "folder", "git": true } }`; `404` unknown session, `409` already a repository, `403` folder outside the allowed roots, `500` when `git init` fails.
+**Response:** `{ "place": { "kind": "folder", "git": true } }`; `404` unknown session, `409` already a repository, inside one, or an org folder, `403` folder outside the allowed roots, `500` when `git init` fails.
 
 ### `GET /api/settings/repos-path`
 
@@ -375,13 +375,19 @@ Browse directories on the server filesystem (for folder picker UI).
 }
 ```
 
-`dirs` lists non-hidden subfolders. `gitDirs` is the subset that are git work trees, and `git` says whether `path` itself is one. `roots` are the allowed roots, so a picker can explain a refusal before asking.
+`dirs` lists non-hidden subfolders. `gitDirs` is the subset that are repository roots. `git` says whether `path` is inside a git work tree, its own or an enclosing repository's; then `repoRoot` is that work tree's root (equal to `path` at a repository root). `roots` are the allowed roots, so a picker can explain a refusal before asking.
 
 ### `POST /api/scratch`
 
 Create a new, empty scratch folder for a session (`<scratch root>/<adjective-noun>`). The scratch root is the Settings value, else the `SCRATCH_ROOT` env var, else `~/codekin/scratch`, and must sit inside the home directory or `REPOS_ROOT`. Scratch folders are never deleted automatically.
 
 **Response:** `{ "path": "/home/user/codekin/scratch/brisk-otter" }`
+
+### `POST /api/orgs/:owner/folder`
+
+Prepare the folder for an org session, `REPOS_ROOT/<owner>`, creating it on first use. Clones of that owner's repositories land inside it (`REPOS_ROOT/<owner>/<name>`), and a session started there is an **org** session: its `place` is `{ "kind": "org", "git": false, "owner": "<owner>" }`. Any folder directly under `REPOS_ROOT` that is not in a repository is detected as an org.
+
+**Response:** `{ "path": "/home/user/repos/acme-co" }`; `400` for an invalid owner name, an owner folder that is a symlink or a file, or one inside a repository.
 
 ### `GET /api/settings/scratch-root` / `PUT /api/settings/scratch-root`
 

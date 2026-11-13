@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Sessions in a folder without git run in place and say so (`no git`). **Changes** offers **Initialize git here**, which makes the folder a repository without restarting the session (#862).
 - The sidebar groups scratch sessions under **Scratch** and tags each group `scratch`, `folder`, `git folder` or `repo`; a group's **New session** opens the composer for that folder (#861).
 - Scratch folders go to `~/codekin/scratch` by default and are never deleted automatically. Change the location in **Settings → Sessions → Scratch folder location** or with `SCRATCH_ROOT` (#857, #860).
+- **Org sessions: work across a whole GitHub organization in one session.** Choose an owner (org or user) in the place chip. The session runs in `REPOS_ROOT/<owner>`, and its agent is told which repositories are cloned there and clones others as it needs them (each clone asks for approval). With the worktree switch on, each repository it changes gets its own worktree. **Changes** lists every repository's changes together, grouped by repository. Works with every agent (#868, #870, #871).
 - Reasoning effort for Grok sessions. The effort picker now lists the levels each Grok model advertises (Grok 4.7: low, medium, high, extra high). A change takes effect on the next turn without restarting the session.
 
 ## [0.11.4] - 2026-11-09
