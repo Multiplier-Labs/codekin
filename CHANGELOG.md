@@ -22,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - **Ctrl+C in the composer** now stops the agent's turn while it is working, as the shortcut always promised; your next message continues the conversation. With text selected it copies, as on any text field (it used to block copying on Linux and Windows), and when the agent is idle it does nothing. Before, it sent an invisible control character to the agent as a message.
+- **Revoking an approval now revokes it for Claude too.** "Always Allow" also writes the rule to the project's `.claude/settings.local.json`, which Claude Code honours on its own, and removing the rule in Codekin left that copy behind, so Claude sessions kept running the tool without asking. Removing a rule now removes the matching entries there as well (for a command pattern, every command it covers), except ones another remaining rule still covers.
 - Org sessions follow the repositories folder set in Settings, so they open where the repo list and cloning put that owner's clones, instead of always under `REPOS_ROOT`.
 - The first org session on a machine with no repositories folder yet creates it instead of failing.
 - A `.github` repository in an org folder shows up in **Changes** and the change count.

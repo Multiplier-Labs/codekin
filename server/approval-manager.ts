@@ -10,7 +10,7 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { DATA_DIR } from './config.js'
-import { addNativePermission, toNativePermission, toAllowedToolsPatterns } from './native-permissions.js'
+import { addNativePermission, nativeBashCommand, removeNativePermission, toNativePermission, toAllowedToolsPatterns } from './native-permissions.js'
 
 const REPO_APPROVALS_FILE = join(DATA_DIR, 'repo-approvals.json')
 const PERSIST_DEBOUNCE_MS = 2000
@@ -454,7 +454,36 @@ export class ApprovalManager {
     if (command) removed = entry.commands.delete(command) || removed
     if (pattern) removed = entry.patterns.delete(pattern) || removed
     if (removed && !skipPersist) this.persistRepoApprovals()
+    if (removed) this.removeMatchingNativePermissions(workingDir, entry, { tool, command, pattern })
     return removed
+  }
+
+  /**
+   * Revoke the Claude-native copies of a removed rule. "Always Allow" also
+   * writes to the project's `.claude/settings.local.json` (see saveAlwaysAllow),
+   * where Claude Code honours it on its own; without this, a revoked rule kept
+   * working for Claude sessions. Bash rules were written as exact commands, so
+   * a removed pattern takes every command it matches. Entries a remaining rule
+   * still covers are kept.
+   */
+  private removeMatchingNativePermissions(
+    workingDir: string,
+    remaining: { tools: Set<string>; commands: Set<string>; patterns: Set<string> },
+    removed: { tool: string; command: string; pattern: string },
+  ): void {
+    const stillCovered = (cmd: string) =>
+      remaining.commands.has(cmd) || [...remaining.patterns].some(p => this.matchesPattern(p, cmd))
+    const matches = (perm: string): boolean => {
+      if (removed.tool && perm === removed.tool) return !remaining.tools.has(perm)
+      const cmd = nativeBashCommand(perm)
+      if (cmd === null) return false
+      const hit = (removed.command !== '' && cmd === removed.command)
+        || (removed.pattern !== '' && this.matchesPattern(removed.pattern, cmd))
+      return hit && !stillCovered(cmd)
+    }
+    removeNativePermission(workingDir, matches).catch((err: unknown) => {
+      console.error(`[auto-approve] failed to remove native permission:`, err)
+    })
   }
 
   /** Write repo-level approvals to disk (atomic rename). */

@@ -83,8 +83,15 @@ export async function addNativePermission(repoDir: string, permission: string): 
   })
 }
 
-/** Remove a native permission from `.claude/settings.local.json`. */
-export async function removeNativePermission(repoDir: string, permission: string): Promise<void> {
+/**
+ * Remove native permissions from `.claude/settings.local.json`: one exact
+ * entry, or every entry a predicate accepts.
+ */
+export async function removeNativePermission(
+  repoDir: string,
+  permission: string | ((permission: string) => boolean),
+): Promise<void> {
+  const matches = typeof permission === 'string' ? (p: string) => p === permission : permission
   await withLock(repoDir, async () => {
     const filePath = settingsPath(repoDir)
     if (!existsSync(filePath)) return
@@ -97,18 +104,22 @@ export async function removeNativePermission(repoDir: string, permission: string
     }
 
     const allow = settings.permissions?.allow
-    if (!allow) return
+    if (!allow || !settings.permissions) return
 
-    const idx = allow.indexOf(permission)
-    if (idx === -1) return
-
-    allow.splice(idx, 1)
+    const removed = allow.filter(p => typeof p === 'string' && matches(p))
+    if (removed.length === 0) return
+    settings.permissions.allow = allow.filter(p => !removed.includes(p))
 
     const tmp = filePath + '.tmp'
     writeFileSync(tmp, JSON.stringify(settings, null, 2) + '\n', { mode: 0o600 })
     renameSync(tmp, filePath)
-    console.log(`[native-permissions] removed "${permission}" from ${filePath}`)
+    console.log(`[native-permissions] removed ${removed.map(p => `"${p}"`).join(', ')} from ${filePath}`)
   })
+}
+
+/** The command inside a native `Bash(<command>)` entry, or null for other tools. */
+export function nativeBashCommand(permission: string): string | null {
+  return permission.startsWith('Bash(') && permission.endsWith(')') ? permission.slice(5, -1) : null
 }
 
 /**

@@ -175,6 +175,19 @@ describe('removeNativePermission', () => {
     expect(parsed.permissions.allow).toEqual(['Bash(npm test)'])
   })
 
+  it('removes every entry a predicate accepts', async () => {
+    mockExistsSync.mockReturnValue(true)
+    mockReadFileSync.mockReturnValue(JSON.stringify({
+      permissions: { allow: ['Bash(git push)', 'WebFetch', 'Bash(git push origin main)'], deny: ['Bash(rm *)'] },
+    }))
+
+    await removeNativePermission('/repo', p => p.startsWith('Bash(git push'))
+
+    const parsed = JSON.parse(mockWriteFileSync.mock.calls[0][1] as string)
+    expect(parsed.permissions.allow).toEqual(['WebFetch'])
+    expect(parsed.permissions.deny).toEqual(['Bash(rm *)'])
+  })
+
   it('is a no-op when file does not exist', async () => {
     mockExistsSync.mockReturnValue(false)
 
