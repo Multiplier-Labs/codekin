@@ -332,7 +332,7 @@ describe('handleWsMessage', () => {
     expect(ctx.sessions.leave).toHaveBeenCalledWith('sess-1', ctx.ws)
     expect(ctx.clientSessions.has(ctx.ws)).toBe(false)
     handleWsMessage({ type: 'stop' }, ctx)
-    expect(ctx.sessions.stopSession).not.toHaveBeenCalled()
+    expect(ctx.sessions.stopClaude).not.toHaveBeenCalled()
     handleWsMessage({ type: 'input', data: 'new session input' }, ctx)
     expect(ctx.sessions.sendInput).not.toHaveBeenCalled()
   })
@@ -391,7 +391,7 @@ describe('handleWsMessage', () => {
       handleWsMessage({ type: 'stop' } as WsClientMessage, ctx)
       handleWsMessage({ type: 'prompt_response', value: 'allow', requestId: 'r1' } as WsClientMessage, ctx)
       expect(ctx.sessions.sendInput).not.toHaveBeenCalled()
-      expect(ctx.sessions.stopSession).not.toHaveBeenCalled()
+      expect(ctx.sessions.stopClaude).not.toHaveBeenCalled()
       expect(ctx.sessions.sendPromptResponse).not.toHaveBeenCalled()
     })
   })
@@ -440,17 +440,18 @@ describe('handleWsMessage', () => {
   /* ---- stop ---- */
 
   describe('stop', () => {
-    it('calls sessions.stopSession', () => {
+    it('stops the process without taking the session out of service', () => {
       handleWsMessage({ type: 'stop' } as WsClientMessage, ctx)
 
-      expect(ctx.sessions.stopSession).toHaveBeenCalledWith('sess-1')
+      expect(ctx.sessions.stopClaude).toHaveBeenCalledWith('sess-1')
+      expect(ctx.sessions.stopSession).not.toHaveBeenCalled()
     })
 
     it('does nothing when not in a session', () => {
       ctx.clientSessions.clear()
       handleWsMessage({ type: 'stop' } as WsClientMessage, ctx)
 
-      expect(ctx.sessions.stopSession).not.toHaveBeenCalled()
+      expect(ctx.sessions.stopClaude).not.toHaveBeenCalled()
     })
   })
 

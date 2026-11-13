@@ -232,10 +232,14 @@ export function handleWsMessage(msg: WsClientMessage, ctx: WsHandlerContext): vo
     }
 
     // Kill the Claude process for the current session (user-initiated stop).
+    // Interrupt: stop the agent's process (the next input restarts it and
+    // resumes the conversation). Deliberately not stopSession(): that tells
+    // the stop listeners the session was taken out of service, which would
+    // cancel a Joe child's task.
     case 'stop': {
       const sessionId = clientSessions.get(ws)
       if (sessionId) {
-        sessions.stopSession(sessionId)
+        sessions.stopClaude(sessionId)
       }
       break
     }
