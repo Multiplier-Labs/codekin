@@ -127,7 +127,6 @@ export type IntentRefusal =
   | 'intent_out_of_order'
   | 'intent_rate_limited'
   | 'intent_step_up_required'
-  | 'intent_local_only'
 
 /**
  * Stream frames that carry nothing and need no intent (§2.2). `auth` is

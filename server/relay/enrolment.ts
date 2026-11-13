@@ -40,6 +40,7 @@ import {
 } from './intent-actions.js'
 import type { IntentVerifier } from './intent-verify.js'
 import { describeIntentRefusal } from './connector-stream.js'
+import { RELAY_ERROR } from './relay-protocol.js'
 import type { RelayPrincipal } from './relay-protocol.js'
 import type { SecretStore } from './secret-store.js'
 
@@ -101,7 +102,7 @@ export const MAX_ENROL_PASSKEYS = 3
 
 /** A refusal the connector sends back as a relay `error` frame. */
 export class EnrolmentError extends Error {
-  constructor(readonly code: 'enrol_refused' | 'enrol_unavailable', message: string) {
+  constructor(readonly code: typeof RELAY_ERROR.enrolRefused | typeof RELAY_ERROR.enrolUnavailable, message: string) {
     super(message)
     this.name = 'EnrolmentError'
   }
@@ -118,7 +119,7 @@ export interface MachineEnrolmentOptions {
   log?: Pick<Console, 'log' | 'warn'>
 }
 
-const refuse = (message: string) => new EnrolmentError('enrol_refused', message)
+const refuse = (message: string) => new EnrolmentError(RELAY_ERROR.enrolRefused, message)
 
 /** Handles the enrol_* frames for one paired machine. */
 export class MachineEnrolment {

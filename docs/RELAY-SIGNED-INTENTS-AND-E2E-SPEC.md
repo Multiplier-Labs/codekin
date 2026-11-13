@@ -235,7 +235,7 @@ Browser B (owner, signed in)                Relay              Connector M
 - **The code is authentic, not secret.** Every input to the code crosses the relay, so a relay can compute it. That doesn't matter as long as it can't enter it: only local surfaces (Settings on the machine, `codekin relay devices approve`, the login prompt) accept a code. The local list of waiting requests still never shows it, because the owner has to read it off the browser. **For slices 4 and 7:** a relay that can drive a session on the machine could have it run `codekin relay devices approve` or edit `relay-devices.json`. Signed intents must close that before enforcement means anything.
 - **The browser's first pin** is covered by step 5 (above).
 - **Old connectors.** A connector that can enrol advertises the `enrolment` feature. The hub answers older ones with `connector_update_required` straight away.
-- **Registry.** When a machine accepts a reveal, the relay records the key in `device_keys` (`GET`/`DELETE /api/device-keys`).
+- **Registry.** When a machine accepts a reveal, the relay records the key in `device_keys` (`POST /api/device-keys`).
 - **Not built yet:** the desktop notification and tray item for a waiting request (§5.5), and the Account → Devices page (§6.9).
 
 ### 5.2b One pasted command instead of two codes (trust token)

@@ -333,23 +333,6 @@ describe('connector hub', () => {
       expect(hub.updateRequired(machineId)).toBeNull()
       current.stop()
     })
-
-    it('refuses a connector that lacks a capability its workspace requires', async () => {
-      hub.close()
-      hub = new ConnectorHub(db, { floors: { base: '0.9.0', capabilities: { intents: '0.12.0' } } })
-      db.prepare(`UPDATE workspaces SET required_capabilities = '["intents"]' WHERE id = ?`).run(BOOTSTRAP_WORKSPACE_ID)
-
-      const statuses: Array<{ status: string; detail?: string }> = []
-      const connector = await connectAt('0.12.0', statuses)
-      expect(hub.updateRequired(machineId)).toEqual({
-        minimum: '0.12.0',
-        missing: ['intents'],
-        reason: 'the workspace requires intents (needed for signed control)',
-      })
-      expect(await hub.sendRequest(machineId, { method: 'GET', path: '/api/sessions/list' }))
-        .toMatchObject({ error: { code: RELAY_ERROR.connectorUpdateRequired } })
-      connector.stop()
-    })
   })
 
   describe('require confirmed devices (signed-intents spec §6.8)', () => {

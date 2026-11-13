@@ -32,7 +32,7 @@ import {
 } from './rate-limit.js'
 import { CONNECTOR_FLOORS, connectorUpdateRequired, hasCapability } from './connector-version.js'
 import type { ConnectorFloors, UpdateRequired } from './connector-version.js'
-import { confirmedDevicesEnforced, getConfirmedDevicesRule, getRequiredCapabilities, requiresPasskeyStepUp } from './workspaces.js'
+import { confirmedDevicesEnforced, getConfirmedDevicesRule, requiresPasskeyStepUp } from './workspaces.js'
 import type { ConfirmedDevicesRule } from './workspaces.js'
 import { isMeterPaused, meterFrame } from './usage-meter.js'
 import type { UsageMeter } from './usage-meter.js'
@@ -676,8 +676,7 @@ export class ConnectorHub {
     const workspace = this.db.prepare('SELECT workspace_id FROM machines WHERE id = ?').get(machineId) as
       | { workspace_id: string }
       | undefined
-    const required = workspace ? getRequiredCapabilities(this.db, workspace.workspace_id) : []
-    const updateRequired = connectorUpdateRequired(connectorVersion, features, required, this.floors)
+    const updateRequired = connectorUpdateRequired(connectorVersion, this.floors)
     this.machines.set(machineId, {
       machineId, socket, lastActivity: now, lastSeenWrite: now,
       pending: new Set(), channels: new Set(),

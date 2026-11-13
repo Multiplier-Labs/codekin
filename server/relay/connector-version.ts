@@ -16,12 +16,8 @@
 /** Connectors older than this predate the sharing enforcement mirror. */
 export const MIN_SUPPORTED_CONNECTOR_VERSION = '0.9.0'
 
-/**
- * Features a connector can advertise in `ConnectorHello.capabilities.features`
- * and a workspace can require.
- */
-export const CONNECTOR_CAPABILITIES = ['intents', 'e2e', 'credentialClass'] as const
-export type ConnectorCapability = (typeof CONNECTOR_CAPABILITIES)[number]
+/** Security features a connector can advertise in `ConnectorHello.capabilities.features`. */
+export type ConnectorCapability = 'intents'
 
 export interface ConnectorFloors {
   /** Anything older is refused traffic everywhere. */
@@ -39,28 +35,16 @@ export const CONNECTOR_FLOORS: ConnectorFloors = {
     // Signed intents (L1) are enforced from the release that carries slice 7
     // (signed-intents spec §6.8). Raise this if that release is numbered higher.
     intents: '0.11.0',
-    // e2e: set when the end-to-end handshake (L2) ships.
-    // credentialClass: set when connectors declare their credential class.
   },
 }
 
 /** Why a machine needs a newer connector before the relay serves it. */
 export interface UpdateRequired {
-  /** Lowest connector version that would clear every floor that applies. */
+  /** Lowest connector version that would clear the floor. */
   minimum: string
-  /** Required capabilities the connector lacks (empty when only `base` applies). */
+  /** Always empty: only the base floor gates traffic. Kept on the wire for existing clients. */
   missing: ConnectorCapability[]
   reason: string
-}
-
-const CAPABILITY_REASONS: Record<ConnectorCapability, string> = {
-  intents: 'needed for signed control',
-  e2e: 'needed for end-to-end encryption',
-  credentialClass: 'needed to declare which credentials the machine uses',
-}
-
-export function isConnectorCapability(value: unknown): value is ConnectorCapability {
-  return typeof value === 'string' && (CONNECTOR_CAPABILITIES as readonly string[]).includes(value)
 }
 
 /**
@@ -81,29 +65,18 @@ export function hasCapability(
 
 /**
  * Whether the relay must refuse a connector's traffic, and why. Null when
- * the connector clears the base floor and has every capability `required`
- * names.
+ * the connector clears the base floor.
  */
 export function connectorUpdateRequired(
   version: string | null | undefined,
-  advertised: readonly string[],
-  required: readonly ConnectorCapability[],
   floors: ConnectorFloors = CONNECTOR_FLOORS,
 ): UpdateRequired | null {
-  const missing = required.filter(cap => !hasCapability(version, advertised, cap, floors))
-  const belowBase = isConnectorOutdated(version, floors.base)
-  if (!belowBase && missing.length === 0) return null
-
-  let minimum = floors.base
-  for (const cap of missing) {
-    const floor = floors.capabilities[cap]
-    if (floor !== undefined && isConnectorOutdated(minimum, floor)) minimum = floor
+  if (!isConnectorOutdated(version, floors.base)) return null
+  return {
+    minimum: floors.base,
+    missing: [],
+    reason: `connector ${version ?? 'of unknown version'} is older than the minimum ${floors.base}`,
   }
-  const reasons = missing.map(cap => CAPABILITY_REASONS[cap])
-  const reason = belowBase
-    ? `connector ${version ?? 'of unknown version'} is older than the minimum ${floors.base}`
-    : `the workspace requires ${missing.join(', ')} (${reasons.join('; ')})`
-  return { minimum, missing, reason }
 }
 
 interface Semver {
