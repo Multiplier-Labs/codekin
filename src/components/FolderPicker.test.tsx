@@ -91,4 +91,24 @@ describe('FolderPicker', () => {
     expect(container.textContent).toContain('Select this folder')
     expect(container.textContent).toContain('alpha')
   })
+
+  it('saves the folder chosen in the in-page browser', async () => {
+    api.getNativeFolderPickerAvailable.mockResolvedValue(false)
+    api.browseDirs.mockImplementation(async (_t: string, p?: string) => (
+      p === '/Users/me/repos/alpha' ? { path: p, dirs: [] } : { path: '/Users/me/repos', dirs: ['alpha', 'beta'] }
+    ))
+    const onSave = vi.fn(async () => {})
+    await render(onSave)
+
+    await act(async () => { browseButton().click() })
+    const alpha = [...container.querySelectorAll('button')].find(b => b.textContent === 'alpha')!
+    await act(async () => { alpha.click() })
+    const select = [...container.querySelectorAll('button')].find(b => b.textContent === 'Select this folder')!
+    await act(async () => { select.click() })
+
+    expect(onSave).toHaveBeenCalledWith('/Users/me/repos/alpha')
+    expect(input().value).toBe('/Users/me/repos/alpha')
+    expect(container.textContent).not.toContain('Select this folder')
+  })
 })
+

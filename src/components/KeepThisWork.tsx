@@ -43,7 +43,10 @@ export function KeepThisWork({ place, folderName, owners, onGitInit, onPublish, 
   const [publishing, setPublishing] = useState(false)
   const [moving, setMoving] = useState(false)
   const [parent, setParent] = useState('')
-  const [owner, setOwner] = useState(owners[0] ?? '')
+  const [chosenOwner, setOwner] = useState('')
+  // Owners load asynchronously: fall back to the first one until the user
+  // picks, and drop a pick that is no longer offered.
+  const owner = owners.includes(chosenOwner) ? chosenOwner : (owners[0] ?? '')
   const [name, setName] = useState(folderName)
   const [visibility, setVisibility] = useState<'private' | 'public'>('private')
   const [published, setPublished] = useState<string | null>(null)

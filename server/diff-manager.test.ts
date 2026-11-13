@@ -53,8 +53,10 @@ import { cleanGitEnv, execGit, execGitChunked, getFileStatuses, DiffManager } fr
 /** Make mockExecFile invoke its callback with the given stdout. */
 function stubExecFile(stdout: string, stderr = '') {
   // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
-  mockExecFile.mockImplementation((_cmd: string, _args: string[], _opts: unknown, cb: Function) => {
-    cb(null, { stdout, stderr })
+  mockExecFile.mockImplementation((_cmd: string, args: string[], _opts: unknown, cb: Function) => {
+    // A repository root: no subfolder prefix.
+    if (args.includes('--show-prefix')) cb(null, { stdout: '\n', stderr: '' })
+    else cb(null, { stdout, stderr })
   })
 }
 
@@ -231,7 +233,7 @@ describe('getFileStatuses', () => {
   it('passes paths to git status when provided', async () => {
     stubExecFile(' M foo.ts\0')
     await getFileStatuses('/repo', ['foo.ts'])
-    const args = mockExecFile.mock.calls[0][1] as string[]
+    const args = mockExecFile.mock.calls.map(c => c[1] as string[]).find(a => a[0] === 'status')!
     expect(args).toContain('--')
     expect(args).toContain('foo.ts')
   })
@@ -320,7 +322,7 @@ describe('DiffManager.getDiff', () => {
   it('reports a failing diff as diff_error instead of an empty result', async () => {
     stubExecFileByArgs({
       'rev-parse --abbrev-ref': 'main\n',
-      'diff --find-renames --no-color --unified=3 --cached': new Error('fatal: index file corrupt'),
+      'diff --relative --find-renames --no-color --unified=3 --cached': new Error('fatal: index file corrupt'),
     })
 
     const result = await dm.getDiff('/repo', 'staged') as any

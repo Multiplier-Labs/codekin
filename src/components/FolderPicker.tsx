@@ -121,7 +121,11 @@ export function FolderPicker({ value, token, placeholder = '~/repos (default)', 
   function pickCurrentDir() {
     if (!browsePath) return
     setPath(browsePath)
+    setError(null)
     setBrowserOpen(false)
+    // Choosing a folder is a decision, like the native dialog: save it now
+    // rather than waiting for a blur that may never come.
+    void save(browsePath)
   }
 
   const inputSizeClass = inputClass ?? 'text-body'

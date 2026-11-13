@@ -1,7 +1,7 @@
 /** Changes for a session's attached folders, against real git repositories. */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { execFileSync } from 'child_process'
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { SessionManager } from './session-manager.js'
@@ -65,5 +65,41 @@ describe('Changes for attached folders', () => {
     expect(await sm.discardChanges(s.id, 'all', ['x'], undefined, join(base, 'elsewhere'))).toMatchObject({ type: 'diff_error' })
     // A non-git attached folder adds nothing to the count.
     expect((await sm.getChangeSummary(s.id))?.uncommittedFiles).toBe(0)
+  })
+
+  it('in an attached repository subfolder, shows and discards only that subtree, by its own paths', async () => {
+    const own = repo(join(base, 'own'))
+    const other = repo(join(base, 'other'))
+    const sub = join(other, 'sub')
+    mkdirSync(join(sub, 'sub'), { recursive: true })
+    writeFileSync(join(sub, 'x.txt'), 'outer before\n')
+    writeFileSync(join(sub, 'sub', 'x.txt'), 'nested before\n')
+    git(['add', '.'], other)
+    git(['commit', '-q', '-m', 'sub'], other)
+    writeFileSync(join(sub, 'x.txt'), 'outer after\n')
+    writeFileSync(join(sub, 'sub', 'x.txt'), 'nested after\n')
+    writeFileSync(join(sub, 'new.txt'), 'untracked\n')
+    writeFileSync(join(other, 'README.md'), '# r\noutside\n')
+    const s = sm.create('t', own)
+    s.addDirs = [sub]
+
+    const diff = await sm.getDiff(s.id, 'all', sub) as DiffResult
+    expect(diff.type).toBe('diff_result')
+    expect(diff.files.map(f => f.path).sort()).toEqual(['new.txt', 'sub/x.txt', 'x.txt'])
+    // Only the subtree counts toward the session's uncommitted files.
+    expect((await sm.getChangeSummary(s.id))?.uncommittedFiles).toBe(3)
+
+    // Discarding the displayed "x.txt" restores sub/x.txt, never sub/sub/x.txt.
+    const after = await sm.discardChanges(s.id, 'all', ['x.txt'], undefined, sub) as DiffResult
+    expect(after.type).toBe('diff_result')
+    expect(readFileSync(join(sub, 'x.txt'), 'utf-8')).toBe('outer before\n')
+    expect(readFileSync(join(sub, 'sub', 'x.txt'), 'utf-8')).toBe('nested after\n')
+    expect(after.files.map(f => f.path).sort()).toEqual(['new.txt', 'sub/x.txt'])
+
+    // Discard all: the subtree is clean, the rest of the repository untouched.
+    await sm.discardChanges(s.id, 'all', undefined, undefined, sub)
+    expect(readFileSync(join(sub, 'sub', 'x.txt'), 'utf-8')).toBe('nested before\n')
+    expect(existsSync(join(sub, 'new.txt'))).toBe(false)
+    expect(readFileSync(join(other, 'README.md'), 'utf-8')).toBe('# r\noutside\n')
   })
 })
