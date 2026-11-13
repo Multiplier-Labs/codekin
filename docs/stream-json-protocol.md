@@ -368,7 +368,7 @@ Response to a `control_request`. Uses a nested format with a `response` wrapper.
 
 ## Diff Viewer Types
 
-The diff viewer uses these types in `diff_result` messages (defined in `src/types.ts`):
+The diff viewer uses these types in `diff_result` messages (defined in `server/protocol.ts`):
 
 ```typescript
 type DiffScope = 'staged' | 'unstaged' | 'all'
