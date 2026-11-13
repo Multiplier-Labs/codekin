@@ -49,7 +49,7 @@ import type { InputBarHandle } from './components/InputBar'
 import { RepoSelector } from './components/RepoSelector'
 import { NewSessionComposer } from './components/NewSessionComposer'
 import { EnvironmentChecklist } from './components/EnvironmentChecklist'
-import { defaultPlace, getRecentPlaces, rememberPlace, type DraftPlace } from './lib/places'
+import { defaultPlace, getRecentPlaces, placeFromSession, rememberPlace, type DraftPlace } from './lib/places'
 import { draftModeFor, startDraftSession } from './lib/startDraftSession'
 import { DiffPanel } from './components/DiffPanel'
 import { OrchestratorContent } from './components/OrchestratorContent'
@@ -1044,7 +1044,10 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
             repoName={activeRepoName}
             sessionName={activeSessionName}
             onMenuOpen={() => setMobileMenuOpen(true)}
-            onNewSession={handleNewSessionForRepo}
+            onNewSession={composerEnabled
+              // Same place as the session in view (a new scratch folder for a scratch session); else the default.
+              ? () => { openNewSession(activeSession ? placeFromSession(activeSession) : undefined) }
+              : handleNewSessionForRepo}
             onSettingsOpen={() => { openSettings() }}
             activeRepo={activeRepo}
           />

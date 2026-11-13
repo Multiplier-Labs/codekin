@@ -115,3 +115,38 @@ describe('NewSessionComposer', () => {
     expect(onSend).toHaveBeenCalledWith('Write a parser', [])
   })
 })
+
+describe('NewSessionComposer on touch', () => {
+  it('folds place, model and mode into one Options button with a bottom sheet', () => {
+    render(props({ isMobile: true, availableModels: [{ id: 'claude-opus-5', label: 'Opus 5' }], currentModel: 'claude-opus-5' }))
+    const options = container!.querySelector('[aria-haspopup="dialog"]') as HTMLButtonElement
+    expect(options.textContent).toBe('Scratch folder · Opus 5 · Auto accept edits')
+    // The desktop chips are not in the toolbar.
+    expect(container!.querySelector('[title="Where this session runs"]')).toBeNull()
+    act(() => { options.click() })
+    const sheet = document.querySelector('[role="dialog"][aria-label="Session options"]')!
+    expect(sheet.textContent).toContain('Place')
+    expect(sheet.textContent).toContain('Agent')
+    expect(sheet.textContent).toContain('Permission mode')
+    expect(sheet.textContent).not.toContain('Work in a worktree')
+  })
+
+  it('offers the worktree switch for git places and opens the picker as a screen', async () => {
+    render(props({ isMobile: true, place: placeFromPath('/home/sam/site', true, '/home/sam') }))
+    act(() => { (container!.querySelector('[aria-haspopup="dialog"]') as HTMLButtonElement).click() })
+    const sheet = document.querySelector('[role="dialog"][aria-label="Session options"]')!
+    expect(sheet.textContent).toContain('Work in a worktree')
+    const placeRow = [...sheet.querySelectorAll('button')].find(b => b.textContent?.includes('~/site'))!
+    act(() => { placeRow.click() })
+    await act(async () => { await new Promise(r => setTimeout(r, 0)) })
+    expect(document.querySelector('[role="dialog"][aria-label="Session options"]')).toBeNull()
+    expect(document.querySelector('[role="dialog"][aria-label="Where should this session run?"]')).not.toBeNull()
+  })
+
+  it('shows recent places above the composer', () => {
+    render(props({ isMobile: true, recent: [placeFromPath('/home/sam/notes', false, '/home/sam')] }))
+    const recent = [...container!.querySelectorAll('button')].find(b => b.textContent === '~/notes')!
+    const textarea = container!.querySelector('textarea')!
+    expect(recent.compareDocumentPosition(textarea) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+})
