@@ -100,7 +100,7 @@ describe('place constructors', () => {
   it('a session place maps scratch to a new scratch folder', () => {
     expect(placeFromSession({ workingDir: '/s/x', place: { kind: 'scratch', git: false } }, HOME)).toBe(NEW_SCRATCH)
     expect(placeFromSession({ workingDir: '/home/sam/wt/1', groupDir: '/home/sam/repos/a', place: { kind: 'repo', git: true } }, HOME))
-      .toEqual({ kind: 'repo', path: '/home/sam/repos/a', git: true, label: '~/repos/a' })
+      .toEqual({ kind: 'repo', path: '/home/sam/repos/a', git: true, label: 'a' })
   })
 
   it('org places key by owner', () => {

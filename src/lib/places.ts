@@ -84,7 +84,7 @@ export function placeFromSession(session: Pick<Session, 'workingDir' | 'groupDir
   const place: SessionPlace = session.place ?? { kind: 'folder', git: true }
   if (place.kind === 'scratch') return NEW_SCRATCH
   const path = session.groupDir ?? session.workingDir
-  return { kind: place.kind, path, git: place.git, label: tildify(path, home) }
+  return { kind: place.kind, path, git: place.git, label: place.kind === 'repo' ? baseName(path) : tildify(path, home) }
 }
 
 /** Identity used to dedupe recent places and to mark the current one. */

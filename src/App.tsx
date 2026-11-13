@@ -1011,6 +1011,7 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
         onNewSessionInRepo={handleNewSessionInRepo}
         onOpenSession={handleOpenSession}
         onNewSession={composerEnabled ? () => { docsBrowser.close(); openNewSession() } : undefined}
+        onNewSessionInPlace={composerEnabled ? (place) => { docsBrowser.close(); openNewSession(place) } : undefined}
         onSelectRepo={handleSelectRepo}
         onDeleteRepo={handleDeleteRepo}
         onSettingsOpen={() => { openSettings() }}

@@ -16,7 +16,8 @@ import {
   IconPlus, IconShieldCheck, IconArchive, IconFileText,
   IconRobot, IconSparkles, IconPencil, IconGitBranch, IconRobotFace, IconTrash, IconShare, IconHeartbeat, IconHandStop,
 } from '@tabler/icons-react'
-import type { Session, CodingProvider } from '../types'
+import type { Session, CodingProvider, PlaceKind } from '../types'
+import { placeTag } from '../lib/places'
 import { PROVIDERS } from '../types'
 import { RowMenu, type RowMenuItem } from './RowMenu'
 import { providerAvailability } from '../lib/agentHealth'
@@ -128,8 +129,13 @@ function sessionStatus(
 // --------------------------------------------------------------------------
 
 export interface RepoNode {
+  /** The group's folder, or LeftSidebar's SCRATCH_GROUP for the Scratch group. */
   workingDir: string
   displayName: string
+  /** Kind of place, for the tag; absent from older servers. */
+  kind?: PlaceKind
+  /** The place is a git work tree. */
+  git?: boolean
   sessions: Session[]
   hasWaiting: boolean
   hasActive: boolean
@@ -147,6 +153,8 @@ export interface RepoSectionProps {
   onRenameSession: (id: string, name: string) => void
   /** Start a session in this repo — the hover-revealed row under its sessions. */
   onNewSession?: (provider?: CodingProvider) => void
+  /** Open the new-session composer preset to this group's place. Replaces the provider menu when set. */
+  onNewSessionHere?: () => void
   onSelectRepo: (workingDir: string) => void
   onDeleteRepo: (workingDir: string) => void
   /** Open the repo drawer on a given tab. */
@@ -179,6 +187,7 @@ export function RepoSection({
   onDeleteSession,
   onRenameSession,
   onNewSession,
+  onNewSessionHere,
   onSelectRepo,
   onDeleteRepo,
   onOpenDrawer,
@@ -219,7 +228,11 @@ export function RepoSection({
     setEditingSessionId(null)
   }
 
-  const repoMenuItems: RowMenuItem[] = [
+  // The Scratch group spans many folders: only closing its sessions applies to it.
+  const isScratch = node.kind === 'scratch'
+  const repoMenuItems: RowMenuItem[] = isScratch ? [
+    { label: 'Close sessions', icon: <IconTrash size={14} stroke={2} />, onSelect: () => onDeleteRepo(node.workingDir), danger: true },
+  ] : [
     ...(onOpenMaintenance
       ? [{ label: 'Maintenance', icon: <IconHeartbeat size={14} stroke={2} />, onSelect: () => onOpenMaintenance(node.workingDir) }]
       : []),
@@ -237,10 +250,15 @@ export function RepoSection({
           onClick={() => { setExpanded(!expanded); if (!isActive) onSelectRepo(node.workingDir) }}
           aria-expanded={expanded}
           className="flex min-w-0 flex-1 items-center gap-1.5 rounded-control text-left text-micro font-medium uppercase tracking-wider text-ink-faint transition-colors hover:text-ink"
-          title={node.workingDir}
+          title={isScratch ? 'Sessions in scratch folders' : node.workingDir}
         >
           <StatusDot status={repoStatus} title={repoStatusTitle} />
           <span className="truncate">{node.displayName}</span>
+          {node.kind && (
+            <span className="flex-shrink-0 rounded-control border border-edge px-1 font-normal normal-case tracking-normal text-ink-muted">
+              {placeTag(node.kind, node.git ?? false)}
+            </span>
+          )}
           {!expanded && node.sessions.length > 0 && (
             <span className="flex-shrink-0 tabular-nums normal-case tracking-normal">({node.sessions.length})</span>
           )}
@@ -389,7 +407,19 @@ export function RepoSection({
           {/* New session in this repo. Revealed by hovering the section, on the
               same terms as a row's overflow menu: visible on touch, while
               focused, and while its own provider menu is open. */}
-          {onNewSession && (
+          {onNewSessionHere ? (
+            <button
+              type="button"
+              onClick={onNewSessionHere}
+              aria-label={`New session in ${node.displayName}`}
+              className="section-reveal-target density-row flex w-full items-center gap-1.5 rounded-control pl-6 pr-2.5 text-left text-body text-ink-muted transition-colors hover:bg-surface-raised hover:text-ink"
+            >
+              <span className="inline-flex w-3 flex-shrink-0 items-center justify-center">
+                <IconPlus size={12} stroke={2} />
+              </span>
+              <span className="truncate">New session</span>
+            </button>
+          ) : onNewSession && (
             <RowMenu
               label="New session in this repo"
               className="section-reveal-target"

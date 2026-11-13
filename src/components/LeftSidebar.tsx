@@ -17,15 +17,15 @@ import type { Session, Module, Repo, MobileProps, ConnectionState } from '../typ
 import type { RepoGroup } from '../hooks/useRepos'
 import AppIcon from './AppIcon'
 import { NewSessionButton } from './NewSessionButton'
-import { RepoSection, type RepoNode } from './RepoSection'
+import { RepoSection } from './RepoSection'
 import type { RepoDrawerTab } from './RepoDrawer'
 import { ModuleBrowser } from './ModuleBrowser'
 import { ConnectionPopup } from './ConnectionPopup'
 import { ThemeMenu } from './ThemeMenu'
 import type { ThemeId } from '../themes/registry'
-import { groupKey } from '../hooks/useSessionOrchestration'
 import { getPref, setPref } from '../lib/prefs'
-import { byLatestActivity } from '../lib/sessionOrder'
+import { NEW_SCRATCH, placeFromSession, type DraftPlace } from '../lib/places'
+import { buildRepoNodes, SCRATCH_GROUP } from '../lib/sidebarGroups'
 
 const DEFAULT_WIDTH = 224
 const MIN_WIDTH = 160
@@ -34,38 +34,6 @@ const MAX_WIDTH = 480
 // --------------------------------------------------------------------------
 // Helpers
 // --------------------------------------------------------------------------
-
-function repoDisplayName(workingDir: string): string {
-  const parts = workingDir.replace(/\/+$/, '').split('/')
-  return parts[parts.length - 1] || workingDir
-}
-
-function buildRepoNodes(
-  sessions: Session[],
-  waitingSessions: Record<string, boolean>,
-  tentativeQueues: Record<string, { text: string; files: File[] }[]>,
-): RepoNode[] {
-  const map = new Map<string, Session[]>()
-  for (const s of sessions) {
-    if (s.source === 'orchestrator') continue
-    const key = groupKey(s)
-    const list = map.get(key) ?? []
-    list.push(s)
-    map.set(key, list)
-  }
-  return Array.from(map.entries()).sort((a, b) => {
-    const nameA = a[0].replace(/\/+$/, '').split('/').pop() ?? a[0]
-    const nameB = b[0].replace(/\/+$/, '').split('/').pop() ?? b[0]
-    return nameA.localeCompare(nameB)
-  }).map(([key, repoSessions]) => ({
-    workingDir: key,
-    displayName: repoDisplayName(key),
-    sessions: [...repoSessions].sort(byLatestActivity),
-    hasWaiting: repoSessions.some(s => waitingSessions[s.id]),
-    hasActive: repoSessions.some(s => s.isProcessing),
-    hasTentative: repoSessions.some(s => (tentativeQueues[s.id]?.length ?? 0) > 0),
-  }))
-}
 
 // --------------------------------------------------------------------------
 // Props
@@ -141,6 +109,8 @@ interface Props {
   onOpenSession: (repo: Repo, provider?: import('../types').CodingProvider) => void
   /** Open the new-session composer. When set, New is a plain button instead of the repo popover. */
   onNewSession?: () => void
+  /** Open the composer preset to a group's place (its "New session" row). Set together with onNewSession. */
+  onNewSessionInPlace?: (place: DraftPlace) => void
   /** Switch the active repo (expands its tree node). */
   onSelectRepo: (workingDir: string) => void
   /** Close every session in a repo, dropping it from the sidebar. */
@@ -204,6 +174,7 @@ export function LeftSidebar({
   onNewSessionInRepo,
   onOpenSession,
   onNewSession,
+  onNewSessionInPlace,
   onSelectRepo,
   onDeleteRepo,
   onSettingsOpen,
@@ -458,11 +429,13 @@ export function LeftSidebar({
         <div className="mx-3 mt-3 mb-1 border-t border-edge" />
 
         {/* Repo nodes — each repo is its own section label */}
-        {repoNodes.map(node => (
+        {repoNodes.map(node => {
+          const scratch = node.workingDir === SCRATCH_GROUP
+          return (
           <RepoSection
             key={node.workingDir}
             node={node}
-            isActive={node.workingDir === activeWorkingDir}
+            isActive={scratch ? node.sessions.some(s => s.id === activeSessionId) : node.workingDir === activeWorkingDir}
             activeSessionId={activeSessionId}
             waitingSessions={waitingSessions}
             tentativeQueues={tentativeQueues}
@@ -470,8 +443,16 @@ export function LeftSidebar({
             onDeleteSession={onDeleteSession}
             onRenameSession={onRenameSession}
             onNewSession={(provider) => { onNewSessionInRepo(node.workingDir, provider) }}
-            onSelectRepo={(wd) => { onSelectRepo(wd); if (isMobile) onMobileClose?.() }}
-            onDeleteRepo={onDeleteRepo}
+            onNewSessionHere={onNewSessionInPlace ? () => {
+              onNewSessionInPlace(scratch ? NEW_SCRATCH : placeFromSession(node.sessions[0]))
+              if (isMobile) onMobileClose?.()
+            } : undefined}
+            onSelectRepo={(wd) => {
+              // The Scratch group spans many folders; selecting it only expands it.
+              if (!scratch) onSelectRepo(wd)
+              if (isMobile) onMobileClose?.()
+            }}
+            onDeleteRepo={scratch ? () => { for (const s of node.sessions) onDeleteSession(s.id) } : onDeleteRepo}
             onOpenDrawer={(wd, tab) => { onOpenDrawer(wd, tab); if (isMobile) onMobileClose?.() }}
             onMoveToWorktree={onMoveToWorktree}
             onShareSession={onShareSession}
@@ -481,7 +462,8 @@ export function LeftSidebar({
             onTakeBack={onTakeBack}
             agentName={agentName}
           />
-        ))}
+          )
+        })}
 
         {/* Empty state */}
         {repoNodes.length === 0 && (

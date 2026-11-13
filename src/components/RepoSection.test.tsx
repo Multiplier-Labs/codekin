@@ -214,3 +214,38 @@ describe('RepoSection', () => {
     expect(metaLines.join('')).not.toContain('0s')
   })
 })
+
+describe('RepoSection places', () => {
+  it('tags the group with its kind of place', () => {
+    const c = render(<RepoSection {...props({ node: { ...node, kind: 'folder', git: true } })} />)
+    expect(c.textContent).toContain('git folder')
+    act(() => activeRoot!.unmount()); activeRoot = null; c.remove()
+    const plain = render(<RepoSection {...props({ node: { ...node, kind: 'folder', git: false } })} />)
+    expect(plain.querySelector('[aria-expanded]')!.textContent).toMatch(/folder$/)
+  })
+
+  it('shows no tag for an older server that sends no place', () => {
+    const c = render(<RepoSection {...props()} />)
+    expect(c.querySelector('[aria-expanded]')!.textContent).toBe('codekin')
+  })
+
+  it('opens the composer for this place instead of a provider menu', () => {
+    const onNewSessionHere = vi.fn()
+    const onNewSession = vi.fn()
+    const c = render(<RepoSection {...props({ onNewSessionHere, onNewSession })} />)
+    const btn = c.querySelector('[aria-label="New session in codekin"]') as HTMLButtonElement
+    expect(btn).not.toBeNull()
+    expect(btn.hasAttribute('aria-haspopup')).toBe(false)
+    click(btn)
+    expect(onNewSessionHere).toHaveBeenCalledTimes(1)
+    expect(onNewSession).not.toHaveBeenCalled()
+  })
+
+  it('offers only closing sessions on the Scratch group', () => {
+    const c = render(<RepoSection {...props({ node: { ...node, workingDir: '__scratch__', displayName: 'Scratch', kind: 'scratch' } })} />)
+    expect(c.textContent).toContain('scratch')
+    click(c.querySelector('[title="Actions for Scratch"]') as HTMLElement)
+    const items = [...document.querySelectorAll('[role="menuitem"]')].map(el => el.textContent?.trim())
+    expect(items).toEqual(['Close sessions'])
+  })
+})
