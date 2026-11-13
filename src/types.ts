@@ -203,6 +203,14 @@ export interface Session {
   model?: string
   /** Where the session runs. Derived by the server from the session's root; absent from older servers. */
   place?: SessionPlace
+  /** Folders attached beside the session's own (phase 3), each with its place. */
+  attached?: AttachedPlace[]
+}
+
+/** A folder attached to a running session, beside the folder it runs in. */
+export interface AttachedPlace {
+  path: string
+  place: SessionPlace
 }
 
 /** Kind of place a session runs in. Keep in sync with server/places.ts. */

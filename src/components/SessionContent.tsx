@@ -7,7 +7,7 @@
  */
 
 import { isNotRepoPlace } from '../lib/places'
-import type { RefObject } from 'react'
+import type { ReactNode, RefObject } from 'react'
 import { ChatView } from './ChatView'
 import { TodoPanel } from './TodoPanel'
 import { PromptButtons } from './PromptButtons'
@@ -46,6 +46,8 @@ export interface SessionContentProps {
   place?: import('../types').SessionPlace
   /** The session's folder, for the place chip. */
   placePath?: string
+  /** Where the session works and + Attach (phase 3); absent for sessions that can't attach. */
+  contextBar?: ReactNode
   onExecuteTentative: () => void
   onDiscardTentative: () => void
   inputBarRef: RefObject<InputBarHandle | null>
@@ -118,6 +120,7 @@ export function SessionContent({
   activeRepoName,
   place,
   placePath,
+  contextBar,
   onExecuteTentative,
   onDiscardTentative,
   inputBarRef,
@@ -171,6 +174,7 @@ export function SessionContent({
     : activeRepoName
   return (
     <div className="flex flex-1 flex-col overflow-hidden min-h-0">
+      {contextBar}
       <div className="relative flex-1 min-h-0 flex flex-col">
         <ChatView
           sessionId={activeSessionId}

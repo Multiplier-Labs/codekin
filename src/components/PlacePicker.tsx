@@ -33,6 +33,8 @@ interface Props {
   current: DraftPlace
   /** Offer whole-organization places (phase 2). */
   showOrgPlaces?: boolean
+  /** Offer a new scratch folder. Off when attaching to a running session. */
+  allowScratch?: boolean
   onPick: (place: DraftPlace) => void
   onClose: () => void
   /** `popover` under a chip (desktop); `screen` fills its container (touch). */
@@ -79,7 +81,7 @@ function crumbsFor(path: string, home: string | null): { label: string; path: st
 }
 
 export function PlacePicker({
-  token, groups, recent, current, showOrgPlaces = false, onPick, onClose, variant = 'popover', className = '', style,
+  token, groups, recent, current, showOrgPlaces = false, allowScratch = true, onPick, onClose, variant = 'popover', className = '', style,
 }: Props) {
   const browser = useDirBrowser(token)
   const [state, setState] = useState(INITIAL_PICKER_STATE)
@@ -121,7 +123,7 @@ export function PlacePicker({
     ? { path: browser.path, dirs: browser.dirs, gitDirs: browser.gitDirs, git: browser.git, repoRoot: browser.repoRoot }
     : null
   const model = pickerModel(state, {
-    groups, recent, showOrgPlaces, listing, roots: browser.roots, home: browser.home,
+    groups, recent, showOrgPlaces, allowScratch, listing, roots: browser.roots, home: browser.home,
     // Only a refusal of the folder the query points into counts.
     refusedPath: pathQuery && refusedPath && refusedPath === splitPathQuery(pathQuery, browser.home).dir
       && browser.error?.includes('outside') ? refusedPath : null,

@@ -90,6 +90,8 @@ export interface PickerData {
   groups: RepoGroup[]
   recent: DraftPlace[]
   showOrgPlaces: boolean
+  /** Offer a new scratch folder (not when attaching to a running session). Default true. */
+  allowScratch?: boolean
   /** Current folder listing for browse view and path search. */
   listing: { path: string; dirs: string[]; gitDirs: ReadonlySet<string>; git: boolean; repoRoot?: string | null } | null
   /** Allowed roots, once known. */
@@ -188,9 +190,9 @@ function rootModel(data: PickerData): PickerModel {
   const sections: PickerSection[] = []
   if (recent.length) sections.push({ title: 'Recent', rows: recent })
   sections.push({
-    title: 'Start fresh',
+    title: data.allowScratch === false ? 'This machine' : 'Start fresh',
     rows: [
-      { ...placeRow(NEW_SCRATCH, 'fresh', data.home), tag: undefined },
+      ...(data.allowScratch === false ? [] : [{ ...placeRow(NEW_SCRATCH, 'fresh', data.home), tag: undefined }]),
       { id: 'fresh:choose', icon: 'folder-plus', label: 'Choose a folder on this machine…', action: { type: 'choose-folder' } },
     ],
   })
