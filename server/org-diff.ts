@@ -1,7 +1,7 @@
 /**
  * Changes for an org session: one diff across the repositories in its folder.
  *
- * An org session runs in `REPOS_ROOT/<owner>`, which is not a repository; its
+ * An org session runs in `<repos root>/<owner>`, which is not a repository; its
  * edits land in the clones there, or — with worktrees on — in this session's
  * `<name>-wt-<id8>` worktrees (see org-manifest.ts). The combined diff reuses
  * the single-repo DiffManager per repository and prefixes each file path with
@@ -18,7 +18,7 @@
 import { readdirSync } from 'fs'
 import { join } from 'path'
 import { clonedRepos } from './org-manifest.js'
-import { getFileStatuses, type DiffManager } from './diff-manager.js'
+import { getFileStatuses, invalidDiscardPath, isDiffScope, type DiffManager } from './diff-manager.js'
 import { isGitWorkTree } from './places.js'
 import type { DiffFile, DiffFileStatus, DiffScope, DiffSummary, DiffView, WsServerMessage } from './types.js'
 
@@ -128,8 +128,8 @@ export async function getOrgChangeSummary(dm: DiffManager, orgDir: string, sessi
 
 /**
  * Discard changes in an org session. Each path's first segment names the
- * repository; paths outside a known repository are refused before anything
- * is discarded. With no paths, every repository's changes are discarded.
+ * repository; every path is checked (known repository, no traversal) before
+ * anything is discarded, so a bad path never leaves a partial discard. With no paths, every repository's changes are discarded.
  */
 export async function discardOrgChanges(
   dm: DiffManager, orgDir: string, sessionId: string, scope: DiffScope,
@@ -139,6 +139,9 @@ export async function discardOrgChanges(
   const byName = new Map(repos.map(r => [r.name, r]))
   const groups = new Map<string, { paths: string[]; statuses: Record<string, DiffFileStatus> }>()
   const targets = paths ?? (statuses ? Object.keys(statuses) : null)
+  if (!isDiffScope(scope)) {
+    return { type: 'diff_error', message: 'Changes can only be discarded from the Uncommitted, Staged or Unstaged views.', scope }
+  }
   if (targets) {
     for (const p of targets) {
       const slash = p.indexOf('/')
@@ -146,6 +149,8 @@ export async function discardOrgChanges(
       if (!byName.has(name) || slash === p.length - 1) return { type: 'diff_error', message: `Not in a repository of this session: ${p}`, scope }
       const group = groups.get(name) ?? { paths: [], statuses: {} }
       const rel = p.slice(slash + 1)
+      const invalid = invalidDiscardPath(byName.get(name)!.dir, rel)
+      if (invalid) return { type: 'diff_error', message: `${name}: ${invalid}`, scope }
       group.paths.push(rel)
       if (statuses?.[p]) group.statuses[rel] = statuses[p]
       groups.set(name, group)

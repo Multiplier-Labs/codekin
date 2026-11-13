@@ -12,9 +12,10 @@
  * - `folder`: anything else; `git` says whether it is a work tree without a
  *   remote (shown as "git folder") or no repository at all.
  *
- * - `org`: a folder directly under REPOS_ROOT that is not itself in a
- *   repository — the owner folder clones land in (`REPOS_ROOT/<owner>/<name>`).
- *   An org session works across that owner's repositories.
+ * - `org`: a folder directly under the repositories root (the Settings value,
+ *   else REPOS_ROOT) that is not itself in a repository — the owner folder
+ *   clones land in (`<repos root>/<owner>/<name>`). An org session works
+ *   across that owner's repositories.
  *
  * A folder inside a repository (not its root) belongs to that repository:
  * `git` is true and `inRepo` names the repository root. Such sessions run in
@@ -249,6 +250,28 @@ export function findWorkTreeRoot(dir: string): string | null {
 }
 
 // ---------------------------------------------------------------------------
+// Repositories root
+// ---------------------------------------------------------------------------
+
+/** The Settings value `repos_path`; empty means "use REPOS_ROOT". */
+let reposPathSetting = ''
+
+/** Set the repositories-folder Settings value (at boot and whenever it is saved). */
+export function configureReposPath(setting: string): void {
+  reposPathSetting = setting.trim()
+  invalidatePlace()
+}
+
+/**
+ * The repositories root in effect: the Settings value, else REPOS_ROOT. The
+ * same root the repo list and cloning use, so an org folder is where that
+ * owner's clones land.
+ */
+export function getReposRoot(): string {
+  return reposPathSetting || REPOS_ROOT
+}
+
+// ---------------------------------------------------------------------------
 // Org folders
 // ---------------------------------------------------------------------------
 
@@ -259,9 +282,9 @@ export function isValidOwner(owner: string): boolean {
   return OWNER_RE.test(owner) && !owner.includes('--') && !owner.endsWith('-')
 }
 
-/** The owner when `root` is a folder directly under REPOS_ROOT (not in a repository); else null. */
+/** The owner when `root` is a folder directly under the repositories root (not in a repository); else null. */
 function ownerOfOrgFolder(root: string): string | null {
-  const reposRoot = realpathOfExistingPrefix(resolve(REPOS_ROOT))
+  const reposRoot = realpathOfExistingPrefix(resolve(getReposRoot()))
   const real = realpathOfExistingPrefix(resolve(root))
   if (dirname(real) !== reposRoot) return null
   const owner = real.slice(reposRoot.length + 1)
@@ -269,13 +292,16 @@ function ownerOfOrgFolder(root: string): string | null {
 }
 
 /**
- * The folder for an org session, `REPOS_ROOT/<owner>`, created on first use.
- * Refuses an invalid owner and an owner folder that is a symlink (it must not
- * lead out of the repos root).
+ * The folder for an org session, `<repos root>/<owner>`, created on first use
+ * (with the repositories root itself, on a fresh install). Refuses an invalid
+ * owner and an owner folder that is a symlink (it must not lead out of the
+ * repos root).
  */
 export function ensureOrgFolder(owner: string): string {
   if (!isValidOwner(owner)) throw new Error('Invalid owner name')
-  const reposRoot = realpathSync(resolve(REPOS_ROOT))
+  const configured = resolve(getReposRoot())
+  mkdirSync(configured, { recursive: true })
+  const reposRoot = realpathSync(configured)
   const dir = join(reposRoot, owner)
   let st
   try { st = lstatSync(dir) } catch { st = null }

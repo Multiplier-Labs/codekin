@@ -107,6 +107,22 @@ describe('org session changes', () => {
     expect(readFileSync(join(web, 'README.md'), 'utf-8')).toBe('# web\nchanged\n')
   })
 
+  it('refuses a request with any bad path before discarding anything', async () => {
+    const api = repo('api')
+    repo('web')
+    writeFileSync(join(api, 'README.md'), '# api\nchanged\n')
+    const refused = await discardOrgChanges(dm, org, SESSION, 'all', ['api/README.md', 'web/../api/README.md'])
+    expect(refused.type).toBe('diff_error')
+    expect(readFileSync(join(api, 'README.md'), 'utf-8')).toBe('# api\nchanged\n')
+  })
+
+  it('includes a .github clone in the diff and the change count', async () => {
+    const gh = repo('.github')
+    writeFileSync(join(gh, 'README.md'), '# .github\nchanged\n')
+    expect((await diff('all')).files.map(f => f.path)).toEqual(['.github/README.md'])
+    expect((await getOrgChangeSummary(dm, org, SESSION)).uncommittedFiles).toBe(1)
+  })
+
   it('discards everything when no paths are given', async () => {
     const api = repo('api')
     writeFileSync(join(api, 'new.txt'), 'x\n')

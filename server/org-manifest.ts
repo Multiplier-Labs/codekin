@@ -1,7 +1,7 @@
 /**
  * The org manifest: what an org session's agent is told about where it is.
  *
- * An org session runs in `REPOS_ROOT/<owner>`, the folder that owner's clones
+ * An org session runs in `<repos root>/<owner>`, the folder that owner's clones
  * land in. The manifest is prefixed to the session's first message, the same
  * way a handoff is, so it reaches every harness without per-harness system
  * prompt plumbing. It is built from disk only (no GitHub call), so creating
@@ -15,7 +15,7 @@
 
 import { readdirSync } from 'fs'
 import { join } from 'path'
-import { isGitWorkTree } from './places.js'
+import { describePlace, isGitWorkTree } from './places.js'
 
 /** Most cloned repos named in the manifest; beyond that the agent lists the folder. */
 const MAX_LISTED = 200
@@ -25,7 +25,7 @@ const WORKTREE_DIR_RE = /-wt-[0-9a-f]{8}$/
 
 export interface OrgManifestInput {
   owner: string
-  /** The org folder, `REPOS_ROOT/<owner>`. */
+  /** The org folder, `<repos root>/<owner>`. */
   dir: string
   sessionId: string
   /** Isolate edits in one worktree per repository. */
@@ -34,12 +34,16 @@ export interface OrgManifestInput {
   branchPrefix: string
 }
 
-/** Repositories cloned in the org folder (not worktrees), sorted. Exported for tests. */
+/**
+ * Repositories cloned in the org folder (not worktrees), sorted. A dot-named
+ * folder counts when it is a repository: `.github` is a real repository name.
+ * Exported for tests.
+ */
 export function clonedRepos(dir: string): string[] {
   let names: string[]
   try {
     names = readdirSync(dir, { withFileTypes: true })
-      .filter(d => d.isDirectory() && !d.name.startsWith('.'))
+      .filter(d => d.isDirectory())
       .map(d => d.name)
   } catch {
     return []
@@ -47,6 +51,17 @@ export function clonedRepos(dir: string): string[] {
   return names
     .filter(name => !WORKTREE_DIR_RE.test(name) && isGitWorkTree(join(dir, name)))
     .sort((a, b) => a.localeCompare(b))
+}
+
+/**
+ * The manifest for a session about to start in `dir`, or undefined when `dir`
+ * is not an org folder. Every route that creates a manual session calls this,
+ * so an org session gets its instructions however it was created.
+ */
+export function orgManifestFor(dir: string, sessionId: string, worktrees: boolean, branchPrefix: string): string | undefined {
+  const place = describePlace(dir)
+  if (place.kind !== 'org' || !place.owner) return undefined
+  return buildOrgManifest({ owner: place.owner, dir, sessionId, worktrees, branchPrefix })
 }
 
 export function buildOrgManifest(input: OrgManifestInput): string {

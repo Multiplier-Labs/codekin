@@ -105,6 +105,18 @@ const DIFF_SCOPES: ReadonlySet<string> = new Set(['staged', 'unstaged', 'all'])
 const DIFF_VIEWS: ReadonlySet<string> = new Set([...DIFF_SCOPES, 'branch', 'committed'])
 
 /** Runtime check for a discardable scope (client input is untrusted). */
+/**
+ * Why a client-supplied discard path is refused (traversal, absolute, or
+ * outside `cwd`), or null when it is safe to hand to git and fs calls.
+ */
+export function invalidDiscardPath(cwd: string, p: string): string | null {
+  if (p.includes('..') || path.isAbsolute(p)) return `Invalid path: ${p}`
+  const base = path.resolve(cwd)
+  const resolved = path.resolve(cwd, p)
+  if (resolved !== base && !resolved.startsWith(path.join(base, path.sep))) return `Path escapes working directory: ${p}`
+  return null
+}
+
 export function isDiffScope(value: unknown): value is DiffScope {
   return typeof value === 'string' && DIFF_SCOPES.has(value)
 }
@@ -411,16 +423,10 @@ export class DiffManager {
       // Validate every client-supplied path (both `paths` and `statuses`
       // keys, since either can become the effective target list below)
       // against path traversal, before any of them reach git or fs calls.
-      const root = path.join(path.resolve(cwd), path.sep)
       const clientPaths = [...(paths ?? []), ...Object.keys(statuses ?? {})]
       for (const p of clientPaths) {
-        if (p.includes('..') || path.isAbsolute(p)) {
-          return { type: 'diff_error', message: `Invalid path: ${p}` }
-        }
-        const resolved = path.resolve(cwd, p)
-        if (resolved !== path.resolve(cwd) && !resolved.startsWith(root)) {
-          return { type: 'diff_error', message: `Path escapes working directory: ${p}` }
-        }
+        const invalid = invalidDiscardPath(cwd, p)
+        if (invalid) return { type: 'diff_error', message: invalid }
       }
 
       // Determine file statuses if not provided

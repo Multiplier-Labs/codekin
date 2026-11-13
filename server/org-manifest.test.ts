@@ -18,11 +18,16 @@ afterEach(() => { rmSync(join(DIR, '..'), { recursive: true, force: true }) })
 function repo(name: string) { mkdirSync(join(DIR, name, '.git'), { recursive: true }) }
 
 describe('clonedRepos', () => {
-  it('lists repositories, not plain folders, hidden folders or session worktrees', () => {
+  it('lists repositories, not plain folders or session worktrees', () => {
     repo('web'); repo('api'); repo('api-wt-abcdef12')
     mkdirSync(join(DIR, 'notes'))
-    mkdirSync(join(DIR, '.cache', '.git'), { recursive: true })
+    mkdirSync(join(DIR, '.cache'))
     expect(clonedRepos(DIR)).toEqual(['api', 'web'])
+  })
+
+  it('lists a dot-named repository such as .github', () => {
+    repo('.github'); repo('api')
+    expect(clonedRepos(DIR)).toEqual(['.github', 'api'])
   })
 
   it('is empty for a missing folder', () => {

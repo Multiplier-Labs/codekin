@@ -2109,7 +2109,7 @@ export class SessionManager {
     return this.diffManager.discardChanges(session.workingDir, scope, paths, statuses)
   }
 
-  /** An org session (REPOS_ROOT/<owner>): its Changes span the repositories in its folder. */
+  /** An org session (<repos root>/<owner>): its Changes span the repositories in its folder. */
   private isOrgSession(session: Session): boolean {
     return describePlace(session.groupDir ?? session.workingDir).kind === 'org'
   }
