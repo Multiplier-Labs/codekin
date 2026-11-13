@@ -8,6 +8,7 @@ function deps(over: Partial<DraftDeps> = {}): DraftDeps & { createSession: Retur
   return {
     createScratch: vi.fn(async () => `${HOME}/codekin/scratch/brisk-otter`),
     cloneRepo: vi.fn(async () => `${HOME}/repos/acme-co/web-app`),
+    orgFolder: vi.fn(async (owner: string) => `${HOME}/repos/${owner}`),
     uploadAndBuildMessage: vi.fn(async (files: File[], text: string) => `${text}\n[${files.length} file]`),
     createSession: vi.fn(),
     onProgress: vi.fn(),
@@ -97,9 +98,26 @@ describe('startDraftSession', () => {
     expect(d.onProgress).toHaveBeenLastCalledWith(null)
   })
 
-  it('refuses an empty message and org places', async () => {
+  it('refuses an empty message', async () => {
     await expect(startDraftSession(draft(NEW_SCRATCH, { text: '  ' }), deps())).rejects.toThrow('first message')
-    await expect(startDraftSession(draft(placeFromOwner('acme-co')), deps())).rejects.toThrow('not available')
+  })
+
+  it('starts an org session in its owner folder, passing the worktree choice on', async () => {
+    const d = deps()
+    const started = await startDraftSession(draft(placeFromOwner('acme-co')), d)
+    expect(d.orgFolder).toHaveBeenCalledWith('acme-co')
+    expect(d.onProgress).toHaveBeenCalledWith('Preparing the folder for acme-co…')
+    expect(d.createSession.mock.calls[0].slice(0, 3)).toEqual(['hub:acme-co', `${HOME}/repos/acme-co`, true])
+    expect(started.place).toMatchObject({ kind: 'org', owner: 'acme-co', path: `${HOME}/repos/acme-co` })
+    const off = deps()
+    await startDraftSession(draft(placeFromOwner('acme-co'), { useWorktree: false }), off)
+    expect(off.createSession.mock.calls[0][2]).toBe(false)
+  })
+
+  it('creates nothing when the org folder cannot be prepared', async () => {
+    const d = deps({ orgFolder: vi.fn(async () => { throw new Error('Invalid owner name') }) })
+    await expect(startDraftSession(draft(placeFromOwner('bad')), d)).rejects.toThrow('Invalid owner name')
+    expect(d.createSession).not.toHaveBeenCalled()
   })
 })
 

@@ -462,6 +462,16 @@ describe('createSessionRouter', () => {
       expect(existsSync(join(dir, '.git'))).toBe(false)
     })
 
+    it('returns 409 for an org folder', async () => {
+      const dir = join(REPOS_DIR, 'acme-co')
+      mkdirSync(dir, { recursive: true })
+      withSession(dir)
+      server = await startApp(createSessionRouter(verifyToken, extractToken, sessions))
+      const res = await fetch(`${server.baseUrl}/api/sessions/s1/git-init`, { method: 'POST', headers: auth() })
+      expect(res.status).toBe(409)
+      expect(existsSync(join(dir, '.git'))).toBe(false)
+    })
+
     it('refuses a session folder outside the allowed roots', async () => {
       withSession(OUTSIDE_DIR)
       server = await startApp(createSessionRouter(verifyToken, extractToken, sessions))

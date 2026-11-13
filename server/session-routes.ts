@@ -548,6 +548,9 @@ export function createSessionRouter(
     // would create a nested repository instead of using it.
     invalidatePlace(root)
     const current = describePlace(root)
+    if (current.kind === 'org') {
+      return res.status(409).json({ error: 'An organization folder holds repositories; it is not made into one' })
+    }
     if (current.git) {
       return res.status(409).json({
         error: current.inRepo ? `This folder is already inside a git repository (${current.inRepo})` : 'This folder is already a git repository',

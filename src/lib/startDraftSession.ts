@@ -25,13 +25,18 @@ export interface DraftSession {
   model?: string | null
   effort?: string | null
   permissionMode: PermissionMode
-  /** The user's worktree choice; only applied when the place is a git work tree. */
+  /**
+   * The user's worktree choice; applied to a repository root, and for an org
+   * it means one worktree per repository (made by the agent, per the org manifest).
+   */
   useWorktree: boolean
 }
 
 export interface DraftDeps {
   createScratch: () => Promise<string>
   cloneRepo: (owner: string, name: string) => Promise<string | null>
+  /** The org's owner folder on the machine, created on first use. */
+  orgFolder: (owner: string) => Promise<string>
   uploadAndBuildMessage: (files: File[], text: string) => Promise<string>
   createSession: (
     name: string, workingDir: string, useWorktree: boolean, permissionMode: PermissionMode,
@@ -61,7 +66,7 @@ export function draftModeFor(provider: CodingProvider, mode: PermissionMode): Pe
 }
 
 /** Resolve a draft's place to a folder on the machine. */
-export async function resolvePlacePath(place: DraftPlace, deps: Pick<DraftDeps, 'createScratch' | 'cloneRepo' | 'onProgress'>): Promise<DraftPlace & { path: string }> {
+export async function resolvePlacePath(place: DraftPlace, deps: Pick<DraftDeps, 'createScratch' | 'cloneRepo' | 'orgFolder' | 'onProgress'>): Promise<DraftPlace & { path: string }> {
   if (place.kind === 'scratch' && !place.path) {
     deps.onProgress?.('Creating a scratch folder…')
     const path = await deps.createScratch()
@@ -75,7 +80,12 @@ export async function resolvePlacePath(place: DraftPlace, deps: Pick<DraftDeps, 
     if (!path) throw new Error(`Cloned ${place.repo.owner}/${place.repo.name}, but the server did not say where.`)
     return { ...place, path, repo: { ...place.repo, cloned: true } }
   }
-  if (place.kind === 'org') throw new Error('Organization sessions are not available yet.')
+  if (place.kind === 'org') {
+    const owner = place.owner ?? place.label
+    deps.onProgress?.(`Preparing the folder for ${owner}…`)
+    const path = await deps.orgFolder(owner)
+    return { ...place, owner, path }
+  }
   if (!place.path) throw new Error('Choose where this session should run.')
   return { ...place, path: place.path }
 }
@@ -93,7 +103,7 @@ export async function startDraftSession(draft: DraftSession, deps: DraftDeps): P
     deps.createSession(
       `hub:${baseName(place.path)}`,
       place.path,
-      place.git && !place.inRepo && draft.useWorktree,
+      (place.kind === 'org' || (place.git && !place.inRepo)) && draft.useWorktree,
       draft.permissionMode,
       draft.provider,
       {
