@@ -3,7 +3,6 @@ import { describe, it, expect } from 'vitest'
 import {
   buildCron,
   parseCron,
-  formatHour,
   describeCron,
   kindLabel,
   kindCategory,
@@ -12,8 +11,6 @@ import {
   formatTime,
   repoNameFromRun,
   statusBadge,
-  toTimeValue,
-  fromTimeValue,
   isEventDriven,
   EVENT_CRON,
 } from './workflowHelpers.js'
@@ -88,41 +85,6 @@ describe('workflowHelpers', () => {
 
     it('handles non-numeric hour', () => {
       expect(parseCron('0 abc * * *')).toEqual({ hour: 0, minute: 0, dow: '*' })
-    })
-  })
-
-  describe('formatHour', () => {
-    it('formats midnight', () => {
-      expect(formatHour(0)).toBe('12:00 AM')
-    })
-
-    it('formats morning hours', () => {
-      expect(formatHour(6)).toBe('6:00 AM')
-      expect(formatHour(11)).toBe('11:00 AM')
-    })
-
-    it('formats noon', () => {
-      expect(formatHour(12)).toBe('12:00 PM')
-    })
-
-    it('formats afternoon hours', () => {
-      expect(formatHour(13)).toBe('1:00 PM')
-      expect(formatHour(23)).toBe('11:00 PM')
-    })
-  })
-
-  describe('toTimeValue', () => {
-    it('pads hour and minute', () => {
-      expect(toTimeValue(6, 0)).toBe('06:00')
-      expect(toTimeValue(14, 30)).toBe('14:30')
-      expect(toTimeValue(0, 15)).toBe('00:15')
-    })
-  })
-
-  describe('fromTimeValue', () => {
-    it('parses time string', () => {
-      expect(fromTimeValue('06:00')).toEqual({ hour: 6, minute: 0 })
-      expect(fromTimeValue('14:30')).toEqual({ hour: 14, minute: 30 })
     })
   })
 

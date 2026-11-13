@@ -3,7 +3,6 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import {
   verifyToken,
   listSessions,
-  createSession,
   deleteSession,
   uploadFile,
   wsUrl,
@@ -120,41 +119,6 @@ describe('listSessions', () => {
   it('throws on non-ok response', async () => {
     mockFetch.mockResolvedValue(jsonResponse({}, 500))
     await expect(listSessions('tok')).rejects.toThrow('Failed to list sessions: 500')
-  })
-})
-
-describe('createSession', () => {
-  it('returns sessionId and session object', async () => {
-    const body = {
-      sessionId: 's1',
-      session: {
-        id: 's1',
-        name: 'New',
-        created: '2026-01-01',
-        active: true,
-        workingDir: '/home',
-        connectedClients: 0,
-        lastActivity: '2026-01-01',
-      },
-    }
-    mockFetch.mockResolvedValue(jsonResponse(body))
-    const result = await createSession('tok', 'New', '/home')
-    expect(result).toEqual(body)
-    expect(mockFetch).toHaveBeenCalledWith('/cc/api/sessions/create', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: 'Bearer tok',
-      },
-      body: JSON.stringify({ name: 'New', workingDir: '/home' }),
-    })
-  })
-
-  it('throws on non-ok response', async () => {
-    mockFetch.mockResolvedValue(jsonResponse({}, 403))
-    await expect(createSession('tok', 'x', '/tmp')).rejects.toThrow(
-      'Failed to create session: 403',
-    )
   })
 })
 

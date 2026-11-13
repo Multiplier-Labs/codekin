@@ -23,11 +23,10 @@ afterEach(async () => {
 })
 
 describe('InputBar permission picker', () => {
-  it('is shown in the orchestrator (Joe) composer, the same as in sessions', async () => {
+  it('shows the current mode in the composer', async () => {
     await act(async () => {
       root.render(
         <InputBar
-          variant="orchestrator"
           onSendInput={vi.fn()} isWaiting={false} disabled={false} onEscape={vi.fn()}
           pendingFiles={[]} onAddFiles={vi.fn()} onRemoveFile={vi.fn()}
           sessionProvider="codex"

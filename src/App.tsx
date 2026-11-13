@@ -1063,7 +1063,6 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
             // Same place as the session in view (a new scratch folder for a scratch session); else the default.
             onNewSession={() => { openNewSession(activeSession ? placeFromSession(activeSession) : undefined) }}
             onSettingsOpen={() => { openSettings() }}
-            activeRepo={activeRepo}
           />
         )}
         {/* Error banner */}
@@ -1357,7 +1356,6 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
         starredDocs={docsBrowser.starredDocs}
         onSelectDoc={handleDrawerSelectDoc}
         archiveRefreshKey={archiveRefreshKey}
-        onViewArchivedSession={() => { /* the drawer owns the viewer */ }}
         onNewSessionFromArchive={handleNewSessionFromArchive}
         onResumeSession={(id) => { void refreshSessions(); handleSelectSession(id) }}
         fontSize={settings.fontSize}

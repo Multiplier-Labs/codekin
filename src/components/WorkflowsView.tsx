@@ -285,11 +285,6 @@ export function WorkflowsView({ token, onNavigateToSession }: Props) {
         <EditWorkflowModal
           token={token}
           repo={editingRepo}
-          schedules={schedules.filter(s => s.id === editingRepo.id)}
-          recentRuns={runs.filter(r =>
-            (r.input.repoPath as string | undefined) === editingRepo.repoPath ||
-            (r.input.repoName as string | undefined) === editingRepo.name
-          )}
           onClose={() => setEditingRepo(null)}
           onSave={updateRepo}
         />

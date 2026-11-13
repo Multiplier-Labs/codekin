@@ -107,25 +107,6 @@ export function parseCron(expr: string): { hour: number; minute: number; dow: st
   return { hour: 6, minute: 0, dow: '*' }
 }
 
-/** Format a 24-hour integer (0–23) as a 12-hour time string, e.g. `6` → `"6:00 AM"`. */
-export function formatHour(h: number): string {
-  if (h === 0) return '12:00 AM'
-  if (h < 12) return `${h}:00 AM`
-  if (h === 12) return '12:00 PM'
-  return `${h - 12}:00 PM`
-}
-
-/** Convert hour + minute to an HTML time input value string, e.g. `(6, 30)` → `"06:30"`. */
-export function toTimeValue(h: number, m: number): string {
-  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
-}
-
-/** Parse an HTML time input value string to hour + minute, e.g. `"06:30"` → `{ hour: 6, minute: 30 }`. */
-export function fromTimeValue(v: string): { hour: number; minute: number } {
-  const [h, m] = v.split(':').map(Number)
-  return { hour: h || 0, minute: m || 0 }
-}
-
 /** Sentinel cron expression for event-driven workflows (no schedule). */
 export const EVENT_CRON = 'event'
 

@@ -18,7 +18,7 @@ import { SkillMenu, type SkillGroup } from './SkillMenu'
 import { SlashAutocomplete } from './SlashAutocomplete'
 import { DropZone } from './DropZone'
 import type { SlashCommand } from '../lib/slashCommands'
-import { AGENT_PROVIDER_IDS, PERMISSION_MODES, PROVIDERS, effortLabel, permissionModesFor, type PermissionMode, type ModelOption } from '../types'
+import { PERMISSION_MODES, PROVIDERS, effortLabel, permissionModesFor, type PermissionMode, type ModelOption } from '../types'
 import { getPref, setPref, usePref } from '../lib/prefs'
 import { composerTone, cycleCandidates, offeredModes, resolveEnabledModes } from '../lib/permissionModes'
 import { CYCLE_EFFORT_KEYS, effectiveEffort, effortChoices, effortDisplay, isCycleEffortKey, nextEffort, rememberedEffort } from '../lib/effort'
@@ -62,9 +62,9 @@ function ToolbarAction({ onClick, disabled, title, accent = false, children }: {
  * other LLM composers have settled on; the title still says what it takes,
  * since the picker only accepts images, markdown and PDFs.
  */
-function AttachButton({ onClick, disabled, accent = false }: { onClick: () => void; disabled: boolean; accent?: boolean }) {
+function AttachButton({ onClick, disabled }: { onClick: () => void; disabled: boolean }) {
   return (
-    <ToolbarAction onClick={onClick} disabled={disabled} title="Attach images, markdown or PDFs" accent={accent}>
+    <ToolbarAction onClick={onClick} disabled={disabled} title="Attach images, markdown or PDFs">
       <IconPlus className="density-icon" stroke={2} />
     </ToolbarAction>
   )
@@ -236,9 +236,6 @@ function PermissionModeDropdown({ currentMode, modes, isOpen, menuRef, onToggle,
     </div>
   )
 }
-
-/** Joe runs unattended, so its composer only offers harnesses cleared for that. */
-const AGENT_HANDOFF_TARGETS = PROVIDERS.filter(p => AGENT_PROVIDER_IDS.includes(p.id))
 
 /** One spelling per harness, shared with the sidebar mark — see PROVIDERS. */
 function providerLabel(provider: import('../types').CodingProvider): string {
@@ -670,7 +667,7 @@ export interface InputBarHandle {
 }
 
 /** `draft`: the composer of a session not created yet (agent picked, not handed off; menus open downward). */
-export type InputBarVariant = 'default' | 'orchestrator' | 'draft'
+export type InputBarVariant = 'default' | 'draft'
 
 interface InputBarProps {
   /** Called with the raw text when the user sends a message (Enter key or send button). */
@@ -733,7 +730,7 @@ interface InputBarProps {
   onMoveToWorktree?: () => void
   /** Worktree path if the session is in a worktree (falsy = not in worktree). */
   worktreePath?: string | null
-  /** Visual variant — 'orchestrator' strips toolbar to attach+send only with accent theme. */
+  /** Visual variant — see InputBarVariant. */
   variant?: InputBarVariant
   /**
    * Agent Joe's display name. When set, a leading @Joe addresses Joe instead
@@ -750,13 +747,11 @@ interface InputBarProps {
 }
 
 export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function InputBar({ onSendInput, isWaiting, disabled, onEscape, onInterrupt, pendingFiles, onAddFiles, onRemoveFile, skillGroups, slashCommands, initialValue = '', onValueChange, currentModel, onModelChange, currentEffort = null, onEffortChange, availableModels = [], sessionProvider, onProviderChange, placeholder, isMobile = false, showWorktreeToggle = false, useWorktree = false, onWorktreeChange, currentPermissionMode, onPermissionModeChange, onMoveToWorktree, worktreePath, variant = 'default', joeName, lockedReason, placeSlot, permissionNote }, ref) {
-  const isOrchestrator = variant === 'orchestrator'
   const isDraft = variant === 'draft'
   const enabledModes = resolveEnabledModes(usePref('enabledPermissionModes'))
   const providerModes = permissionModesFor(sessionProvider)
   const visibleModes = offeredModes(providerModes, enabledModes, currentPermissionMode)
   const tone = composerTone(currentPermissionMode)
-  const handoffTargets = isOrchestrator ? AGENT_HANDOFF_TARGETS : PROVIDERS
   const [value, setValue] = useState(initialValue)
   const [skillMenuOpen, setSkillMenuOpen] = useState(false)
   const [agentMenuOpen, setAgentMenuOpen] = useState(false)
@@ -963,14 +958,10 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
     if (next) onPermissionModeChange(next.id)
   }, [currentPermissionMode, onPermissionModeChange, providerModes, enabledModes])
 
-  const hasSkills = !isOrchestrator && skillGroups && skillGroups.some(g => g.skills.length > 0)
-  const hasSlashCommands = !isOrchestrator && slashCommands && slashCommands.length > 0
+  const hasSkills = skillGroups && skillGroups.some(g => g.skills.length > 0)
+  const hasSlashCommands = slashCommands && slashCommands.length > 0
 
-  // Session state (left) and actions (right). The orchestrator variant is a
-  // filter over these plus an accent flag — not a second layout.
-  // The orchestrator keeps the full agent control — it is one agent, so "what
-  // is answering me" (harness and model alike) and "what may it do without
-  // asking" are as much questions there as in a session.
+  // Session state (left) and actions (right).
   const showPermission = !!currentPermissionMode && !!onPermissionModeChange
   useEffect(() => {
     cycleModeRef.current = showPermission ? cyclePermissionMode : null
@@ -996,13 +987,13 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
     return () => window.removeEventListener('keydown', onKey)
   }, [canCycleEffort, onEffortChange, currentEffort, effortModel])
 
-  const showWorktree = !isOrchestrator && (!!worktreePath || (showWorktreeToggle && !!onWorktreeChange) || !!onMoveToWorktree)
+  const showWorktree = !!worktreePath || (showWorktreeToggle && !!onWorktreeChange) || !!onMoveToWorktree
   // Anything beyond the permission chip folds into the overflow menu on a
   // narrow composer; a dangerous mode must stay visible at every width.
   const hasOverflow = showAgent || showWorktree
 
   return (
-    <div className={`app-input-bar @container relative flex flex-col ${isOrchestrator ? 'orchestrator-input-bar' : ''}`}>
+    <div className="app-input-bar @container relative flex flex-col">
       {/* Exactly the transcript row's padding, so the card's edges land on the
           prose edges at every width. Nothing here reads the pane width. */}
       <div className="px-4 pb-3 pt-1 @[32rem]:px-12">
@@ -1059,7 +1050,7 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
 
           <div className="flex gap-2">
             {isWaiting && (
-              <span className={`mt-1.5 h-2 w-2 flex-shrink-0 rounded-full animate-pulse ${isOrchestrator ? 'bg-accent-5' : 'bg-primary-5'}`} />
+              <span className="mt-1.5 h-2 w-2 flex-shrink-0 rounded-full animate-pulse bg-primary-5" />
             )}
             <textarea
               ref={textareaRef}
@@ -1069,7 +1060,7 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
               onKeyDown={handleKeyDown}
               disabled={disabled}
               autoFocus={!isMobile}
-              placeholder={placeholder ?? (isOrchestrator ? 'Ask the orchestrator...' : isWaiting ? 'Type response...' : 'What do you want to build?')}
+              placeholder={placeholder ?? (isWaiting ? 'Type response...' : 'What do you want to build?')}
               // Mobile must stay 16px: font sizes under 16px trigger iOS Safari zoom-on-focus
               className={`composer-textarea field-sizing-content max-h-[40vh] w-full flex-1 resize-none bg-transparent ${isMobile ? 'text-[16px]' : 'text-body'} text-ink placeholder:text-ink-muted outline-none disabled:opacity-50 overflow-y-auto`}
             />
@@ -1092,7 +1083,7 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
               permission chip stays out of that trade: it is icon-only, and a
               dangerous mode must be visible everywhere. */}
           <div className="flex items-center gap-3">
-            <AttachButton onClick={handleFileSelect} disabled={disabled} accent={isOrchestrator} />
+            <AttachButton onClick={handleFileSelect} disabled={disabled} />
             {placeSlot}
 
             <div className="flex-1" />
@@ -1147,7 +1138,7 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
                 <div className="hidden @[34rem]:flex">
                   <AgentDropdown
                     provider={showProvider ? sessionProvider : undefined}
-                    handoffTargets={handoffTargets}
+                    handoffTargets={PROVIDERS}
                     currentModel={showModel ? currentModel : null}
                     currentEffort={currentEffort}
                     models={availableModels}
@@ -1221,7 +1212,7 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
                         <>
                           {showModel && <div className="my-1 border-t border-edge-strong" />}
                           <div className="px-3 py-1.5 text-meta text-ink-muted uppercase tracking-wider">{isDraft ? 'Agent' : 'Hand off to'}</div>
-                          {handoffTargets.filter(p => p.id !== sessionProvider).map(p => (
+                          {PROVIDERS.filter(p => p.id !== sessionProvider).map(p => (
                             <button
                               key={p.id}
                               onClick={() => {
@@ -1241,7 +1232,7 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
                 </div>
               )}
 
-              {joeName && !isOrchestrator && (
+              {joeName && (
                 <ToolbarAction
                   onClick={toggleJoe}
                   disabled={disabled}
@@ -1279,7 +1270,7 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
                 onClick={handleSend}
                 disabled={disabled || blocked}
                 hasContent={!!(value.trim() || pendingFiles.length > 0)}
-                accent={isOrchestrator || toJoe}
+                accent={toJoe}
               />
             </div>
           </div>

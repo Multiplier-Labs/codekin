@@ -10,7 +10,7 @@
  * the `.md` extension because every entry has it.
  */
 
-import { useEffect, useMemo } from 'react'
+import { useMemo } from 'react'
 import { IconLoader2, IconFileText, IconStar, IconStarFilled } from '@tabler/icons-react'
 
 export interface DocFile {
@@ -27,11 +27,6 @@ interface Props {
   onToggleStar?: (filePath: string) => void
   /** Filter text owned by the drawer's filter row. */
   filter?: string
-  /**
-   * Legacy inline-sidebar usage only — binds Escape to close. The drawer owns
-   * closing and does not pass this; drop it once no inline caller remains.
-   */
-  onClose?: () => void
 }
 
 /** Split "docs/setup/install.md" into ["docs/setup", "install.md"]. */
@@ -45,16 +40,7 @@ function stripMd(name: string): string {
   return name.replace(/\.md$/i, '')
 }
 
-export function DocsFilePicker({ files, loading, starredDocs, onSelect, onToggleStar, filter = '', onClose }: Props) {
-  useEffect(() => {
-    if (!onClose) return
-    function handleKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') onClose?.()
-    }
-    document.addEventListener('keydown', handleKey)
-    return () => { document.removeEventListener('keydown', handleKey) }
-  }, [onClose])
-
+export function DocsFilePicker({ files, loading, starredDocs, onSelect, onToggleStar, filter = '' }: Props) {
   const starredSet = useMemo(() => new Set(starredDocs), [starredDocs])
 
   const { starred, pinned, folders } = useMemo(() => {
