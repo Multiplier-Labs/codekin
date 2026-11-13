@@ -49,7 +49,8 @@ import type { InputBarHandle } from './components/InputBar'
 import { NewSessionComposer } from './components/NewSessionComposer'
 import { EnvironmentChecklist } from './components/EnvironmentChecklist'
 import { defaultPlace, getRecentPlaces, placeFromSession, rememberPlace, type DraftPlace } from './lib/places'
-import { draftModeFor, startDraftSession } from './lib/startDraftSession'
+import { startDraftSession } from './lib/startDraftSession'
+import { useDraftPermissionMode, useDraftState } from './hooks/useDraftState'
 import { DiffPanel } from './components/DiffPanel'
 import { OrchestratorContent } from './components/OrchestratorContent'
 import { TasksView } from './components/TasksView'
@@ -239,12 +240,7 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
   const recentPlacesPref = usePref('recentPlaces')
   const [draftPlace, setDraftPlace] = useState<DraftPlace>(() => defaultPlace(getRecentPlaces()))
   const [draftProviderChoice, setDraftProviderChoice] = useState<CodingProvider | null>(null)
-  const [draftText, setDraftText] = useState('')
-  const [draftResetKey, setDraftResetKey] = useState(0)
-  const [draftProgress, setDraftProgress] = useState<string | null>(null)
-  const [draftError, setDraftError] = useState<string | null>(null)
-  /** Set while a draft's create is in flight: what to send once it exists, and what to restore if it fails. */
-  const pendingDraftRef = useRef<{ firstMessage: string; text: string; place: DraftPlace } | null>(null)
+  const draft = useDraftState()
 
   const {
     connState,
@@ -294,15 +290,11 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
       }
       setActiveSessionId(sessionId)
       void refreshSessions()
-      const draft = pendingDraftRef.current
-      if (draft) {
-        pendingDraftRef.current = null
+      const created = draft.takeCreated()
+      if (created) {
         // The server holds input until the agent (and any worktree) is ready.
-        sendInputRef.current(draft.firstMessage)
-        rememberPlace(draft.place)
-        setDraftText('')
-        setDraftProgress(null)
-        setDraftError(null)
+        sendInputRef.current(created.firstMessage)
+        rememberPlace(created.place)
         return
       }
       if (pendingContextRef.current) {
@@ -322,14 +314,9 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
       setArchiveRefreshKey(k => k + 1)
     },
     onError: (msg) => {
-      const draft = pendingDraftRef.current
-      if (draft) {
+      if (draft.isAwaitingCreate()) {
         // A draft's create failed: keep the draft, text included, and say why there.
-        pendingDraftRef.current = null
-        setDraftProgress(null)
-        setDraftError(msg)
-        setDraftText(draft.text)
-        setDraftResetKey(k => k + 1)
+        draft.fail(msg)
         return
       }
       showError(msg)
@@ -403,6 +390,7 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
   // The composer is up on /new, and on the landing page when no session is open.
   const showComposer = view === 'new' || (view === 'chat' && !activeSessionId)
   const draftProvider = draftProviderChoice ?? currentProvider
+  const [draftPermissionMode, setDraftPermissionMode] = useDraftPermissionMode(draftProvider)
   const activeSessionProvider = showComposer ? draftProvider : view === 'orchestrator'
     ? sessionProvider ?? 'claude'
     : listedProvider
@@ -588,40 +576,31 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
 
   // A create can't be confirmed over a dropped connection: hand the draft back.
   useEffect(() => {
-    if (connState === 'connected' || !pendingDraftRef.current) return
-    const draft = pendingDraftRef.current
-    pendingDraftRef.current = null
-    setDraftProgress(null)
-    setDraftError('The connection dropped before the session started. Try again once it is back.')
-    setDraftText(draft.text)
-    setDraftResetKey(k => k + 1)
-  }, [connState])
+    if (connState === 'connected' || !draft.isAwaitingCreate()) return
+    draft.fail('The connection dropped before the session started. Try again once it is back.')
+  }, [connState, draft])
 
   /** Open the composer; `preset` picks the place (the sidebar's group +), else the last one used. */
   const openNewSession = useCallback((preset?: DraftPlace) => {
     setDraftPlace(preset ?? defaultPlace(getRecentPlaces()))
-    setDraftError(null)
+    draft.setError(null)
     navigate('/new')
-  }, [navigate])
+  }, [navigate, draft])
 
-  /** Choose the draft's agent. Skip permissions is Claude-only, so other agents fall back to Bypass. */
+  /** Choose the draft's agent. Its permission mode follows (Skip permissions is Claude-only). */
   const handleDraftProviderChange = useCallback((provider: CodingProvider) => {
     setDraftProviderChoice(provider)
     setPref('provider', provider)
-    const mode = draftModeFor(provider, currentPermissionMode)
-    if (mode !== currentPermissionMode) handlePermissionModeChange(mode)
-  }, [currentPermissionMode, handlePermissionModeChange])
+  }, [])
 
   const handleDraftSend = useCallback((text: string, files: File[]) => {
     const token = settings.token
-    if (!token || pendingDraftRef.current) return
-    setDraftError(null)
-    setDraftText(text)
+    if (!token || !draft.begin(text)) return
     // Only pass a model that belongs to the chosen agent's list; the sync may still be catching up.
     const model = currentModel && availableModels.some(m => m.id === currentModel) ? currentModel : null
     startDraftSession({
       place: draftPlace, text, files, provider: draftProvider, model, effort: currentEffort,
-      permissionMode: currentPermissionMode, useWorktree,
+      permissionMode: draftPermissionMode, useWorktree,
     }, {
       createScratch: () => createScratch(token),
       cloneRepo: (owner, name) => cloneRepo(token, owner, name),
@@ -629,17 +608,14 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
       createSession: (name, workingDir, worktree, mode, provider, explicit, start) => {
         // From here a server error lands in onError, which restores the draft;
         // session_created sends the first message.
-        pendingDraftRef.current = { firstMessage: start.firstMessage, text, place: start.place }
+        draft.awaitCreated({ firstMessage: start.firstMessage, place: start.place })
         wsCreateSession(name, workingDir, worktree, mode, provider, explicit)
       },
-      onProgress: setDraftProgress,
+      onProgress: draft.setProgress,
     }).catch((err: unknown) => {
-      pendingDraftRef.current = null
-      setDraftProgress(null)
-      setDraftError(err instanceof Error ? err.message : String(err))
-      setDraftResetKey(k => k + 1)
+      draft.fail(err instanceof Error ? err.message : String(err))
     })
-  }, [settings.token, currentModel, availableModels, draftPlace, draftProvider, currentEffort, currentPermissionMode, useWorktree, wsCreateSession])
+  }, [settings.token, draft, currentModel, availableModels, draftPlace, draftProvider, currentEffort, draftPermissionMode, useWorktree, wsCreateSession])
 
   // Handle built-in slash commands locally (not sent to Claude)
   const handleBuiltinCommand = useCallback((command: string, args: string) => {
@@ -1155,11 +1131,11 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
             isMobile={isMobile}
             disabled={!settings.token || connState !== 'connected'}
             place={draftPlace}
-            onPlaceChange={(p) => { setDraftPlace(p); setDraftError(null) }}
+            onPlaceChange={(p) => { setDraftPlace(p); draft.setError(null) }}
             recent={recentPlacesPref ?? []}
-            initialText={draftText}
-            onTextChange={setDraftText}
-            resetKey={draftResetKey}
+            initialText={draft.text}
+            onTextChange={draft.setText}
+            resetKey={draft.resetKey}
             provider={draftProvider}
             onProviderChange={handleDraftProviderChange}
             currentModel={currentModel}
@@ -1167,12 +1143,12 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
             currentEffort={currentEffort}
             onEffortChange={handleEffortChange}
             availableModels={availableModels}
-            permissionMode={currentPermissionMode}
-            onPermissionModeChange={handlePermissionModeChange}
+            permissionMode={draftPermissionMode}
+            onPermissionModeChange={setDraftPermissionMode}
             useWorktree={useWorktree}
             onWorktreeChange={setUseWorktree}
-            progress={draftProgress}
-            error={draftError}
+            progress={draft.progress}
+            error={draft.error}
             onSend={handleDraftSend}
           >
             <EnvironmentChecklist
