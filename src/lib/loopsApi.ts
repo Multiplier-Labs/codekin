@@ -8,15 +8,13 @@
  * `?after=<sequence>`.
  */
 
-import { transport } from './transport'
+import { readJson, request, send, type RequestOptions } from './request'
 
 const BASE = '/api/loops'
 
-function headers(token: string): HeadersInit {
-  return {
-    'Content-Type': 'application/json',
-    Authorization: `Bearer ${token}`,
-  }
+/** A /api/loops call. Every loops request sends the JSON content type and the Bearer token. */
+function loops<T = unknown>(token: string, path: string, opts: Omit<RequestOptions, 'token'>): Promise<T> {
+  return request<T>(`${BASE}${path}`, { token, jsonHeader: true, ...opts })
 }
 
 // ---------------------------------------------------------------------------
@@ -168,10 +166,7 @@ export async function listLoopRecipes(token: string, repoPath?: string): Promise
   const params = new URLSearchParams()
   if (repoPath) params.set('repoPath', repoPath)
   const qs = params.toString()
-  const res = await transport.fetch(`${BASE}/recipes${qs ? `?${qs}` : ''}`, { headers: headers(token) })
-  if (!res.ok) throw new Error(`Failed to list loop recipes: ${res.status}`)
-  const data = (await res.json()) as { recipes: LoopRecipeInfo[] }
-  return data.recipes
+  return (await loops<{ recipes: LoopRecipeInfo[] }>(token, `/recipes${qs ? `?${qs}` : ''}`, { error: 'Failed to list loop recipes' })).recipes
 }
 
 // ---------------------------------------------------------------------------
@@ -188,27 +183,19 @@ export async function listLoopRuns(
   if (opts?.repo) params.set('repo', opts.repo)
   if (opts?.limit) params.set('limit', String(opts.limit))
   const qs = params.toString()
-  const res = await transport.fetch(`${BASE}/runs${qs ? `?${qs}` : ''}`, { headers: headers(token) })
-  if (!res.ok) throw new Error(`Failed to list loop runs: ${res.status}`)
-  const data = (await res.json()) as { runs: LoopRun[] }
-  return data.runs
+  return (await loops<{ runs: LoopRun[] }>(token, `/runs${qs ? `?${qs}` : ''}`, { error: 'Failed to list loop runs' })).runs
 }
 
 export async function getLoopRun(token: string, runId: string): Promise<LoopRunDetail> {
-  const res = await transport.fetch(`${BASE}/runs/${encodeURIComponent(runId)}`, { headers: headers(token) })
-  if (!res.ok) throw new Error(`Failed to fetch loop run: ${res.status}`)
-  const data = (await res.json()) as { run: LoopRunDetail }
-  return data.run
+  return (await loops<{ run: LoopRunDetail }>(token, `/runs/${encodeURIComponent(runId)}`, { error: 'Failed to fetch loop run' })).run
 }
 
-export async function getLoopRunEvents(
+export function getLoopRunEvents(
   token: string,
   runId: string,
   after = 0,
 ): Promise<{ events: LoopEvent[]; lastSequence: number }> {
-  const res = await transport.fetch(`${BASE}/runs/${encodeURIComponent(runId)}/events?after=${after}`, { headers: headers(token) })
-  if (!res.ok) throw new Error(`Failed to fetch loop run events: ${res.status}`)
-  return (await res.json()) as { events: LoopEvent[]; lastSequence: number }
+  return loops(token, `/runs/${encodeURIComponent(runId)}/events?after=${after}`, { error: 'Failed to fetch loop run events' })
 }
 
 export interface RecipeOverrides {
@@ -249,24 +236,22 @@ export interface EffectiveLoopConfig {
 
 /** The wizard's confirmation screen: exactly what would run, before spending. */
 export async function preflightLoopRun(token: string, input: StartLoopInput): Promise<EffectiveLoopConfig> {
-  const res = await transport.fetch(`${BASE}/runs/preflight`, { method: 'POST', headers: headers(token), body: JSON.stringify(input) })
-  const data = (await res.json()) as { effective?: EffectiveLoopConfig; error?: string }
+  const res = await send(`${BASE}/runs/preflight`, { method: 'POST', token, body: input })
+  const data = await readJson<{ effective?: EffectiveLoopConfig; error?: string }>(res)
   if (!res.ok || !data.effective) throw new Error(data.error ?? `Preflight failed: ${res.status}`)
   return data.effective
 }
 
 export async function startLoopRun(token: string, input: StartLoopInput): Promise<LoopRun> {
-  const res = await transport.fetch(`${BASE}/runs`, { method: 'POST', headers: headers(token), body: JSON.stringify(input) })
-  const data = (await res.json()) as { run?: LoopRun; error?: string }
+  const res = await send(`${BASE}/runs`, { method: 'POST', token, body: input })
+  const data = await readJson<{ run?: LoopRun; error?: string }>(res)
   if (!res.ok || !data.run) throw new Error(data.error ?? `Failed to start loop run: ${res.status}`)
   return data.run
 }
 
 /** Local branches of a cloned repo, with the detected default. */
-export async function listLoopBranches(token: string, repoPath: string): Promise<{ branches: string[]; defaultBranch: string | null }> {
-  const res = await transport.fetch(`${BASE}/branches?repoPath=${encodeURIComponent(repoPath)}`, { headers: headers(token) })
-  if (!res.ok) throw new Error(`Failed to list branches: ${res.status}`)
-  return (await res.json()) as { branches: string[]; defaultBranch: string | null }
+export function listLoopBranches(token: string, repoPath: string): Promise<{ branches: string[]; defaultBranch: string | null }> {
+  return loops(token, `/branches?repoPath=${encodeURIComponent(repoPath)}`, { error: 'Failed to list branches' })
 }
 
 // ---------------------------------------------------------------------------
@@ -274,11 +259,9 @@ export async function listLoopBranches(token: string, repoPath: string): Promise
 // ---------------------------------------------------------------------------
 
 async function control(token: string, runId: string, action: 'pause' | 'resume' | 'cancel'): Promise<void> {
-  const res = await transport.fetch(`${BASE}/runs/${encodeURIComponent(runId)}/${action}`, { method: 'POST', headers: headers(token) })
-  if (!res.ok) {
-    const data = (await res.json().catch(() => ({}))) as { error?: string }
-    throw new Error(data.error ?? `Failed to ${action} loop run: ${res.status}`)
-  }
+  await loops(token, `/runs/${encodeURIComponent(runId)}/${action}`, {
+    method: 'POST', parse: 'none', serverMessage: ['error'], error: `Failed to ${action} loop run`,
+  })
 }
 
 export const pauseLoopRun = (token: string, runId: string) => control(token, runId, 'pause')
@@ -286,15 +269,9 @@ export const resumeLoopRun = (token: string, runId: string) => control(token, ru
 export const cancelLoopRun = (token: string, runId: string) => control(token, runId, 'cancel')
 
 export async function steerLoopRun(token: string, runId: string, instruction: string, revisePlan = false): Promise<void> {
-  const res = await transport.fetch(`${BASE}/runs/${encodeURIComponent(runId)}/steer`, {
-    method: 'POST',
-    headers: headers(token),
-    body: JSON.stringify({ instruction, revisePlan }),
+  await loops(token, `/runs/${encodeURIComponent(runId)}/steer`, {
+    method: 'POST', body: { instruction, revisePlan }, parse: 'none', serverMessage: ['error'], error: 'Failed to steer loop run',
   })
-  if (!res.ok) {
-    const data = (await res.json().catch(() => ({}))) as { error?: string }
-    throw new Error(data.error ?? `Failed to steer loop run: ${res.status}`)
-  }
 }
 
 export interface LoopLesson {
@@ -314,34 +291,28 @@ export async function listLoopLessons(token: string, recipeId?: string, status?:
   if (recipeId) params.set('recipeId', recipeId)
   if (status) params.set('status', status)
   const qs = params.toString()
-  const res = await transport.fetch(`${BASE}/lessons${qs ? `?${qs}` : ''}`, { headers: headers(token) })
-  if (!res.ok) throw new Error(`Failed to list lessons: ${res.status}`)
-  return ((await res.json()) as { lessons: LoopLesson[] }).lessons
+  return (await loops<{ lessons: LoopLesson[] }>(token, `/lessons${qs ? `?${qs}` : ''}`, { error: 'Failed to list lessons' })).lessons
 }
 
 export async function resolveLoopLesson(token: string, lessonId: string, action: 'approve' | 'reject'): Promise<void> {
-  const res = await transport.fetch(`${BASE}/lessons/${encodeURIComponent(lessonId)}/${action}`, { method: 'POST', headers: headers(token) })
-  if (!res.ok) {
-    const data = (await res.json().catch(() => ({}))) as { error?: string }
-    throw new Error(data.error ?? `Failed to ${action} lesson: ${res.status}`)
-  }
+  await loops(token, `/lessons/${encodeURIComponent(lessonId)}/${action}`, {
+    method: 'POST', parse: 'none', serverMessage: ['error'], error: `Failed to ${action} lesson`,
+  })
 }
 
 /** Fork a run into a new one starting from its current worktree state. */
 export async function forkLoopRun(token: string, runId: string): Promise<LoopRun> {
-  const res = await transport.fetch(`${BASE}/runs/${encodeURIComponent(runId)}/fork`, { method: 'POST', headers: headers(token) })
-  const data = (await res.json()) as { run?: LoopRun; error?: string }
+  const res = await send(`${BASE}/runs/${encodeURIComponent(runId)}/fork`, { method: 'POST', token, jsonHeader: true })
+  const data = await readJson<{ run?: LoopRun; error?: string }>(res)
   if (!res.ok || !data.run) throw new Error(data.error ?? `Failed to fork run: ${res.status}`)
   return data.run
 }
 
 /** Artifact body (plan text, evaluator output, review) as text. */
-export async function getLoopArtifactBody(token: string, runId: string, artifactId: string): Promise<string> {
-  const res = await transport.fetch(`${BASE}/runs/${encodeURIComponent(runId)}/artifacts/${encodeURIComponent(artifactId)}`, {
-    headers: headers(token),
+export function getLoopArtifactBody(token: string, runId: string, artifactId: string): Promise<string> {
+  return loops(token, `/runs/${encodeURIComponent(runId)}/artifacts/${encodeURIComponent(artifactId)}`, {
+    parse: 'text', error: 'Failed to fetch artifact',
   })
-  if (!res.ok) throw new Error(`Failed to fetch artifact: ${res.status}`)
-  return res.text()
 }
 
 export async function resolveLoopIntervention(
@@ -351,12 +322,7 @@ export async function resolveLoopIntervention(
   choice: string,
   note?: string,
 ): Promise<void> {
-  const res = await transport.fetch(
-    `${BASE}/runs/${encodeURIComponent(runId)}/interventions/${encodeURIComponent(interventionId)}/resolve`,
-    { method: 'POST', headers: headers(token), body: JSON.stringify({ choice, note }) },
-  )
-  if (!res.ok) {
-    const data = (await res.json().catch(() => ({}))) as { error?: string }
-    throw new Error(data.error ?? `Failed to resolve intervention: ${res.status}`)
-  }
+  await loops(token, `/runs/${encodeURIComponent(runId)}/interventions/${encodeURIComponent(interventionId)}/resolve`, {
+    method: 'POST', body: { choice, note }, parse: 'none', serverMessage: ['error'], error: 'Failed to resolve intervention',
+  })
 }

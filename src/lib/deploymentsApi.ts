@@ -6,19 +6,13 @@
  * server/deployment-monitor.ts.
  */
 
-import { transport } from './transport'
+import { request, type RequestOptions } from './request'
 
 const BASE = '/api/deployments'
 
-async function fetchJson<T>(res: Response): Promise<T> {
-  return res.json() as Promise<T>
-}
-
-function headers(token: string): HeadersInit {
-  return {
-    'Content-Type': 'application/json',
-    Authorization: `Bearer ${token}`,
-  }
+/** A /api/deployments call. Every deployments request sends the JSON content type and the Bearer token. */
+function deployments<T = unknown>(token: string, path: string, opts: Omit<RequestOptions, 'token'>): Promise<T> {
+  return request<T>(`${BASE}${path}`, { token, jsonHeader: true, ...opts })
 }
 
 // ---------------------------------------------------------------------------
@@ -96,45 +90,22 @@ export interface DiscoveredProcess {
 
 /** Registry with each probe's latest sample. */
 export async function listDeployments(token: string): Promise<Deployment[]> {
-  const res = await transport.fetch(BASE, { headers: headers(token) })
-  if (!res.ok) throw new Error(`Failed to list deployments: ${res.status}`)
-  const data = await fetchJson<{ deployments: Deployment[] }>(res)
-  return data.deployments
+  return (await deployments<{ deployments: Deployment[] }>(token, '', { error: 'Failed to list deployments' })).deployments
 }
 
 export async function saveDeployment(token: string, deployment: Omit<Deployment, 'latestSamples'>): Promise<void> {
-  const res = await transport.fetch(BASE, {
-    method: 'POST',
-    headers: headers(token),
-    body: JSON.stringify(deployment),
-  })
-  if (!res.ok) {
-    const body = await fetchJson<{ error?: string }>(res).catch(() => ({ error: undefined }))
-    throw new Error(body.error ?? `Failed to save deployment: ${res.status}`)
-  }
+  await deployments(token, '', { method: 'POST', body: deployment, parse: 'none', serverMessage: ['error'], error: 'Failed to save deployment' })
 }
 
 export async function patchDeployment(token: string, id: string, patch: Partial<Omit<Deployment, 'latestSamples'>>): Promise<void> {
-  const res = await transport.fetch(`${BASE}/${encodeURIComponent(id)}`, {
-    method: 'PATCH',
-    headers: headers(token),
-    body: JSON.stringify(patch),
-  })
-  if (!res.ok) throw new Error(`Failed to update deployment: ${res.status}`)
+  await deployments(token, `/${encodeURIComponent(id)}`, { method: 'PATCH', body: patch, parse: 'none', error: 'Failed to update deployment' })
 }
 
 export async function deleteDeployment(token: string, id: string): Promise<void> {
-  const res = await transport.fetch(`${BASE}/${encodeURIComponent(id)}`, {
-    method: 'DELETE',
-    headers: headers(token),
-  })
-  if (!res.ok) throw new Error(`Failed to delete deployment: ${res.status}`)
+  await deployments(token, `/${encodeURIComponent(id)}`, { method: 'DELETE', parse: 'none', error: 'Failed to delete deployment' })
 }
 
 /** pm2 process proposals (never auto-enrolled). */
 export async function discoverDeployments(token: string): Promise<DiscoveredProcess[]> {
-  const res = await transport.fetch(`${BASE}/discover`, { headers: headers(token) })
-  if (!res.ok) throw new Error(`Failed to discover: ${res.status}`)
-  const data = await fetchJson<{ pm2: DiscoveredProcess[] }>(res)
-  return data.pm2
+  return (await deployments<{ pm2: DiscoveredProcess[] }>(token, `/discover`, { error: 'Failed to discover' })).pm2
 }

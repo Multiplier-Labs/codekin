@@ -4,7 +4,7 @@
  * Mirrors server/task-store.ts — see docs/JOE-TASKS-SPEC.md.
  */
 
-import { transport } from './transport'
+import { joeRequest } from './request'
 
 export type TaskStatus = 'todo' | 'in_progress' | 'needs_decision' | 'in_review' | 'done' | 'dismissed'
 export type TaskPriority = 'high' | 'normal' | 'low'
@@ -68,25 +68,8 @@ export interface NewTask {
   detail?: string
 }
 
-async function call<T>(token: string, path: string, init: { method?: string; body?: unknown } = {}): Promise<T> {
-  const res = await transport.fetch(`/api/orchestrator/tasks${path}`, {
-    method: init.method ?? 'GET',
-    headers: {
-      Authorization: `Bearer ${token}`,
-      ...(init.body !== undefined ? { 'Content-Type': 'application/json' } : {}),
-    },
-    body: init.body !== undefined ? JSON.stringify(init.body) : undefined,
-  })
-  if (!res.ok) {
-    let message = `Request failed (${res.status})`
-    try {
-      const body = (await res.json()) as { error?: string }
-      if (body.error) message = body.error
-    } catch { /* keep the status message */ }
-    throw new Error(message)
-  }
-  return (await res.json()) as T
-}
+const call = <T>(token: string, path: string, init?: { method?: string; body?: unknown }): Promise<T> =>
+  joeRequest<T>(token, `/api/orchestrator/tasks${path}`, init)
 
 export function listTasks(token: string, opts: { repo?: string } = {}): Promise<TaskList> {
   const qs = opts.repo ? `?repo=${encodeURIComponent(opts.repo)}` : ''
