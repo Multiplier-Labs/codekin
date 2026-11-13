@@ -39,8 +39,9 @@ import { deriveActivityLabel } from './lib/deriveActivityLabel'
 import { emitWorkflowEvent } from './lib/workflowEvents'
 import { setAgentHealth, getAgentHealth, resolveDefaultProvider } from './lib/agentHealth'
 import { useAgentHealth } from './hooks/useAgentHealth'
-import { getQueueMessages, getAgentName, listArchivedSessions, type ArchivedSessionInfo, attachFolder, cloneRepo, createScratch, detachFolder, gitInit, orgFolder, uploadAndBuildMessage } from './lib/ccApi'
+import { getQueueMessages, getAgentName, listArchivedSessions, type ArchivedSessionInfo, attachFolder, cloneRepo, createScratch, detachFolder, gitInit, moveSessionFolder, orgFolder, publishToGitHub, uploadAndBuildMessage } from './lib/ccApi'
 import { ContextBar } from './components/ContextBar'
+import { KeepThisWork } from './components/KeepThisWork'
 import { sessionIsShared } from './hosted/sessionShares'
 import { SettingsView } from './components/settings/SettingsView'
 import { LeftSidebar } from './components/LeftSidebar'
@@ -974,6 +975,15 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
   const [shareSessionId, setShareSessionId] = useState<string | null>(null)
   const shareSession = sessions.find(s => s.id === shareSessionId)
   const hostedMachineId = (transport as { machineId?: string }).machineId ?? ''
+  // "Keep this work?" on a scratch session that holds something, between turns (phase 3).
+  const keepWorkDismissed = usePref('keepWorkDismissed')
+  const activePlace = activeSession?.place
+  // Grok and OpenCode key their sessions by folder, so only Claude and Codex can move it.
+  const canMoveFolder = (activeSession?.provider ?? 'claude') === 'claude' || activeSession?.provider === 'codex'
+  const showKeepThisWork = !!activeSession && activePlace?.kind === 'scratch' && !!activePlace.hasFiles && (!activePlace.remote || canMoveFolder)
+    && activeSession.source === 'manual' && !isProcessing && messages.some(m => m.type === 'user')
+    && !(keepWorkDismissed ?? []).includes(activeSession.id)
+
   // Attached repositories and org folders Changes can switch to (phase 3).
   const attachedDiffRoots = useMemo(() => (activeSession?.attached ?? [])
     .filter(a => a.place.git || a.place.kind === 'org')
@@ -1247,6 +1257,29 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
             activeRepoName={activeRepo?.name ?? activeWorkingDir?.split('/').pop() ?? 'this repo'}
             place={activeSession?.place}
             placePath={activeSession ? activeSession.groupDir ?? activeSession.workingDir : undefined}
+            keepThisWork={showKeepThisWork && activeSession ? (
+              <KeepThisWork
+                key={activeSession.id}
+                place={activeSession.place!}
+                folderName={(activeSession.groupDir ?? activeSession.workingDir).split('/').filter(Boolean).pop() ?? 'scratch'}
+                owners={groups.filter(g => g.source !== 'local' && !g.error).map(g => g.owner)}
+                onGitInit={async () => {
+                  await gitInit(settings.token, activeSession.id)
+                  await refreshSessions()
+                }}
+                onPublish={async (choice) => {
+                  const { url } = await publishToGitHub(settings.token, activeSession.id, choice)
+                  await refreshSessions()
+                  return url
+                }}
+                token={settings.token}
+                onMove={canMoveFolder ? async (parent) => {
+                  await moveSessionFolder(settings.token, activeSession.id, parent)
+                  await refreshSessions()
+                } : undefined}
+                onDismiss={() => { setPref('keepWorkDismissed', [...(keepWorkDismissed ?? []).filter(id => id !== activeSession.id), activeSession.id].slice(-200)) }}
+              />
+            ) : undefined}
             contextBar={activeSession?.place && activeSession.source === 'manual' && effectiveOwner(activeSession) !== 'joe' ? (
               <ContextBar
                 token={settings.token}

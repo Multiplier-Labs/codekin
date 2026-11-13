@@ -27,7 +27,7 @@
  * working directory is held to.
  */
 
-import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, statSync } from 'fs'
+import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, statSync } from 'fs'
 import { homedir } from 'os'
 import { dirname, isAbsolute, join, resolve } from 'path'
 import { randomInt } from 'crypto'
@@ -43,6 +43,10 @@ export interface SessionPlace {
   inRepo?: string
   /** The GitHub owner (org or user), for an org place. */
   owner?: string
+  /** Scratch only: the folder holds something besides `.git` (worth keeping). */
+  hasFiles?: boolean
+  /** Scratch only: the folder's repository has an `origin` remote (published). */
+  remote?: boolean
 }
 
 // ---------------------------------------------------------------------------
@@ -59,7 +63,7 @@ export function isWithinRoots(p: string, roots: readonly string[] = allowedRoots
   return roots.some(root => p === root || p.startsWith(root + '/'))
 }
 
-function expandTilde(p: string): string {
+export function expandTilde(p: string): string {
   if (p === '~' || p.startsWith('~/')) return join(homedir(), p.slice(1))
   return p
 }
@@ -316,7 +320,13 @@ export function ensureOrgFolder(owner: string): string {
 export function detectPlace(root: string, scratchRoot: string = getScratchRoot()): SessionPlace {
   // A scratch folder is a fresh, self-contained place: only its own `.git` counts.
   if (isWithinRoots(root, [scratchRoot])) {
-    return { kind: 'scratch', git: isGitWorkTree(root) }
+    const place: SessionPlace = { kind: 'scratch', git: isGitWorkTree(root) }
+    let entries: string[] = []
+    try { entries = readdirSync(root) } catch { /* gone */ }
+    if (entries.some(e => e !== '.git')) place.hasFiles = true
+    const gitDir = place.git ? gitDirOf(root) : null
+    if (gitDir && hasOriginRemote(gitDir)) place.remote = true
+    return place
   }
   const repoRoot = findWorkTreeRoot(root)
   const gitDir = repoRoot && gitDirOf(repoRoot)

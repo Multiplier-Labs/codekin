@@ -190,6 +190,21 @@ describe('org places', () => {
   })
 })
 
+describe('scratch place details', () => {
+  it('says when a scratch folder holds files and when it is published', () => {
+    const root = join(HOME, 'codekin', 'scratch')
+    configureScratchRoot(root)
+    const dir = join(root, 'brisk-otter')
+    mkdirSync(join(dir, '.git'), { recursive: true })
+    expect(detectPlace(dir, root)).toEqual({ kind: 'scratch', git: true })
+    writeFileSync(join(dir, 'a.txt'), '')
+    expect(detectPlace(dir, root)).toEqual({ kind: 'scratch', git: true, hasFiles: true })
+    writeFileSync(join(dir, '.git', 'config'), '[remote "origin"]\n\turl = https://example.com/x.git\n')
+    expect(detectPlace(dir, root)).toMatchObject({ kind: 'scratch', hasFiles: true, remote: true })
+    configureScratchRoot('')
+  })
+})
+
 describe('describePlace cache', () => {
   it('serves a cached place within the TTL and re-detects after invalidation', () => {
     const dir = join(HOME, 'p')

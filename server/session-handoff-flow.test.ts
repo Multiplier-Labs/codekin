@@ -225,3 +225,36 @@ describe('attached places', () => {
     }
   })
 })
+
+describe('move a scratch folder', () => {
+  it('moves the folder, repoints the session and tells the agent; refuses other agents and running turns', async () => {
+    const { configureScratchRoot } = await import('./places.js')
+    const base = realpathSync(mkdtempSync(join(homedir(), '.codekin-move-test-')))
+    const scratch = join(base, 'scratch')
+    const { mkdirSync, writeFileSync, existsSync } = await import('fs')
+    mkdirSync(join(scratch, 'brisk-otter'), { recursive: true })
+    mkdirSync(join(base, 'projects'))
+    writeFileSync(join(scratch, 'brisk-otter', 'a.txt'), 'x')
+    configureScratchRoot(scratch)
+    try {
+      const sm = new SessionManager()
+      const grok = sm.create('g', join(scratch, 'brisk-otter'), { provider: 'grok' })
+      expect(await sm.moveSessionFolder(grok.id, join(base, 'projects'))).toMatchObject({ ok: false, status: 409 })
+
+      const s = sm.create('c', join(scratch, 'brisk-otter'))
+      s.isProcessing = true
+      expect(await sm.moveSessionFolder(s.id, join(base, 'projects'))).toMatchObject({ ok: false, error: /turn/ })
+      s.isProcessing = false
+
+      const res = await sm.moveSessionFolder(s.id, join(base, 'projects'))
+      expect(res).toEqual({ ok: true, path: join(base, 'projects', 'brisk-otter') })
+      expect(s.workingDir).toBe(join(base, 'projects', 'brisk-otter'))
+      expect(existsSync(join(base, 'projects', 'brisk-otter', 'a.txt'))).toBe(true)
+      expect(s.pendingPlaceNotes?.[0]).toContain('<codekin-place-moved>')
+      expect(sm.list().find(i => i.id === s.id)?.place?.kind).toBe('folder')
+    } finally {
+      configureScratchRoot('')
+      rmSync(base, { recursive: true, force: true })
+    }
+  })
+})

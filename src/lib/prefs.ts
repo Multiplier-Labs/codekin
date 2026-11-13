@@ -64,6 +64,8 @@ export interface Prefs {
   notifyTurnFinished: boolean
   /** Places new sessions were started in, newest first (see lib/places). */
   recentPlaces: DraftPlace[]
+  /** Scratch sessions whose "Keep this work?" callout was dismissed (newest last). */
+  keepWorkDismissed: string[]
 }
 
 export type PrefKey = keyof Prefs

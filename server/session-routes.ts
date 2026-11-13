@@ -30,6 +30,7 @@ import { execFile } from 'child_process'
 import { promisify } from 'util'
 import { randomUUID } from 'crypto'
 import { orgManifestFor } from './org-manifest.js'
+import { publishFolder, validatePublishInput } from './publish.js'
 import {
   allowedRoots as allowedRootsOf, configureReposPath, configureScratchRoot, createScratchDir, describePlace, getScratchRoot, invalidatePlace,
   ensureOrgFolder, findWorkTreeRoot, isGitWorkTree, isValidOwner, validateScratchRoot,
@@ -599,6 +600,56 @@ export function createSessionRouter(
     invalidatePlace(root)
     sessions.notifySessionsUpdated()
     res.json({ place: describePlace(root) })
+  })
+
+  // Move a scratch session's folder somewhere permanent (Keep this work?).
+  router.post('/api/sessions/:id/move', async (req: Request<Record<string, string>, unknown, { parent?: unknown }>, res) => {
+    const token = extractToken(req)
+    if (!verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' })
+    const result = await sessions.moveSessionFolder(req.params.id, req.body?.parent)
+    if (!result.ok) return res.status(result.status).json({ error: result.error })
+    res.json({ path: result.path, place: describePlace(result.path) })
+  })
+
+  // Publish a session's folder to GitHub (Keep this work?): git init if
+  // needed, commit everything, gh repo create --source . --push. The click is
+  // the consent, as with git-init and clone.
+  router.post('/api/sessions/:id/publish', async (req, res) => {
+    const token = extractToken(req)
+    if (!verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' })
+    const session = sessions.get(req.params.id)
+    if (!session) return res.status(404).json({ error: 'Session not found' })
+    const checked = validatePublishInput(req.body)
+    if (!checked.ok) return res.status(400).json({ error: checked.error })
+    const root = session.groupDir ?? session.workingDir
+    invalidatePlace(root)
+    const current = describePlace(root)
+    if (current.kind === 'org') return res.status(409).json({ error: 'An organization folder is not published as one repository' })
+    if (current.kind === 'repo' || current.remote) return res.status(409).json({ error: 'This folder is already on GitHub' })
+    if (current.inRepo) return res.status(409).json({ error: `This folder is inside a git repository (${current.inRepo})` })
+    let realRoot: string
+    try {
+      realRoot = fsRealpathSync(root)
+    } catch {
+      return res.status(400).json({ error: 'The session folder no longer exists' })
+    }
+    if (!allowedRootsOf().some(r => realRoot === r || realRoot.startsWith(r + '/'))) {
+      return res.status(403).json({ error: 'Session folder is outside allowed directories' })
+    }
+    try {
+      const { url } = await publishFolder(realRoot, checked.input)
+      invalidatePlace(root)
+      sessions.queuePlaceNote(session.id, [
+        '<codekin-place-published>',
+        `The user published this folder to GitHub as ${checked.input.owner}/${checked.input.name} (${url}, ${checked.input.visibility}). It is a git repository with remote origin; everything was committed as "Initial commit" and pushed.`,
+        '</codekin-place-published>',
+      ].join('\n'), `Published to ${url}`)
+      res.json({ url, place: describePlace(root) })
+    } catch (err) {
+      invalidatePlace(root)
+      sessions.notifySessionsUpdated()
+      res.status(500).json({ error: err instanceof Error ? err.message : String(err) })
+    }
   })
 
   // --- UI preferences ---

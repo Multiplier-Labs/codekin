@@ -48,6 +48,8 @@ export interface SessionContentProps {
   placePath?: string
   /** Where the session works and + Attach (phase 3); absent for sessions that can't attach. */
   contextBar?: ReactNode
+  /** The "Keep this work?" callout for a scratch session, when it applies. */
+  keepThisWork?: ReactNode
   onExecuteTentative: () => void
   onDiscardTentative: () => void
   inputBarRef: RefObject<InputBarHandle | null>
@@ -121,6 +123,7 @@ export function SessionContent({
   place,
   placePath,
   contextBar,
+  keepThisWork,
   onExecuteTentative,
   onDiscardTentative,
   inputBarRef,
@@ -316,6 +319,8 @@ export function SessionContent({
           )}
         </div>
       )}
+
+      {keepThisWork}
 
       {/* Tentative banner */}
       {activeTentativeCount > 0 && (

@@ -589,6 +589,36 @@ export async function detachFolder(token: string, sessionId: string, path: strin
   return (await jsonBody<{ attached: string[] }>(res)).attached
 }
 
+/** Move a scratch session's folder into `parent`; returns the new path. */
+export async function moveSessionFolder(token: string, sessionId: string, parent: string): Promise<{ path: string; place: SessionPlace }> {
+  const res = await transport.authFetch(`/api/sessions/${encodeURIComponent(sessionId)}/move`, {
+    method: 'POST',
+    headers: headers(token),
+    body: JSON.stringify({ parent }),
+  })
+  if (!res.ok) {
+    const data = await errorBody(res, 'Could not move the folder')
+    throw new Error(data.error ?? `Could not move the folder: ${res.status}`)
+  }
+  return jsonBody<{ path: string; place: SessionPlace }>(res)
+}
+
+/** Publish a session's folder to GitHub (commit everything, gh repo create --push). */
+export async function publishToGitHub(
+  token: string, sessionId: string, choice: { owner: string; name: string; visibility: 'private' | 'public' },
+): Promise<{ url: string; place: SessionPlace }> {
+  const res = await transport.authFetch(`/api/sessions/${encodeURIComponent(sessionId)}/publish`, {
+    method: 'POST',
+    headers: headers(token),
+    body: JSON.stringify(choice),
+  })
+  if (!res.ok) {
+    const data = await errorBody(res, 'Publishing failed')
+    throw new Error(data.error ?? `Publishing failed: ${res.status}`)
+  }
+  return jsonBody<{ url: string; place: SessionPlace }>(res)
+}
+
 /** Run `git init` in a session's folder; returns the session's new place. */
 export async function gitInit(token: string, sessionId: string): Promise<SessionPlace> {
   const res = await transport.authFetch(`/api/sessions/${encodeURIComponent(sessionId)}/git-init`, {
