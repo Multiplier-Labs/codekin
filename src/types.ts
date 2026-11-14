@@ -68,6 +68,11 @@ export const PROVIDERS: { id: CodingProvider; label: string; description: string
   { id: 'grok', label: 'Grok', description: 'Grok Build CLI (SpaceXAI)' },
 ]
 
+/** One spelling per harness, shared with the sidebar mark — see PROVIDERS. */
+export function providerLabel(provider: CodingProvider): string {
+  return PROVIDERS.find(p => p.id === provider)?.label ?? provider
+}
+
 /**
  * Harnesses that may run unattended — Agent Joe, its delegated sessions, and
  * workflows.
