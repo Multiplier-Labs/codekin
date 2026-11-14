@@ -5,11 +5,19 @@
  * a way back and, on wider-than-phone windows, the agent's latest line.
  */
 
-import { IconChevronLeft, IconHierarchy2, IconMessage, IconTable, IconX } from '@tabler/icons-react'
+import { useEffect, useRef, useState } from 'react'
+import { IconChevronLeft, IconGitCompare, IconHierarchy2, IconMessage, IconTable, IconX } from '@tabler/icons-react'
 import type { CanvasApi } from '../../hooks/useCanvas'
-import { relativeTime, sourceLabel } from '../../lib/canvas'
 import { CanvasItemPicker } from './CanvasItemPicker'
 import { CanvasItemView } from './CanvasItemView'
+import { CanvasHeaderActions, RevisionPicker } from './CanvasHeaderActions'
+import { CompareView } from './CompareView'
+import { RevisionBar } from './RevisionBar'
+
+/** Below this Canvas width, view source and copy fold into the ⋯ menu. */
+const NARROW = 520
+/** From this Canvas width, Markdown items show a table of contents. */
+const TOC_FROM = 860
 
 interface Props {
   canvas: CanvasApi
@@ -31,10 +39,66 @@ const SUGGESTIONS = [
 ]
 
 export function CanvasPanel({ canvas, replacesChat, isMobile, onBackToChat, lastAgentLine, onSuggest, onPointerDown }: Props) {
-  const { items, selected, view } = canvas
-  const revisionMeta = selected && view.state !== 'empty'
-    ? `${selected.pinnedRevision !== undefined ? `Pinned at rev ${view.revision}` : `rev ${view.revision}`} · ${relativeTime(selected.revisions.find(r => r.n === view.revision)?.createdAt ?? selected.updatedAt)}`
+  const { items, selected, view, compare } = canvas
+  const mainRef = useRef<HTMLElement>(null)
+  const [width, setWidth] = useState(1000)
+  const [sourceMode, setSourceMode] = useState(false)
+  const viewKey = view.state === 'empty' ? '' : `${view.item.id}@${view.revision}`
+
+  useEffect(() => {
+    const el = mainRef.current
+    if (!el) return
+    const observer = new ResizeObserver(([entry]) => { setWidth(entry.contentRect.width) })
+    observer.observe(el)
+    return () => { observer.disconnect() }
+  }, [])
+
+  // A different item or revision starts rendered, at the top, not reading.
+  useEffect(() => {
+    setSourceMode(false) // eslint-disable-line react-hooks/set-state-in-effect -- reset per revision
+    canvas.setReading(false)
+  }, [viewKey, canvas.setReading]) // eslint-disable-line react-hooks/exhaustive-deps -- setReading is stable
+
+  // Reading: scrolled into the item, or text selected in it.
+  const scrolled = useRef(false)
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const itemId = selected?.id
+  // Another item starts at the top.
+  useEffect(() => {
+    scrollRef.current?.scrollTo({ top: 0 })
+    scrolled.current = false
+  }, [itemId])
+  useEffect(() => {
+    const onSelection = () => {
+      const sel = document.getSelection()
+      const inside = !!sel && !sel.isCollapsed && !!mainRef.current?.contains(sel.anchorNode)
+      canvas.setReading(scrolled.current || inside)
+    }
+    document.addEventListener('selectionchange', onSelection)
+    return () => { document.removeEventListener('selectionchange', onSelection) }
+  }, [canvas.setReading]) // eslint-disable-line react-hooks/exhaustive-deps -- setReading is stable
+
+  const narrow = width < NARROW
+  const revisionPicker = selected && view.state !== 'empty'
+    ? <RevisionPicker item={selected} revision={view.revision} onShow={canvas.showRevision} />
     : null
+  const actions = selected && view.state !== 'empty' && (
+    <CanvasHeaderActions
+      item={selected}
+      revision={view.revision}
+      narrow={narrow}
+      sourceMode={sourceMode}
+      onToggleSource={() => { setSourceMode(m => !m) }}
+      copyText={view.state === 'ready' && selected.kind !== 'image' ? view.content.content : undefined}
+      onPin={canvas.pin}
+      onCompare={view.revision < selected.latest
+        ? () => { canvas.setCompare({ from: view.revision, to: selected.latest }) }
+        : view.revision > 1 && selected.revisions.some(r => r.n === view.revision - 1)
+          ? () => { canvas.setCompare({ from: view.revision - 1, to: view.revision }) }
+          : undefined}
+      onDelete={() => { canvas.remove(selected.id) }}
+    />
+  )
 
   const back = replacesChat && (
     <button
@@ -60,6 +124,7 @@ export function CanvasPanel({ canvas, replacesChat, isMobile, onBackToChat, last
 
   return (
     <main
+      ref={mainRef}
       aria-label="Canvas"
       className="canvas-panel flex min-h-0 min-w-0 flex-1 flex-col bg-page"
       onPointerDown={onPointerDown}
@@ -71,11 +136,9 @@ export function CanvasPanel({ canvas, replacesChat, isMobile, onBackToChat, last
             <div className="flex min-w-0 flex-1 justify-center">
               {selected ? <CanvasItemPicker items={items} selected={selected} onSelect={canvas.select} compact /> : <span className="text-meta text-ink-muted">Canvas</span>}
             </div>
-            <span className="w-16 shrink-0" />
+            <span className="flex w-16 shrink-0 justify-end">{actions}</span>
           </header>
-          {revisionMeta && selected && (
-            <div className="shrink-0 border-b border-edge px-4 py-1.5 text-meta text-ink-muted">{sourceLabel(selected)} · {revisionMeta}</div>
-          )}
+          {revisionPicker && <div className="shrink-0 border-b border-edge px-2 py-0.5">{revisionPicker}</div>}
         </>
       ) : (
         <header className="flex h-12 shrink-0 items-center gap-3 border-b border-edge bg-surface px-3">
@@ -85,8 +148,9 @@ export function CanvasPanel({ canvas, replacesChat, isMobile, onBackToChat, last
           {selected
             ? <CanvasItemPicker items={items} selected={selected} onSelect={canvas.select} />
             : <span className="text-meta text-ink-muted">No items</span>}
-          {revisionMeta && selected && <span className="min-w-0 truncate text-meta text-ink-muted">{sourceLabel(selected)} · {revisionMeta}</span>}
+          {revisionPicker}
           <span className="flex-1" />
+          {actions}
           {close}
         </header>
       )}
@@ -100,10 +164,36 @@ export function CanvasPanel({ canvas, replacesChat, isMobile, onBackToChat, last
         </div>
       )}
 
-      <div className="chat-scroll flex min-h-0 flex-1 flex-col overflow-y-auto">
+      {selected && view.state !== 'empty' && (compare ? (
+        <div className="flex shrink-0 items-center gap-2 border-b border-edge bg-surface px-4 py-1.5 text-meta text-ink-muted" role="status">
+          <IconGitCompare size={15} className="shrink-0" aria-hidden />
+          <span className="min-w-0 flex-1 truncate">Comparing rev {compare.from} with rev {compare.to}{sourceMode ? ' (source)' : ''}</span>
+          <button type="button" onClick={() => { canvas.setCompare(null) }} className="shrink-0 font-medium text-primary-5 underline-offset-2 hover:underline">Done</button>
+        </div>
+      ) : (
+        <RevisionBar
+          item={selected}
+          revision={view.revision}
+          onShowLatest={() => { canvas.showRevision(selected.latest === (selected.pinnedRevision ?? selected.latest) ? null : selected.latest) }}
+          onCompare={() => { canvas.setCompare({ from: view.revision, to: selected.latest }) }}
+        />
+      ))}
+
+      <div
+        ref={scrollRef}
+        className="chat-scroll flex min-h-0 flex-1 flex-col overflow-y-auto"
+        onScroll={(e) => {
+          const now = e.currentTarget.scrollTop > 40
+          if (now !== scrolled.current) { scrolled.current = now; canvas.setReading(now) }
+        }}
+      >
         {view.state === 'empty'
           ? <CanvasEmpty onSuggest={onSuggest} />
-          : <CanvasItemView key={`${view.item.id}@${view.revision}`} view={view} onAsk={onSuggest} onOpenFile={canvas.openFile} />}
+          : compare && selected
+            ? <CompareView item={selected} from={compare.from} to={compare.to} a={canvas.revisionContent(compare.from)} b={canvas.revisionContent(compare.to)} source={sourceMode} />
+            : sourceMode && view.state === 'ready'
+              ? <pre className="px-8 py-6 font-mono text-meta text-ink whitespace-pre-wrap break-words">{view.content.content}</pre>
+              : <CanvasItemView key={viewKey} view={view} onAsk={onSuggest} onOpenFile={canvas.openFile} toc={width >= TOC_FROM} />}
       </div>
 
       {replacesChat && !isMobile && lastAgentLine && (

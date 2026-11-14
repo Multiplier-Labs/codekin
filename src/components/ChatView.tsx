@@ -688,6 +688,9 @@ export function ChatView({ messages, fontSize, disabled, planningMode, activityL
             // milestones for the same task stay as a compact record.
             const latestTaskCard = new Map<string, number>()
             messages.forEach((m, idx) => { if (m.type === 'joe' && m.task) latestTaskCard.set(m.task.id, idx) })
+            // Likewise only an item's newest Canvas card shows its live state (open, pinned).
+            const latestCanvasCard = new Map<string, ChatMessage>()
+            for (const m of messages) if (m.type === 'canvas_card') latestCanvasCard.set(m.itemId, m)
 
             // Group consecutive tool_group + tool_output messages into ToolRuns
             let i = 0
@@ -741,7 +744,7 @@ export function ChatView({ messages, fontSize, disabled, planningMode, activityL
                   </Row>
                 )
                 for (const c of run.cards) {
-                  if (canvas) nodes.push(<Row key={c.key || `card-${c.itemId}-${c.revision}`} isMobile={isMobile}><CanvasChatCard msg={c} ctx={canvas} /></Row>)
+                  if (canvas) nodes.push(<Row key={c.key || `card-${c.itemId}-${c.revision}`} isMobile={isMobile}><CanvasChatCard msg={c} ctx={canvas} latest={latestCanvasCard.get(c.itemId) === c} /></Row>)
                 }
                 continue
               }
@@ -790,7 +793,7 @@ export function ChatView({ messages, fontSize, disabled, planningMode, activityL
                 case 'tentative':
                   node = <TentativeMessage msg={msg} fontSize={fontSize} />; break
                 case 'canvas_card':
-                  node = canvas ? <CanvasChatCard msg={msg} ctx={canvas} /> : null; break
+                  node = canvas ? <CanvasChatCard msg={msg} ctx={canvas} latest={latestCanvasCard.get(msg.itemId) === msg} /> : null; break
                 case 'joe':
                   node = <JoeChatMessage msg={msg} fontSize={fontSize} ctx={joe ?? { token: '', agentName: agentName ?? 'Joe', tasks: {} }} current={!msg.task || latestTaskCard.get(msg.task.id) === i} />; break
               }

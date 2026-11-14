@@ -50,6 +50,23 @@ export interface CanvasApi {
   handleMessage: (msg: WsServerMessage) => boolean
   /** Ask for the joined session's items (after joining or reconnecting). */
   refresh: () => void
+  /** View a specific revision of the selected item; null follows the pinned or latest one. */
+  showRevision: (revision: number | null) => void
+  /** Pin the selected item at a revision (new ones then wait), or unpin with null. */
+  pin: (revision: number | null) => void
+  /** Delete an item and its revisions. */
+  remove: (itemId: string) => void
+  /**
+   * The user is reading (scrolled into the item or has a selection). A new
+   * revision arriving then waits behind the revision bar instead of
+   * replacing the view.
+   */
+  setReading: (reading: boolean) => void
+  /** Two revisions of the selected item being compared, or null. */
+  compare: { from: number; to: number } | null
+  setCompare: (compare: { from: number; to: number } | null) => void
+  /** Content of one revision of the selected item (fetched while comparing). */
+  revisionContent: (revision: number) => CanvasContent | 'loading' | { error: string }
 }
 
 const contentKey = (sessionId: string, itemId: string, revision: number) => `${sessionId}/${itemId}@${revision}`
@@ -80,6 +97,12 @@ export function useCanvas(sessionId: string | null, send: (msg: WsClientMessage)
   const [contents, setContents] = useState<Record<string, CanvasContent | undefined>>({})
   const [errors, setErrors] = useState<Record<string, string | undefined>>({})
   const [notice, setNotice] = useState<string | null>(null)
+  /** Revision the user chose (or a new one was held back from), per session/item. */
+  const [viewRev, setViewRev] = useState<Record<string, number | undefined>>({})
+  const [compare, setCompare] = useState<{ from: number; to: number } | null>(null)
+  const readingRef = useRef(false)
+  /** Latest revision seen per session/item, to notice new ones. */
+  const seenLatest = useRef(new Map<string, number>())
   const sessionsPref = usePref('canvasSessions')
   // Latest values for the message handler, which is stable across renders.
   const itemsRef = useRef(itemsBySession)
@@ -99,15 +122,37 @@ export function useCanvas(sessionId: string | null, send: (msg: WsClientMessage)
   const selected = items.find(i => i.id === sessionState?.itemId) ?? items.at(-1) ?? null
   const open = !!sessionId && !!sessionState?.open
 
-  const revision = selected ? shownRevision(selected) : 0
+  const itemKey = selected && sessionId ? `${sessionId}/${selected.id}` : null
+  const chosen = itemKey ? viewRev[itemKey] : undefined
+  const revision = selected
+    ? chosen !== undefined && selected.revisions.some(r => r.n === chosen) ? chosen : shownRevision(selected)
+    : 0
   const key = selected && sessionId ? contentKey(sessionId, selected.id, revision) : null
 
-  // Fetch the shown revision when Canvas is open and it isn't cached.
+  // A new revision of the item being read waits instead of replacing the view.
   useEffect(() => {
-    if (!open || !key || !selected || contents[key] || errors[key] !== undefined || inflight.current.has(key)) return
-    inflight.current.add(key)
-    send({ type: 'canvas_get', itemId: selected.id, revision })
-  }, [open, key, selected, revision, contents, errors, send])
+    if (!selected || !itemKey) return
+    const seen = seenLatest.current.get(itemKey)
+    seenLatest.current.set(itemKey, selected.latest)
+    if (seen !== undefined && selected.latest > seen && readingRef.current && selected.pinnedRevision === undefined && viewRev[itemKey] === undefined) {
+      setViewRev(prev => ({ ...prev, [itemKey]: seen })) // eslint-disable-line react-hooks/set-state-in-effect -- holds the view when a revision arrives
+    }
+  }, [selected, itemKey, viewRev])
+
+  // Comparing applies to the selected item only.
+  useEffect(() => { setCompare(null) }, [itemKey]) // eslint-disable-line react-hooks/set-state-in-effect -- reset per item
+
+  // Fetch the shown revision (and both compared ones) when Canvas is open and they aren't cached.
+  useEffect(() => {
+    if (!open || !selected || !sessionId) return
+    const wanted = new Set([revision, ...(compare ? [compare.from, compare.to] : [])])
+    for (const n of wanted) {
+      const k = contentKey(sessionId, selected.id, n)
+      if (contents[k] || errors[k] !== undefined || inflight.current.has(k)) continue
+      inflight.current.add(k)
+      send({ type: 'canvas_get', itemId: selected.id, revision: n })
+    }
+  }, [open, selected, sessionId, revision, compare, contents, errors, send])
 
   const shownContent = key ? contents[key] : undefined
   const shownError = key ? errors[key] : undefined
@@ -157,6 +202,31 @@ export function useCanvas(sessionId: string | null, send: (msg: WsClientMessage)
   const refresh = useCallback(() => {
     if (sessionId) send({ type: 'canvas_list' })
   }, [sessionId, send])
+
+  const showRevision = useCallback((n: number | null) => {
+    if (!itemKey) return
+    setViewRev(prev => ({ ...prev, [itemKey]: n ?? undefined }))
+  }, [itemKey])
+
+  const pin = useCallback((n: number | null) => {
+    if (!selected || !itemKey) return
+    send({ type: 'canvas_pin', itemId: selected.id, revision: n })
+    // Pinned or unpinned, the view follows the pin from here.
+    setViewRev(prev => ({ ...prev, [itemKey]: undefined }))
+  }, [selected, itemKey, send])
+
+  const remove = useCallback((itemId: string) => {
+    send({ type: 'canvas_delete', itemId })
+  }, [send])
+
+  const setReading = useCallback((reading: boolean) => { readingRef.current = reading }, [])
+
+  const revisionContent = useCallback((n: number): CanvasContent | 'loading' | { error: string } => {
+    if (!selected || !sessionId) return 'loading'
+    const k = contentKey(sessionId, selected.id, n)
+    const error = errors[k]
+    return contents[k] ?? (error !== undefined ? { error } : 'loading')
+  }, [selected, sessionId, contents, errors])
 
   const handleMessage = useCallback((msg: WsServerMessage): boolean => {
     switch (msg.type) {
@@ -208,5 +278,6 @@ export function useCanvas(sessionId: string | null, send: (msg: WsClientMessage)
     items, loaded: !!sessionId && sessionId in itemsBySession, selected, view, open, notice,
     dismissNotice: () => { setNotice(null) },
     setOpen, toggle, select, step, openFile, handleMessage, refresh,
+    showRevision, pin, remove, setReading, compare, setCompare, revisionContent,
   }
 }

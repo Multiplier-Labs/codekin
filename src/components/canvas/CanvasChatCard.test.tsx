@@ -53,3 +53,15 @@ describe('CanvasChatCard', () => {
     expect(render(card(), { items: null, openItemId: null, onOpen: vi.fn() }).querySelector('button')).not.toBeNull()
   })
 })
+
+describe('CanvasChatCard history', () => {
+  it('shows live state only on the item\'s latest card', () => {
+    const ctx = { items: [item({ latest: 4, pinnedRevision: 3 })], openItemId: 'i1', onOpen: vi.fn() }
+    container = document.createElement('div')
+    document.body.appendChild(container)
+    root = createRoot(container)
+    act(() => { root!.render(<CanvasChatCard msg={card({ action: 'updated', revision: 2 })} ctx={ctx} latest={false} />) })
+    expect(container.textContent).toContain('updated · rev 2')
+    expect(container.textContent).not.toContain('open')
+  })
+})

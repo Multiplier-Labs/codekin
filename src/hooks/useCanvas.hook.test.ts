@@ -171,3 +171,47 @@ describe('useCanvas auto-open', () => {
     expect(asked).toEqual([])
   })
 })
+
+describe('useCanvas revisions', () => {
+  const revs = (n: number) => Array.from({ length: n }, (_, i) => ({ n: i + 1, createdAt: '2026-11-14T10:00:00Z', size: 1, mediaType: 'text/markdown' }))
+
+  it('replaces the view with a new revision when idle, and holds it while reading', () => {
+    render('s1')
+    act(() => { hook.select('a') })
+    deliver({ type: 'canvas_items', sessionId: 's1', items: [item('a', { latest: 1, revisions: revs(1) })] })
+    deliver({ type: 'canvas_items', sessionId: 's1', items: [item('a', { latest: 2, revisions: revs(2) })] })
+    expect(hook.view).toMatchObject({ revision: 2 })
+
+    act(() => { hook.setReading(true) })
+    deliver({ type: 'canvas_items', sessionId: 's1', items: [item('a', { latest: 3, revisions: revs(3) })] })
+    expect(hook.view).toMatchObject({ revision: 2 })
+    act(() => { hook.showRevision(null) })
+    expect(hook.view).toMatchObject({ revision: 3 })
+  })
+
+  it('shows a chosen revision, pins and deletes through the socket', () => {
+    render('s1')
+    act(() => { hook.select('a') })
+    deliver({ type: 'canvas_items', sessionId: 's1', items: [item('a', { latest: 3, revisions: revs(3) })] })
+    act(() => { hook.showRevision(1) })
+    expect(hook.view).toMatchObject({ revision: 1 })
+    expect(sent).toContainEqual({ type: 'canvas_get', itemId: 'a', revision: 1 })
+    act(() => { hook.pin(1) })
+    expect(sent.at(-1)).toEqual({ type: 'canvas_pin', itemId: 'a', revision: 1 })
+    act(() => { hook.remove('a') })
+    expect(sent.at(-1)).toEqual({ type: 'canvas_delete', itemId: 'a' })
+  })
+
+  it('fetches both revisions for compare and exposes their content', () => {
+    render('s1')
+    act(() => { hook.select('a') })
+    deliver({ type: 'canvas_items', sessionId: 's1', items: [item('a', { latest: 3, revisions: revs(3) })] })
+    act(() => { hook.setCompare({ from: 1, to: 3 }) })
+    expect(sent.filter(m => m.type === 'canvas_get').map(m => (m as { revision: number }).revision).sort()).toEqual([1, 3])
+    expect(hook.revisionContent(1)).toBe('loading')
+    deliver({ type: 'canvas_item', sessionId: 's1', item: item('a', { latest: 3, revisions: revs(3) }), revision: 1, content: 'old', encoding: 'utf8' })
+    expect(hook.revisionContent(1)).toMatchObject({ content: 'old' })
+    deliver({ type: 'canvas_error', sessionId: 's1', message: 'gone', itemId: 'a', revision: 3 })
+    expect(hook.revisionContent(3)).toEqual({ error: 'gone' })
+  })
+})
