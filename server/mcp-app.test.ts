@@ -1,6 +1,6 @@
 /** Tests for MCP Apps helpers: UI metadata, Claude tool names, results and resource documents. */
 import { describe, it, expect } from 'vitest'
-import { appDocument, claudeMcpToolName, findClaudeAppTool, isOwnServer, MAX_APP_HTML, showsApp, toContentBlocks, toolUiResourceUri } from './mcp-app.js'
+import { appDocument, appToolRefusal, claudeMcpToolName, claudeServerTools, codexServerTools, findClaudeAppTool, isOwnServer, MAX_APP_HTML, showsApp, toCallResult, toContentBlocks, toolUiResourceUri, toolVisibleToApps } from './mcp-app.js'
 
 describe('MCP Apps helpers', () => {
   it('reads the UI resource from tool metadata, current or legacy key', () => {
@@ -44,5 +44,32 @@ describe('MCP Apps helpers', () => {
     expect(findClaudeAppTool(status, 'mcp__latency__plain')).toBeNull()
     expect(findClaudeAppTool(status, 'mcp__codekin_canvas__canvas_show')).toBeNull()
     expect(findClaudeAppTool({}, 'mcp__latency__latency_report')).toBeNull()
+  })
+})
+
+describe('app tool calls', () => {
+  it('lets apps call tools visible to them, on a connected server', () => {
+    expect(toolVisibleToApps(undefined)).toBe(true)
+    expect(toolVisibleToApps({ ui: { visibility: ['app'] } })).toBe(true)
+    expect(toolVisibleToApps({ ui: { visibility: ['model'] } })).toBe(false)
+    const tools = [{ name: 'refresh' }, { name: 'secret', _meta: { ui: { visibility: ['model'] } } }]
+    expect(appToolRefusal('latency', 'refresh', tools)).toBeNull()
+    expect(appToolRefusal('latency', 'secret', tools)).toMatch(/for the agent only/)
+    expect(appToolRefusal('latency', 'nope', tools)).toMatch(/no tool named nope/)
+    expect(appToolRefusal('latency', 'refresh', null)).toMatch(/not connected/)
+    expect(appToolRefusal('codekin_canvas', 'canvas_show', tools)).toMatch(/Codekin's own/)
+  })
+
+  it('reads tool lists from Claude and Codex', () => {
+    expect(claudeServerTools({ mcpServers: [{ name: 'a', status: 'connected', tools: [{ name: 't' }] }] }, 'a')).toEqual([{ name: 't' }])
+    expect(claudeServerTools({ mcpServers: [{ name: 'a', status: 'failed', tools: [] }] }, 'a')).toBeNull()
+    expect(claudeServerTools({ mcpServers: [] }, 'a')).toBeNull()
+    expect(codexServerTools({ data: [{ name: 'a', tools: { t: { inputSchema: {} } } }] }, 'a')).toEqual([{ inputSchema: {}, name: 't' }])
+    expect(codexServerTools({ data: [] }, 'a')).toBeNull()
+  })
+
+  it('normalizes a tool result', () => {
+    expect(toCallResult({ content: 'hi', structuredContent: null, isError: true })).toEqual({ content: [{ type: 'text', text: 'hi' }], isError: true })
+    expect(toCallResult(null)).toEqual({ content: [] })
   })
 })

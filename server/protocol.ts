@@ -88,6 +88,12 @@ export type WsClientMessage =
   /** Pin an item at a revision so new ones wait; null unpins. */
   | { type: 'canvas_pin'; itemId: string; revision: number | null }
   | { type: 'canvas_delete'; itemId: string }
+  /**
+   * An MCP App in Canvas calls a tool on its own server. `confirmed`: the
+   * user approved this call in Codekin (asked for when the reply says
+   * needsConfirmation).
+   */
+  | { type: 'mcp_app_call'; itemId: string; callId: string; tool: string; arguments?: Record<string, unknown>; confirmed?: boolean }
   // Live preview (docs/CANVAS-SPEC.md §9): a dev server shown in Canvas through Codekin's proxy.
   /** The session folder's launch configurations (.claude/launch.json). */
   | { type: 'preview_configs' }
@@ -189,6 +195,8 @@ export type WsServerMessage =
   | { type: 'canvas_event'; sessionId: string; itemId: string; kind: CanvasItemKind; title: string; revision: number; action: 'created' | 'updated'; by?: CanvasItemSource['type'] }
   /** A failed request. `itemId`/`revision` are set when it was a canvas_get for that revision. */
   | { type: 'canvas_error'; message: string; sessionId?: string; itemId?: string; revision?: number }
+  /** Reply to mcp_app_call (to the asking client only): the tool's result for the app, or why it didn't run. */
+  | { type: 'mcp_app_result'; sessionId: string; itemId: string; callId: string; result?: { content: unknown[]; structuredContent?: unknown; _meta?: unknown; isError?: boolean }; error?: string; needsConfirmation?: boolean }
   /** A preview's server and proxy state; broadcast on every change. */
   | { type: 'preview_state'; sessionId: string; preview: PreviewState }
   | { type: 'preview_configs'; sessionId: string; file: string; configs: PreviewLaunchConfig[]; error?: string }

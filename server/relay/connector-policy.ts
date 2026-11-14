@@ -395,6 +395,8 @@ export function checkClientFrame(policy: ChannelPolicy, state: ChannelState, fra
       const read = requirePermission(policy, state, 'view_diff', 'Viewing files is not granted')
       return read.allowed ? requirePermission(policy, state, 'send_prompt', 'Adding to this session is not granted') : read
     }
+    // An MCP App calling a tool runs it on the owner's machine: owner-only
+    // (mcp_app_call falls through), like the tools the agent runs.
     // Previews: the proxy is only reachable on the machine (or its network),
     // never through the relay. Starting, stopping and restarting run commands
     // and fall through to owner-only; a grantee may not even list them.

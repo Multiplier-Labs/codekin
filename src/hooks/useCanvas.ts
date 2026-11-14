@@ -90,7 +90,17 @@ export interface CanvasApi {
   /** Content of one revision of the selected item (fetched while comparing). */
   revisionContent: (revision: number) => CanvasContent | 'loading' | { error: string }
   preview: PreviewApi
+  /** An MCP App in Canvas calls a tool on its own server (docs/CANVAS-SPEC.md §8). */
+  callAppTool: (itemId: string, tool: string, args: Record<string, unknown>, confirmed: boolean) => Promise<AppToolOutcome>
 }
+
+/** The reply to an app's tool call. */
+export type AppToolOutcome =
+  | { ok: true; result: { content: unknown[]; structuredContent?: unknown; _meta?: unknown; isError?: boolean } }
+  | { ok: false; error: string; needsConfirmation?: boolean }
+
+/** Longer than the server's own limit (an approval prompt may be waiting), so its answer arrives first. */
+const APP_CALL_TIMEOUT_MS = 11 * 60 * 1000
 
 const contentKey = (sessionId: string, itemId: string, revision: number) => `${sessionId}/${itemId}@${revision}`
 
@@ -140,6 +150,8 @@ export function useCanvas(sessionId: string | null, send: (msg: WsClientMessage)
   const [previewStates, setPreviewStates] = useState<Record<string, PreviewState | undefined>>({})
   const [previewLogs, setPreviewLogs] = useState<Record<string, string[] | undefined>>({})
   const [launchConfigs, setLaunchConfigs] = useState<Record<string, PreviewApi['configs'] | undefined>>({})
+  /** App tool calls waiting for mcp_app_result, by callId. */
+  const appCalls = useRef(new Map<string, (outcome: AppToolOutcome) => void>())
   /** A launch configuration the user started: its preview is shown when its state arrives. */
   const pendingLaunch = useRef<{ sessionId: string; name: string } | null>(null)
   /** A file the user asked to open: shown as soon as its item appears. */
@@ -295,6 +307,14 @@ export function useCanvas(sessionId: string | null, send: (msg: WsClientMessage)
         }
         return true
       }
+      case 'mcp_app_result': {
+        const resolve = appCalls.current.get(msg.callId)
+        if (resolve) {
+          appCalls.current.delete(msg.callId)
+          resolve(msg.result ? { ok: true, result: msg.result } : { ok: false, error: msg.error ?? 'The tool call failed.', ...(msg.needsConfirmation ? { needsConfirmation: true } : {}) })
+        }
+        return true
+      }
       case 'preview_state': {
         setPreviewStates(prev => ({ ...prev, [`${msg.sessionId}/${msg.preview.itemId}`]: msg.preview }))
         const pending = pendingLaunch.current
@@ -349,6 +369,18 @@ export function useCanvas(sessionId: string | null, send: (msg: WsClientMessage)
     configs: sessionId ? launchConfigs[sessionId] ?? null : null,
   }), [previewActions, sessionId, previewStates, previewLogs, launchConfigs])
 
+  const callAppTool = useCallback((itemId: string, tool: string, args: Record<string, unknown>, confirmed: boolean): Promise<AppToolOutcome> => {
+    const callId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        appCalls.current.delete(callId)
+        resolve({ ok: false, error: 'The tool call got no answer.' })
+      }, APP_CALL_TIMEOUT_MS)
+      appCalls.current.set(callId, (outcome) => { clearTimeout(timer); resolve(outcome) })
+      send({ type: 'mcp_app_call', itemId, callId, tool, arguments: args, ...(confirmed ? { confirmed: true } : {}) })
+    })
+  }, [send])
+
   // A new session starts without a stale notice.
   useEffect(() => { setNotice(null) }, [sessionId]) // eslint-disable-line react-hooks/set-state-in-effect -- reset per session
 
@@ -356,6 +388,6 @@ export function useCanvas(sessionId: string | null, send: (msg: WsClientMessage)
     items, loaded: !!sessionId && sessionId in itemsBySession, selected, view, open, notice,
     dismissNotice: () => { setNotice(null) },
     setOpen, toggle, select, step, openFile, handleMessage, refresh,
-    openAt, showRevision, pin, remove, setReading, compare, setCompare, revisionContent, preview,
+    openAt, showRevision, pin, remove, setReading, compare, setCompare, revisionContent, preview, callAppTool,
   }
 }

@@ -114,6 +114,84 @@ describe('ClaudeProcess.start() — process event handlers', () => {
     }])
   })
 
+  describe('app tool calls (mcp_call)', () => {
+    const setup = (caps: string[]) => {
+      const cp = new ClaudeProcess('/tmp') as CP
+      cp.start()
+      const line = (m: unknown) => { fakeProc.stdout.write(JSON.stringify(m) + '\n') }
+      const sent = () => (fakeProc.stdin.write.mock.calls as unknown[][])
+        .map(c => { try { return JSON.parse(String(c[0])) as { type?: string; request_id?: string; request?: Record<string, unknown> } } catch { return {} } })
+        .filter(m => m.type === 'control_request')
+      const answer = (subtype: string, response: unknown, ok = true) => {
+        const req = sent().filter(m => m.request?.subtype === subtype).at(-1)!
+        line({ type: 'control_response', response: ok ? { subtype: 'success', request_id: req.request_id, response } : { subtype: 'error', request_id: req.request_id, error: response } })
+      }
+      line({ type: 'system', subtype: 'init', session_id: 's', model: 'm', capabilities: ['mcp_tool_ui_meta_v1', 'mcp_read_resource_v1', ...caps] })
+      return { cp, sent, answer }
+    }
+    const settle = () => new Promise(r => setTimeout(r, 20))
+    const status = { mcpServers: [{ name: 'latency', status: 'connected', tools: [
+      { name: 'refresh', _meta: {} },
+      { name: 'secret', _meta: { ui: { visibility: ['model'] } } },
+    ] }] }
+
+    it('calls the tool with the session\'s permission check, result kept from the model', async () => {
+      const { cp, sent, answer } = setup(['mcp_call_check_permissions_v1', 'mcp_call_result_not_for_model_v1'])
+      await settle()
+      const pending = cp.callAppTool({ server: 'latency', tool: 'refresh', arguments: { days: 3 }, confirmed: false })
+      await settle()
+      answer('mcp_status', status)
+      await settle()
+      expect(sent().find(m => m.request?.subtype === 'mcp_call')!.request).toEqual({
+        subtype: 'mcp_call', tool: 'mcp__latency__refresh', arguments: { days: 3 }, check_permissions: true, result_not_for_model: true,
+      })
+      answer('mcp_call', { content: [{ type: 'text', text: 'ok' }], structuredContent: { rows: [1] } })
+      expect(await pending).toEqual({ ok: true, result: { content: [{ type: 'text', text: 'ok' }], structuredContent: { rows: [1] } } })
+    })
+
+    it('passes a refusal back as an error', async () => {
+      const { cp, answer } = setup(['mcp_call_check_permissions_v1'])
+      await settle()
+      const pending = cp.callAppTool({ server: 'latency', tool: 'refresh', arguments: {}, confirmed: false })
+      await settle(); answer('mcp_status', status); await settle()
+      answer('mcp_call', 'The tool did not run: denied by the user', false)
+      expect(await pending).toEqual({ ok: false, error: 'The tool did not run: denied by the user' })
+    })
+
+    it('refuses agent-only tools and asks for confirmation when the CLI cannot check permissions', async () => {
+      const { cp, sent, answer } = setup(['mcp_call_check_permissions_v1'])
+      await settle()
+      const agentOnly = cp.callAppTool({ server: 'latency', tool: 'secret', arguments: {}, confirmed: false })
+      await settle(); answer('mcp_status', status)
+      expect(await agentOnly).toMatchObject({ ok: false, error: expect.stringMatching(/for the agent only/) })
+      expect(sent().some(m => m.request?.subtype === 'mcp_call')).toBe(false)
+
+      const old = setup([])
+      await settle()
+      expect(await old.cp.callAppTool({ server: 'latency', tool: 'refresh', arguments: {}, confirmed: false })).toMatchObject({ ok: false, needsConfirmation: true })
+    })
+
+    it('asks initialize for the capabilities when no turn has run yet', async () => {
+      const cp = new ClaudeProcess('/tmp') as CP
+      cp.start()
+      const line = (m: unknown) => { fakeProc.stdout.write(JSON.stringify(m) + '\n') }
+      const sent = () => (fakeProc.stdin.write.mock.calls as unknown[][])
+        .map(c => { try { return JSON.parse(String(c[0])) as { type?: string; request_id?: string; request?: Record<string, unknown> } } catch { return {} } })
+        .filter(m => m.type === 'control_request')
+      const answer = (subtype: string, response: unknown) => {
+        const req = sent().filter(m => m.request?.subtype === subtype).at(-1)!
+        line({ type: 'control_response', response: { subtype: 'success', request_id: req.request_id, response } })
+      }
+      const pending = cp.callAppTool({ server: 'latency', tool: 'refresh', arguments: {}, confirmed: false })
+      await settle(); answer('initialize', { capabilities: ['mcp_call_check_permissions_v1', 'mcp_call_result_not_for_model_v1'] })
+      await settle(); answer('mcp_status', status)
+      await settle()
+      expect(sent().find(m => m.request?.subtype === 'mcp_call')!.request).toMatchObject({ check_permissions: true, result_not_for_model: true })
+      answer('mcp_call', { content: [] })
+      expect(await pending).toEqual({ ok: true, result: { content: [] } })
+    })
+  })
+
   it('leaves MCP tool calls alone when the CLI cannot describe tool UIs', async () => {
     const cp = new ClaudeProcess('/tmp') as CP
     cp.start()

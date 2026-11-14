@@ -1,6 +1,6 @@
 # Session Canvas
 
-**Status:** Slices 1–7 implemented: item model and store (#896), layout shell (#897), agent publishing (#898), renderers (#899), revisions (#900), selection → context (#901), the composer (#902), OpenCode tools (#903), the sandbox origin with charts and HTML items (#904), MCP Apps display (#905), and live preview of local dev servers.
+**Status:** Slices 1–7 implemented: item model and store (#896), layout shell (#897), agent publishing (#898), renderers (#899), revisions (#900), selection → context (#901), the composer (#902), OpenCode tools (#903), the sandbox origin with charts and HTML items (#904), MCP Apps display (#905), live preview of local dev servers (#906), and tool calls from MCP Apps.
 
 ## 1. Summary
 
@@ -104,6 +104,7 @@ The session list carries `canvas: { items, pinnedBehind }` per session, so the s
 - `canvas_item` frames for items opened from repository files also need `view_diff`, because their content is code, as with diffs.
 - `canvas_open_file` needs `view_diff` and `send_prompt`.
 - Pin and delete are owner-only.
+- Tool calls from MCP Apps (`mcp_app_call`) are owner-only: they run tools on the owner's machine.
 - Previews are owner-only, both the `preview_*` requests and the `preview_*` frames. Their state carries the proxy's key, and server output can carry anything the dev server prints.
 
 ## 4. Layout: canvas-forward
@@ -220,9 +221,16 @@ A tool whose definition declares a UI resource (`_meta.ui.resourceUri`, the MCP 
   - Codekin hosts it with ext-apps' `AppBridge`, loaded lazily, and sends the stored tool input and result.
 - **What the app can ask for:**
   - **open a link** or **send a message as you:** shown in Codekin's own UI and confirmed first;
-  - **call a tool:** refused for now;
+  - **call a tool** on its own server: see "Tool calls from apps" below;
   - **update model context, display mode:** accepted, inline only.
 - **Network:** apps get none, whatever their resource's `_meta.ui.csp` declares. Apps must be self-contained, the single-file pattern ext-apps recommends.
+- **Tool calls from apps.** Codekin advertises `serverTools` to the app and runs its `tools/call` requests through the session's agent CLI, without a model turn. The result goes back to the app and stays out of the agent's context.
+  - **Which tools.** Only tools on the server the app's item came from. The server is never one the app names. Tools whose `_meta.ui.visibility` leaves out `"app"` are refused, as are unknown tools and Codekin's own servers.
+  - **Claude Code** runs the call with the `mcp_call` control request. When the CLI advertises `mcp_call_check_permissions_v1`, the call goes through `check_permissions`, so it is decided as the agent's own call to that tool would be: permission rules and mode, managed settings and hooks. A refusal comes back to the app, and Canvas explains it: allow `mcp__<server>__<tool>`, or change the permission mode. With `mcp_call_result_not_for_model_v1` the result is the server's own, unshaped for a model. A CLI that can't check permissions runs a call only after the user confirmed it in Canvas. Before the first turn, which is when there is no `system/init` yet, the capabilities come from the `initialize` response.
+  - **Codex** runs it with `mcpServer/tool/call`. The app-server doesn't say whether it applies approvals to these calls, so the user confirms each one in Canvas first, seeing the tool and its arguments.
+  - **A stopped session** is started for the call. That needs no model turn, so it uses no quota. If a just-started Claude Code is still connecting to the server, Codekin waits for it.
+  - **Limits per app:** 4 calls at once, 30 a minute, 256 KiB of arguments and a 4 MiB result. A call waits at most 10 minutes, including an approval prompt.
+  - **Protocol.** `mcp_app_call { itemId, callId, tool, arguments, confirmed? }` is answered, to the asking client only, with `mcp_app_result { callId, result | error, needsConfirmation? }`. Over a relay it is owner-only, like the tools the agent runs.
 - **Codekin controls stay outside the sandbox frame.** Every request a sandboxed app makes on the user's behalf goes through a confirmation in Codekin's chrome. That covers sending a message, opening a link and calling a tool, and tool calls also go through the normal approval rules.
 
 ### Live preview
@@ -273,5 +281,6 @@ A `preview` item shows a dev server running on the machine Codekin runs on.
 | 5 | Sandbox origin | Separate origin and CSP, then sandboxed charts and HTML artifacts (done) |
 | 6 | MCP Apps (display) | Adapter enrichment for Claude and Codex, `AppBridge` host (done) |
 | 7 | Live preview | Local dev servers: proxy, launch configurations, picker, console and server output (done). Previews through the relay are not supported |
+| 8 | Interactive MCP Apps | Tool calls from apps through Claude Code `mcp_call` (session permission rules) and Codex `mcpServer/tool/call` (confirmed in Canvas) (done) |
 
-Interactive MCP Apps (app-initiated tool calls) and relay-tunnelled previews are out of scope until there is a supported path and evidence they're needed.
+Relay-tunnelled previews are out of scope until there is a supported path and evidence they're needed.

@@ -355,6 +355,19 @@ describe('CodexProcess', () => {
       }])
     })
 
+    it('runs an app\'s tool call only after the user confirmed it, on the app\'s server', async () => {
+      expect(await cxp.callAppTool({ server: 'latency', tool: 'refresh', arguments: {}, confirmed: false })).toMatchObject({ ok: false, needsConfirmation: true })
+      const pending = cxp.callAppTool({ server: 'latency', tool: 'refresh', arguments: { days: 3 }, confirmed: true })
+      await tick()
+      const list = writes(proc).find(w => w.method === 'mcpServerStatus/list')!
+      expect(list.params).toEqual({ threadId: 'thread-1', detail: 'toolsAndAuthOnly' })
+      await feed(proc, { id: list.id, result: { data: [{ name: 'latency', tools: { refresh: { name: 'refresh', inputSchema: {} } } }] } })
+      const call = writes(proc).find(w => w.method === 'mcpServer/tool/call')!
+      expect(call.params).toEqual({ server: 'latency', tool: 'refresh', threadId: 'thread-1', arguments: { days: 3 } })
+      await feed(proc, { id: call.id, result: { content: [{ type: 'text', text: 'ok' }], isError: null } })
+      expect(await pending).toEqual({ ok: true, result: { content: [{ type: 'text', text: 'ok' }] } })
+    })
+
     it('ignores MCP tool calls without a UI, failed ones and its own Canvas server', async () => {
       for (const item of [
         { type: 'mcpToolCall', id: 'a', server: 'x', tool: 't', status: 'completed', result: { content: [] }, mcpAppUi: null },

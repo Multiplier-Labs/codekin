@@ -321,6 +321,13 @@ export class CanvasSessions {
     }
   }
 
+  /** The MCP server an `mcp_app` item came from; null when the item isn't an MCP App. */
+  async mcpAppServer(sessionId: string, itemId: string): Promise<string | null> {
+    const item = this.store.list(sessionId).find(i => i.id === itemId)
+    if (!item || item.kind !== 'mcp_app' || item.source.type !== 'mcp') return null
+    return item.source.server
+  }
+
   async pin(sessionId: string, itemId: string, revision: unknown): Promise<string | null> {
     const session = this.deps.getSession(sessionId)
     if (!session) return 'Session not found'

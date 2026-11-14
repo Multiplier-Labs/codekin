@@ -95,3 +95,79 @@ export function findClaudeAppTool(status: unknown, toolName: string): { server: 
   }
   return null
 }
+
+// --- App-initiated tool calls (docs/CANVAS-SPEC.md §8, "MCP Apps") ---
+
+/** An app's request to call a tool on its own server. */
+export interface AppToolCallRequest {
+  server: string
+  tool: string
+  arguments: Record<string, unknown>
+  /** The user confirmed this call in Codekin (needed where the CLI can't apply the session's permission rules). */
+  confirmed: boolean
+}
+
+/** What the app gets back, or why Codekin didn't make the call. */
+export type AppToolCallOutcome =
+  | { ok: true; result: McpAppCall['result'] }
+  | { ok: false; error: string; needsConfirmation?: boolean }
+
+/** How long an app's tool call may take, including an approval prompt waiting for the user. */
+export const APP_TOOL_CALL_TIMEOUT_MS = 10 * 60 * 1000
+
+/** The largest result handed back to an app. */
+export const MAX_APP_RESULT = 4 * 1024 * 1024
+
+/**
+ * Whether an app may call a tool: its `_meta.ui.visibility` includes "app"
+ * (the default, when absent, is model and app).
+ */
+export function toolVisibleToApps(meta: unknown): boolean {
+  const visibility = (meta as { ui?: { visibility?: unknown } } | null | undefined)?.ui?.visibility
+  return !Array.isArray(visibility) || visibility.includes('app')
+}
+
+/** Why an app may not call `tool` on `server`, given the server's tool definitions; null when it may. */
+export function appToolRefusal(server: string, tool: string, tools: Array<{ name?: unknown; _meta?: unknown }> | null): string | null {
+  if (isOwnServer(server)) return 'Apps can\'t call Codekin\'s own tools.'
+  if (!tools) return `${server} is not connected to this session right now.`
+  const def = tools.find(t => t.name === tool)
+  if (!def) return `${server} has no tool named ${tool}.`
+  if (!toolVisibleToApps(def._meta)) return `${tool} is for the agent only; ${server} doesn't let its app call it.`
+  return null
+}
+
+/** Whether Claude Code is still connecting to a server (`mcp_status` says pending). */
+export function claudeServerPending(status: unknown, server: string): boolean {
+  const servers = (status as { mcpServers?: unknown } | null)?.mcpServers
+  return Array.isArray(servers) && (servers as Array<{ name?: unknown; status?: unknown }>).some(s => s.name === server && s.status === 'pending')
+}
+
+/** Claude Code `mcp_status` → one server's tool definitions; null when it isn't connected. */
+export function claudeServerTools(status: unknown, server: string): Array<{ name?: unknown; _meta?: unknown }> | null {
+  const servers = (status as { mcpServers?: unknown } | null)?.mcpServers
+  if (!Array.isArray(servers)) return null
+  const s = (servers as Array<{ name?: unknown; status?: unknown; tools?: unknown }>).find(x => x.name === server)
+  if (!s || (typeof s.status === 'string' && s.status !== 'connected') || !Array.isArray(s.tools)) return null
+  return s.tools as Array<{ name?: unknown; _meta?: unknown }>
+}
+
+/** Codex `mcpServerStatus/list` → one server's tool definitions; null when it isn't there. */
+export function codexServerTools(list: unknown, server: string): Array<{ name?: unknown; _meta?: unknown }> | null {
+  const data = (list as { data?: unknown } | null)?.data
+  if (!Array.isArray(data)) return null
+  const s = (data as Array<{ name?: unknown; tools?: unknown }>).find(x => x.name === server)
+  if (!s || typeof s.tools !== 'object' || s.tools === null) return null
+  return Object.entries(s.tools as Record<string, { name?: unknown; _meta?: unknown }>).map(([key, t]) => ({ ...t, name: typeof t.name === 'string' ? t.name : key }))
+}
+
+/** A CallToolResult from a CLI, normalized for the app. */
+export function toCallResult(raw: unknown): McpAppCall['result'] {
+  const r = (typeof raw === 'object' && raw !== null ? raw : {}) as { content?: unknown; structuredContent?: unknown; _meta?: unknown; isError?: unknown }
+  return {
+    content: toContentBlocks(r.content),
+    ...(r.structuredContent != null ? { structuredContent: r.structuredContent } : {}),
+    ...(r._meta != null ? { _meta: r._meta } : {}),
+    ...(r.isError === true ? { isError: true } : {}),
+  }
+}

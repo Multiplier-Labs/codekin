@@ -332,6 +332,12 @@ describe('canvas', () => {
     }
   })
 
+  it('keeps tool calls from MCP Apps to the owner', () => {
+    const call = frame({ type: 'mcp_app_call', itemId: 'x', callId: 'c', tool: 't', arguments: {} })
+    expect(checkClientFrame(editor, joined(editor), call).allowed).toBe(false)
+    expect(checkClientFrame(owner, joined(owner), call).allowed).toBe(true)
+  })
+
   it('keeps previews to the owner: controls and state', () => {
     for (const msg of [
       { type: 'preview_configs' }, { type: 'preview_open', itemId: 'x' }, { type: 'preview_launch', name: 'web' },
