@@ -363,3 +363,47 @@ describe('InputBar Ctrl+C', () => {
     expect(onSendInput).not.toHaveBeenCalled()
   })
 })
+
+describe('InputBar draft agent picker', () => {
+  const models = [
+    { id: 'claude-opus-5', label: 'Opus 5', efforts: [{ id: 'low' }, { id: 'high' }] },
+    { id: 'claude-sonnet-5', label: 'Sonnet 5' },
+  ]
+
+  async function renderDraft(onProviderChange = vi.fn()) {
+    await act(async () => {
+      root.render(
+        <InputBar
+          variant="draft"
+          onSendInput={vi.fn()} isWaiting={false} disabled={false} onEscape={vi.fn()}
+          pendingFiles={[]} onAddFiles={vi.fn()} onRemoveFile={vi.fn()}
+          sessionProvider="claude" onProviderChange={onProviderChange}
+          currentModel="claude-opus-5" onModelChange={vi.fn()} availableModels={models}
+          currentEffort="high" onEffortChange={vi.fn()}
+        />,
+      )
+    })
+    const chip = container.querySelector('button[title*="choose the agent"]') as HTMLButtonElement
+    await act(async () => { chip.click() })
+    return onProviderChange
+  }
+
+  it('opens the composer at more than two lines', async () => {
+    await renderDraft()
+    expect(container.querySelector('textarea')!.classList.contains('composer-textarea-draft')).toBe(true)
+  })
+
+  it('lists the agents as one segmented row and the models below it', async () => {
+    const onProviderChange = await renderDraft()
+    const radios = Array.from(container.querySelectorAll('[role="radiogroup"][aria-label="Agent"] [role="radio"]'))
+    expect(radios.map(r => r.textContent)).toEqual(['Claude', 'OpenCode', 'Codex', 'Grok'])
+    expect(radios[0].getAttribute('aria-checked')).toBe('true')
+    // Every model is reachable without scrolling past the agents.
+    const buttons = Array.from(container.querySelectorAll('button')).map(b => b.textContent ?? '')
+    expect(buttons.some(t => t.startsWith('Sonnet 5'))).toBe(true)
+    // The effort shortcut lives on the Effort row, not a footer of its own.
+    expect(container.textContent).not.toContain('Cycle effort')
+    await act(async () => { (radios[2] as HTMLButtonElement).click() })
+    expect(onProviderChange).toHaveBeenCalledWith('codex', false)
+  })
+})

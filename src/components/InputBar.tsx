@@ -510,29 +510,44 @@ function AgentDropdown({ provider, handoffTargets, currentModel, currentEffort, 
         <IconChevronDown size={12} stroke={2} className="opacity-70" />
       </StateItem>
       {isOpen && (
-        <div className={`absolute ${below ? 'top-full mt-1' : 'bottom-full mb-1'} right-0 z-50 flex max-h-[380px] w-[280px] flex-col rounded-floating border border-edge-strong bg-surface-raised shadow-floating`}>
+        // A menu that opens downward (the start view) has the screen below it,
+        // so it may run taller and show more of the model list.
+        <div className={`absolute ${below ? 'top-full mt-1 max-h-[min(520px,70vh)]' : 'bottom-full mb-1 max-h-[380px]'} right-0 z-50 flex ${pickProvider ? 'w-[340px]' : 'w-[280px]'} flex-col rounded-floating border border-edge-strong bg-surface-raised shadow-floating`}>
           {pickProvider && onProviderChange && !showEffort && (
-            <div className="border-b border-edge-strong py-1" role="group" aria-label="Agent">
-              <div className="px-3 py-1 text-micro text-ink-muted">Agent</div>
-              {handoffTargets.map(p => {
-                const { available, hint } = providerAvailability(health, p.id)
-                const isCurrent = p.id === provider
-                return (
-                  <button
-                    key={p.id}
-                    disabled={!available}
-                    onClick={() => { if (!isCurrent) onProviderChange(p.id, false) }}
-                    className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-body transition-colors ${
-                      available ? 'text-ink hover:bg-edge' : 'cursor-not-allowed text-ink-muted'
-                    }`}
-                    title={hint ?? p.description}
-                  >
-                    <span className={isCurrent ? 'text-primary-4' : undefined}>{p.label}</span>
-                    <span className="truncate text-meta text-ink-muted">{available ? p.description : 'not installed'}</span>
-                    {isCurrent && <IconCheck size={14} stroke={2.5} className="ml-auto flex-shrink-0 text-primary-4" />}
-                  </button>
-                )
-              })}
+            // One segmented row, not a row per agent: the agents are few and
+            // fixed, the models are what the menu is for, and they need the room.
+            <div className="flex-shrink-0 border-b border-edge-strong p-2">
+              <div role="radiogroup" aria-label="Agent" className="flex gap-0.5 rounded-control border border-edge-strong p-0.5">
+                {handoffTargets.map(p => {
+                  const { available, hint } = providerAvailability(health, p.id)
+                  const isCurrent = p.id === provider
+                  return (
+                    <button
+                      key={p.id}
+                      role="radio"
+                      aria-checked={isCurrent}
+                      disabled={!available}
+                      onClick={() => { if (!isCurrent) onProviderChange(p.id, false) }}
+                      className={`min-w-0 flex-1 truncate rounded-control px-1.5 py-1 text-meta transition-colors ${
+                        isCurrent
+                          ? 'bg-edge-strong text-ink'
+                          : available ? 'text-ink-muted hover:bg-edge hover:text-ink' : 'cursor-not-allowed text-ink-faint'
+                      }`}
+                      title={hint ?? (available ? p.description : `${p.label} is not installed`)}
+                    >
+                      {p.label}
+                    </button>
+                  )
+                })}
+              </div>
+              {provider && (() => {
+                // The chosen agent's CLI, or why it may not answer (not signed in).
+                const hint = providerAvailability(health, provider).hint
+                const text = hint ?? handoffTargets.find(p => p.id === provider)?.description
+                return text ? (
+                  <div className={`mt-1.5 truncate px-1 text-micro ${hint ? 'text-warning-5' : 'text-ink-muted'}`} title={text}>{text}</div>
+                ) : null
+              })()}
             </div>
           )}
           {showHandoff && provider && onProviderChange ? (
@@ -553,7 +568,7 @@ function AgentDropdown({ provider, handoffTargets, currentModel, currentEffort, 
           ) : (
             <>
               {canPickModel && (
-                <div className="border-b border-edge-strong p-2">
+                <div className="flex-shrink-0 border-b border-edge-strong p-2">
                   <input
                     autoFocus
                     value={query}
@@ -565,7 +580,7 @@ function AgentDropdown({ provider, handoffTargets, currentModel, currentEffort, 
                 </div>
               )}
 
-              <div className="overflow-y-auto py-1">
+              <div className="min-h-0 flex-1 overflow-y-auto py-1">
                 {!canPickModel && (
                   <div className="px-3 py-2 text-meta text-ink-muted">
                     No models available for {harnessLabel ?? 'this agent'}.
@@ -620,13 +635,15 @@ function AgentDropdown({ provider, handoffTargets, currentModel, currentEffort, 
               </div>
 
               {canPickEffort && currentOption && (
-                <div className="border-t border-edge-strong p-1">
+                <div className="flex-shrink-0 border-t border-edge-strong p-1">
                   <button
                     onClick={() => setShowEffort(true)}
                     className="flex w-full items-center gap-2 rounded-control px-2 py-1.5 text-left text-body text-ink transition-colors hover:bg-edge"
-                    title={`Reasoning effort for ${currentOption.label}`}
+                    title={`Reasoning effort for ${currentOption.label} — ${CYCLE_EFFORT_KEYS} cycles it`}
                   >
                     Effort
+                    {/* The shortcut sits on the row it drives, not in a footer of its own. */}
+                    <kbd className="rounded-control border border-edge-strong px-1.5 font-sans text-micro text-ink-muted">{CYCLE_EFFORT_KEYS}</kbd>
                     <span className="ml-auto text-ink-muted">{effortDisplay(currentEffort, currentOption)}</span>
                     <IconChevronRight size={14} stroke={2} className="flex-shrink-0 text-ink-muted opacity-70" />
                   </button>
@@ -634,7 +651,7 @@ function AgentDropdown({ provider, handoffTargets, currentModel, currentEffort, 
               )}
 
               {provider && onProviderChange && !pickProvider && (
-                <div className="border-t border-edge-strong p-1">
+                <div className="flex-shrink-0 border-t border-edge-strong p-1">
                   <button
                     onClick={() => setShowHandoff(true)}
                     className="flex w-full items-center gap-2 rounded-control px-2 py-1.5 text-left text-body text-ink-muted transition-colors hover:bg-edge hover:text-ink"
@@ -644,13 +661,6 @@ function AgentDropdown({ provider, handoffTargets, currentModel, currentEffort, 
                     Hand off to another agent
                     <IconChevronRight size={14} stroke={2} className="ml-auto flex-shrink-0 opacity-70" />
                   </button>
-                </div>
-              )}
-
-              {canPickEffort && (
-                <div className="flex items-center justify-end gap-2 border-t border-edge-strong px-3 py-1.5 text-meta text-ink-muted">
-                  <kbd className="rounded-control border border-edge-strong px-1.5 font-sans text-micro">{CYCLE_EFFORT_KEYS}</kbd>
-                  Cycle effort
                 </div>
               )}
             </>
@@ -1062,7 +1072,7 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
               autoFocus={!isMobile}
               placeholder={placeholder ?? (isWaiting ? 'Type response...' : 'What do you want to build?')}
               // Mobile must stay 16px: font sizes under 16px trigger iOS Safari zoom-on-focus
-              className={`composer-textarea field-sizing-content max-h-[40vh] w-full flex-1 resize-none bg-transparent ${isMobile ? 'text-[16px]' : 'text-body'} text-ink placeholder:text-ink-muted outline-none disabled:opacity-50 overflow-y-auto`}
+              className={`composer-textarea ${isDraft ? 'composer-textarea-draft' : ''} field-sizing-content max-h-[40vh] w-full flex-1 resize-none bg-transparent ${isMobile ? 'text-[16px]' : 'text-body'} text-ink placeholder:text-ink-muted outline-none disabled:opacity-50 overflow-y-auto`}
             />
             <input
               ref={fileInputRef}

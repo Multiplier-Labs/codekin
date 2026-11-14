@@ -641,6 +641,25 @@
   }
 }
 
+/* The start view's composer is the whole page's subject, and a new task is
+   usually a paragraph, not a line: it opens at five lines (four on touch,
+   where the keyboard takes half the screen). */
+.composer-textarea.composer-textarea-draft {
+  min-height: 112px;
+}
+[data-density="touch"] .composer-textarea.composer-textarea-draft {
+  min-height: 96px;
+}
+
+@supports (height: 1lh) {
+  .composer-textarea.composer-textarea-draft {
+    min-height: 5lh;
+  }
+  [data-density="touch"] .composer-textarea.composer-textarea-draft {
+    min-height: 4lh;
+  }
+}
+
 /* A session row's overflow menu is revealed by hovering the row — but only
    where hovering is possible. On a touch device it stays visible, because a
    hover-only control is one that cannot be reached at all; that was the bug
