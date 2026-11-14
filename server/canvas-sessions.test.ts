@@ -98,7 +98,8 @@ describe('CanvasSessions reads and changes', () => {
 
   it('returns images base64-encoded', async () => {
     const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2])
-    const item = await canvas.create('s1', { kind: 'image', title: 'Shot', source: { type: 'agent' }, mediaType: 'image/png', content: png })
+    writeFileSync(path.join(repo, 'shot.png'), png)
+    const item = await canvas.publish('s1', { kind: 'image', path: 'shot.png' })
     expect(await canvas.get('s1', item.id)).toMatchObject({ encoding: 'base64', content: png.toString('base64') })
   })
 
@@ -111,5 +112,57 @@ describe('CanvasSessions reads and changes', () => {
     expect(await canvas.delete('s1', item.id)).toBeNull()
     expect(broadcasts.map(m => m.type)).toEqual(['canvas_items', 'canvas_items'])
     expect(canvas.summary('s1')).toBeUndefined()
+  })
+})
+
+describe('CanvasSessions.publish (agent tools)', () => {
+  it('shows inline Markdown, records an agent card, and revises by id', async () => {
+    const item = await canvas.publish('s1', { title: 'Report', kind: 'markdown', content: '# One' })
+    expect(item).toMatchObject({ kind: 'markdown', title: 'Report', source: { type: 'agent' }, latest: 1 })
+    expect(history.at(-1)).toMatchObject({ type: 'canvas_event', action: 'created', by: 'agent', title: 'Report' })
+
+    const v2 = await canvas.publish('s1', { itemId: item.id, content: '# Two', title: 'Report v2' })
+    expect(v2).toMatchObject({ latest: 2, title: 'Report v2' })
+    expect(history.at(-1)).toMatchObject({ action: 'updated', revision: 2 })
+
+    // Unchanged content: no revision, no card.
+    const cards = history.length
+    expect(await canvas.publish('s1', { itemId: item.id, content: '# Two' })).toMatchObject({ latest: 2 })
+    expect(history).toHaveLength(cards)
+  })
+
+  it('encodes inline tables by format and checks them', async () => {
+    expect((await canvas.publish('s1', { title: 'T', kind: 'table', content: 'a,b\n1,2' })).revisions[0].mediaType).toBe('text/csv')
+    expect((await canvas.publish('s1', { title: 'T', kind: 'table', content: 'a\tb', format: 'tsv' })).revisions[0].mediaType).toBe('text/tab-separated-values')
+    expect((await canvas.publish('s1', { title: 'T', kind: 'table', content: '[{"a":1}]', format: 'json' })).revisions[0].mediaType).toBe('application/json')
+    await expect(canvas.publish('s1', { title: 'T', kind: 'table', content: '{}', format: 'json' })).rejects.toThrow(/array of objects/)
+    await expect(canvas.publish('s1', { title: 'T', kind: 'table', content: 'x', format: 'xml' })).rejects.toThrow(/csv, tsv or json/)
+  })
+
+  it('keeps diagram node metadata', async () => {
+    const item = await canvas.publish('s1', { title: 'Arch', kind: 'diagram', content: 'graph LR; A-->B', nodes: { A: { file: 'src/a.ts' } } })
+    expect((await canvas.get('s1', item.id))).toMatchObject({ meta: { nodes: { A: { file: 'src/a.ts' } } } })
+  })
+
+  it('reads files by relative or absolute path inside the session, titled by file name', async () => {
+    expect(await canvas.publish('s1', { kind: 'table', path: 'data.csv' })).toMatchObject({ title: 'data.csv', kind: 'table' })
+    expect(await canvas.publish('s1', { kind: 'markdown', path: path.join(repo, 'docs', 'plan.md') })).toMatchObject({ title: 'plan.md' })
+    expect(await canvas.publish('s1', { kind: 'markdown', path: path.join(attached, 'notes.md') })).toMatchObject({ title: 'notes.md' })
+    writeFileSync(path.join(repo, 'rows.json'), '[{"a":1}]')
+    expect((await canvas.publish('s1', { kind: 'table', path: 'rows.json' })).revisions[0].mediaType).toBe('application/json')
+  })
+
+  it('refuses what the agent should fix', async () => {
+    await expect(canvas.publish('s1', { kind: 'markdown', path: path.join(tmp, 'secret.md') })).rejects.toThrow(/outside the session's folder/)
+    await expect(canvas.publish('s1', { kind: 'markdown', path: 'link.md' })).rejects.toThrow(/outside the session's folder/)
+    await expect(canvas.publish('s1', { kind: 'chart', content: 'x' })).rejects.toThrow(/kind must be one of/)
+    await expect(canvas.publish('s1', { kind: 'image', content: 'x' })).rejects.toThrow(/Images need a path/)
+    await expect(canvas.publish('s1', { kind: 'markdown', content: 'x', path: 'data.csv' })).rejects.toThrow(/either content or path/)
+    await expect(canvas.publish('s1', { kind: 'markdown' })).rejects.toThrow(/Pass content/)
+    await expect(canvas.publish('s1', { kind: 'image', path: 'data.csv' })).rejects.toThrow(/can't be shown as a image/)
+    await expect(canvas.publish('s1', { itemId: 'nope', content: 'x' })).rejects.toThrow(/No Canvas item nope/)
+    const md = await canvas.publish('s1', { title: 'M', kind: 'markdown', content: 'x' })
+    await expect(canvas.publish('s1', { itemId: md.id, kind: 'table', content: 'a' })).rejects.toThrow(/kind can't change/)
+    await expect(canvas.publish('nope', { kind: 'markdown', content: 'x' })).rejects.toThrow(/Session not found/)
   })
 })

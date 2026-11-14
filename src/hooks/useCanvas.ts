@@ -31,6 +31,8 @@ export type CanvasView =
 export interface CanvasApi {
   /** Items of the joined session, oldest first. */
   items: CanvasItem[]
+  /** The joined session's item list has arrived (before that, `items` is empty, not known-empty). */
+  loaded: boolean
   selected: CanvasItem | null
   view: CanvasView
   open: boolean
@@ -65,12 +67,27 @@ function updateSessionState(sessionId: string, patch: { open?: boolean; itemId?:
   setPref('canvasSessions', trimSessionMap({ ...rest, [sessionId]: { ...current, ...patch } }))
 }
 
-export function useCanvas(sessionId: string | null, send: (msg: WsClientMessage) => void): CanvasApi {
+export interface CanvasOptions {
+  /**
+   * Asked when the agent publishes a new item: open Canvas on it? `first`
+   * is true when the session had no agent items before (docs/CANVAS-SPEC.md §4).
+   */
+  shouldAutoOpen?: (first: boolean) => boolean
+}
+
+export function useCanvas(sessionId: string | null, send: (msg: WsClientMessage) => void, options: CanvasOptions = {}): CanvasApi {
   const [itemsBySession, setItemsBySession] = useState<Record<string, CanvasItem[]>>({})
   const [contents, setContents] = useState<Record<string, CanvasContent | undefined>>({})
   const [errors, setErrors] = useState<Record<string, string | undefined>>({})
   const [notice, setNotice] = useState<string | null>(null)
   const sessionsPref = usePref('canvasSessions')
+  // Latest values for the message handler, which is stable across renders.
+  const itemsRef = useRef(itemsBySession)
+  const optionsRef = useRef(options)
+  useEffect(() => {
+    itemsRef.current = itemsBySession
+    optionsRef.current = options
+  })
 
   /** Content requests in flight, so a revision is asked for once. */
   const inflight = useRef(new Set<string>())
@@ -170,8 +187,15 @@ export function useCanvas(sessionId: string | null, send: (msg: WsClientMessage)
         }
         return true
       }
-      case 'canvas_event':
+      case 'canvas_event': {
+        // The event arrives before the updated list, so the list still lacks this item.
+        if (msg.action === 'created' && msg.by !== 'file') {
+          const before = itemsRef.current[msg.sessionId] ?? []
+          const first = !before.some(i => i.source.type !== 'file')
+          if (optionsRef.current.shouldAutoOpen?.(first)) updateSessionState(msg.sessionId, { open: true, itemId: msg.itemId })
+        }
         return true
+      }
       default:
         return false
     }
@@ -181,7 +205,7 @@ export function useCanvas(sessionId: string | null, send: (msg: WsClientMessage)
   useEffect(() => { setNotice(null) }, [sessionId]) // eslint-disable-line react-hooks/set-state-in-effect -- reset per session
 
   return {
-    items, selected, view, open, notice,
+    items, loaded: !!sessionId && sessionId in itemsBySession, selected, view, open, notice,
     dismissNotice: () => { setNotice(null) },
     setOpen, toggle, select, step, openFile, handleMessage, refresh,
   }

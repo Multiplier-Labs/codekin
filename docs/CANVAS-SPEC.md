@@ -1,6 +1,6 @@
 # Session Canvas
 
-**Status:** Slice 1 (item model and store, #896) and slice 2 (layout shell) implemented; slice 3 next.
+**Status:** Slices 1 (item model and store, #896), 2 (layout shell, #897) and 3a (agent publishing, chat cards, auto-open) implemented; 3b (table and diagram renderers) and 3c (revisions UI) next.
 
 ## 1. Summary
 
@@ -66,6 +66,19 @@ Canvas uses the session WebSocket, like review comments, so it follows the sessi
 | `canvas_item { sessionId, item, revision, content, encoding }` | Reply to `canvas_get`. `encoding` is `utf8` or `base64` |
 | `canvas_event { sessionId, itemId, kind, title, revision, action }` | Added to the transcript when an item is `created` or `updated`; renders as the chat card |
 | `canvas_error { sessionId?, message }` | A failed request |
+
+**Agent publishing.**
+
+- Every Claude, Codex and Grok session gets a stdio MCP server, `codekin_canvas` (`server/canvas-mcp-server.ts`), with three tools: `canvas_show`, `canvas_update` and `canvas_list`.
+- The server calls `POST/GET /api/sessions/:id/canvas/items[/:itemId]` with the session-scoped token the agent's process already carries. That token reaches only its own session.
+- These routes are local only; the relay never proxies them.
+- Content is inline text, or a file in the session's folder, an attached folder or the screenshots folder. Images always come from a file.
+- How each harness gets the server:
+  - **Claude:** `--mcp-config`, with the tools pre-approved through `--allowedTools`.
+  - **Codex:** `-c mcp_servers.codekin_canvas.*` overrides, which forward the session env by name and set `default_tools_approval_mode="approve"`.
+  - **Grok:** ACP `session/new` `mcpServers`. Its `use_tool` permission requests for these tools are allowed without a prompt.
+- The tools need no approval because they write only to the session's own Canvas.
+- OpenCode sessions don't get the server yet.
 
 The session list carries `canvas: { items, pinnedBehind }` per session, so the sidebar can show a count and a dot when a pinned item has a newer revision.
 

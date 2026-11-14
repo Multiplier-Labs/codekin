@@ -24,6 +24,7 @@ import { CodexProcess } from './codex-process.js'
 import { GROK_BINARY, GrokProcess } from './grok-process.js'
 import { CLAUDE_BINARY } from './config.js'
 import { jsonParse } from './json-parse.js'
+import { acpCanvasMcpServer, CANVAS_CLAUDE_TOOLS, canvasMcpServerPath, claudeCanvasMcpConfig, codexCanvasMcpArgs } from './canvas-mcp-config.js'
 
 export interface HarnessProbe {
   /** The CLI exists and responds to --version. */
@@ -114,6 +115,7 @@ const claude: HarnessDefinition = {
     return { binary: CLAUDE_BINARY, args, stdin: opts.prompt }
   },
   createProcess(session, ctx) {
+    const canvasServer = canvasMcpServerPath()
     return new ClaudeProcess(session.workingDir, {
       sessionId: session.claudeSessionId || undefined,
       extraEnv: ctx.extraEnv,
@@ -123,8 +125,9 @@ const claude: HarnessDefinition = {
       // A recorded CLI session id means a JSONL exists — --resume continues it
       // (--session-id would collide with the existing file).
       resume: !!session.claudeSessionId,
-      allowedTools: ctx.mergedAllowedTools,
+      allowedTools: canvasServer ? [...ctx.mergedAllowedTools, ...CANVAS_CLAUDE_TOOLS] : ctx.mergedAllowedTools,
       addDirs: session.addDirs,
+      ...(canvasServer ? { mcpConfig: claudeCanvasMcpConfig(canvasServer) } : {}),
     })
   },
 }
@@ -191,8 +194,15 @@ const codex: HarnessDefinition = {
       extraEnv: ctx.extraEnv,
       permissionMode: session.permissionMode,
       addDirs: session.addDirs,
+      extraArgs: codexCanvasArgs(),
     })
   },
+}
+
+/** The Canvas MCP server for Codex sessions, when it is built. */
+function codexCanvasArgs(): string[] {
+  const path = canvasMcpServerPath()
+  return path ? codexCanvasMcpArgs(path) : []
 }
 
 const grok: HarnessDefinition = {
@@ -219,6 +229,7 @@ const grok: HarnessDefinition = {
     }
   },
   createProcess(session, ctx) {
+    const canvasServer = canvasMcpServerPath()
     return new GrokProcess(session.workingDir, {
       sessionId: ctx.sessionId,
       grokSessionId: session.claudeSessionId || undefined,
@@ -226,6 +237,7 @@ const grok: HarnessDefinition = {
       effort: session.effort,
       extraEnv: ctx.extraEnv,
       permissionMode: session.permissionMode,
+      mcpServers: canvasServer ? [acpCanvasMcpServer(canvasServer, ctx.extraEnv)] : [],
     })
   },
 }

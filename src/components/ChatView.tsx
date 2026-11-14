@@ -10,6 +10,8 @@
  * bottom, with a manual "scroll to bottom" button when scrolled up.
  */
 
+import { CanvasChatCard, type CanvasCardContext } from './canvas/CanvasChatCard'
+import { displayToolName } from '../lib/canvas'
 import { memo, useEffect, useLayoutEffect, useRef, useCallback, useState } from 'react'
 import Markdown, { type Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -46,6 +48,8 @@ interface Props {
   joe?: JoeChatContext
   /** Session the transcript belongs to. A change opens the next transcript at the bottom. */
   sessionId?: string | null
+  /** Canvas chat cards: the session's items and how to open one. Without it, cards aren't shown. */
+  canvas?: CanvasCardContext
 }
 
 /**
@@ -320,7 +324,7 @@ function ToolGroupInline({ msg, fontSize }: { msg: ChatMessage & { type: 'tool_g
           ) : (
             <span className="inline-block h-1.5 w-1.5 rounded-full bg-ink-faint flex-shrink-0" />
           )}
-          <span className="text-accent-6">{tool.name}</span>
+          <span className="text-accent-6">{displayToolName(tool.name)}</span>
           {tool.summary && (
             <span className="text-ink-muted truncate max-w-[400px]">{tool.summary}</span>
           )}
@@ -362,6 +366,8 @@ interface ToolRun {
   groups: (ChatMessage & { type: 'tool_group' })[]
   outputs: (ChatMessage & { type: 'tool_output' })[]
   images: (ChatMessage & { type: 'image' })[]
+  /** Canvas cards posted mid-run: shown after the run instead of splitting it. */
+  cards: (ChatMessage & { type: 'canvas_card' })[]
 }
 
 function ToolActivity({ run, fontSize }: { run: ToolRun; fontSize: number }) {
@@ -371,7 +377,7 @@ function ToolActivity({ run, fontSize }: { run: ToolRun; fontSize: number }) {
 
   // Collect all unique tool names for the summary (first-seen order)
   const allTools = run.groups.flatMap(g => g.tools)
-  const uniqueNames = [...new Set(allTools.map(t => t.name))]
+  const uniqueNames = [...new Set(allTools.map(t => displayToolName(t.name)))]
   const toolCount = allTools.length
   const errorCount = run.outputs.filter(o => o.isError).length
 
@@ -527,7 +533,7 @@ function ActivityIndicator({ label, variant = 'default' }: { label: string; vari
   )
 }
 
-export function ChatView({ messages, fontSize, disabled, planningMode, activityLabel, isMobile, variant = 'default', agentName, joe, sessionId }: Props) {
+export function ChatView({ messages, fontSize, disabled, planningMode, activityLabel, isMobile, variant = 'default', agentName, joe, sessionId, canvas }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const contentRef = useRef<HTMLDivElement>(null)
   const [showScrollButton, setShowScrollButton] = useState(false)
@@ -717,13 +723,14 @@ export function ChatView({ messages, fontSize, disabled, planningMode, activityL
               // transparent, so one turn's tool calls spread across several
               // API messages still collapse into a single rail.
               if (msg.type === 'tool_group' || msg.type === 'tool_output' || msg.type === 'image') {
-                const run: ToolRun = { groups: [], outputs: [], images: [] }
+                const run: ToolRun = { groups: [], outputs: [], images: [], cards: [] }
                 const startIdx = i
                 while (i < messages.length) {
                   const m = messages[i]
                   if (m.type === 'tool_group') run.groups.push(m)
                   else if (m.type === 'tool_output') run.outputs.push(m)
                   else if (m.type === 'image') run.images.push(m)
+                  else if (m.type === 'canvas_card') run.cards.push(m)
                   else if (!(m.type === 'assistant' && !stripNoise(m.text))) break
                   i++
                 }
@@ -733,6 +740,9 @@ export function ChatView({ messages, fontSize, disabled, planningMode, activityL
                     <ToolActivity run={run} fontSize={fontSize} />
                   </Row>
                 )
+                for (const c of run.cards) {
+                  if (canvas) nodes.push(<Row key={c.key || `card-${c.itemId}-${c.revision}`} isMobile={isMobile}><CanvasChatCard msg={c} ctx={canvas} /></Row>)
+                }
                 continue
               }
 
@@ -779,6 +789,8 @@ export function ChatView({ messages, fontSize, disabled, planningMode, activityL
                   node = null; break
                 case 'tentative':
                   node = <TentativeMessage msg={msg} fontSize={fontSize} />; break
+                case 'canvas_card':
+                  node = canvas ? <CanvasChatCard msg={msg} ctx={canvas} /> : null; break
                 case 'joe':
                   node = <JoeChatMessage msg={msg} fontSize={fontSize} ctx={joe ?? { token: '', agentName: agentName ?? 'Joe', tasks: {} }} current={!msg.task || latestTaskCard.get(msg.task.id) === i} />; break
               }

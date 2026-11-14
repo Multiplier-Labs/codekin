@@ -1,6 +1,6 @@
 /** Tests for the Canvas helpers: supported files, shortcuts, sizes and labels. */
 import { describe, it, expect } from 'vitest'
-import { canvasKindForPath, canvasStepFromKey, clampChatWidth, isCanvasToggleKey, relativeTime, shownRevision, trimSessionMap } from './canvas'
+import { canvasKindForPath, canvasStepFromKey, clampChatWidth, displayToolName, isCanvasToggleKey, relativeTime, shownRevision, trimSessionMap } from './canvas'
 import type { CanvasItem } from '../types'
 
 const key = (over: Partial<KeyboardEvent> & { target?: unknown } = {}) =>
@@ -68,5 +68,15 @@ describe('helpers', () => {
     const map = Object.fromEntries(Array.from({ length: 5 }, (_, i) => [`s${i}`, i]))
     expect(Object.keys(trimSessionMap(map, 3))).toEqual(['s2', 's3', 's4'])
     expect(trimSessionMap(map, 10)).toBe(map)
+  })
+})
+
+describe('displayToolName', () => {
+  it('names the Canvas tools for every harness, and leaves others alone', () => {
+    expect(displayToolName('mcp__codekin_canvas__canvas_show')).toBe('Canvas: show')
+    expect(displayToolName('codekin_canvas__canvas_update')).toBe('Canvas: update')
+    expect(displayToolName('canvas_list')).toBe('Canvas: list')
+    expect(displayToolName('mcp__other__canvas_show')).toBe('mcp__other__canvas_show')
+    expect(displayToolName('Bash')).toBe('Bash')
   })
 })

@@ -465,3 +465,13 @@ describe('rebuildFromHistory', () => {
     expect((result[5] as any).complete).toBe(true)
   })
 })
+
+describe('Canvas chat cards', () => {
+  it('turns canvas_event into a card, live and from history', () => {
+    const event: WsServerMessage = { type: 'canvas_event', sessionId: 's1', itemId: 'i1', kind: 'table', title: 'Bench', revision: 2, action: 'updated', by: 'agent' }
+    expect(processMessage([], event)).toEqual([
+      expect.objectContaining({ type: 'canvas_card', itemId: 'i1', kind: 'table', title: 'Bench', revision: 2, action: 'updated' }),
+    ])
+    expect(rebuildFromHistory([event]).map(m => m.type)).toEqual(['canvas_card'])
+  })
+})

@@ -7,8 +7,28 @@
 
 import { promises as fs, realpathSync } from 'fs'
 import path from 'path'
-import { CANVAS_LIMITS, CanvasError, CanvasStore, canvasTypeForFile, type CanvasCreateInput } from './canvas-store.js'
-import type { CanvasItem, Session, WsServerMessage } from './types.js'
+import { CANVAS_KINDS, CANVAS_LIMITS, CanvasError, CanvasStore, canvasTypeForFile, type CanvasCreateInput } from './canvas-store.js'
+import { SCREENSHOTS_DIR } from './config.js'
+import type { CanvasItem, CanvasItemKind, CanvasItemSource, Session, WsServerMessage } from './types.js'
+
+/** What an agent sends to show or revise an item (canvas_show / canvas_update). */
+export interface CanvasPublishInput {
+  /** Revise this item instead of creating one. */
+  itemId?: unknown
+  title?: unknown
+  kind?: unknown
+  /** Inline text: Markdown, CSV/TSV/JSON rows, or Mermaid source. */
+  content?: unknown
+  /** A file in the session's folder (or an attached one) instead of `content`; required for images. */
+  path?: unknown
+  /** Table encoding of inline content (default csv). */
+  format?: unknown
+  /** Diagram node id → { file, line, description }. */
+  nodes?: unknown
+}
+
+const TABLE_MEDIA: Record<string, string> = { csv: 'text/csv', tsv: 'text/tab-separated-values', json: 'application/json' }
+const TEXT_MEDIA: Record<Exclude<CanvasItemKind, 'image' | 'table'>, string> = { markdown: 'text/markdown', diagram: 'text/vnd.mermaid' }
 
 export interface CanvasSessionsDeps {
   getSession: (id: string) => Session | undefined
@@ -40,6 +60,27 @@ function resolveInside(root: string, rel: unknown): string {
   }
   if (!real.startsWith(realRoot + path.sep)) throw new CanvasError(`${rel} is outside the session's folder.`)
   return real
+}
+
+/**
+ * A file an agent names: relative to the session's folder, or absolute
+ * inside it, an attached folder, or the screenshots folder.
+ */
+function resolveAgentPath(session: Session, p: unknown): string {
+  if (typeof p !== 'string' || !p || p.includes('\0')) throw new CanvasError('path must be a file path.')
+  if (!path.isAbsolute(p)) return resolveInside(session.workingDir, p)
+  let real: string
+  try {
+    real = realpathSync(p)
+  } catch {
+    throw new CanvasError(`${p} was not found.`)
+  }
+  for (const root of [session.workingDir, ...(session.addDirs ?? []), SCREENSHOTS_DIR]) {
+    let realRoot: string
+    try { realRoot = realpathSync(root) } catch { continue }
+    if (real.startsWith(realRoot + path.sep)) return real
+  }
+  throw new CanvasError(`${p} is outside the session's folder.`)
 }
 
 export class CanvasSessions {
@@ -114,11 +155,64 @@ export class CanvasSessions {
     }
   }
 
-  /** Create an item for the session (agent or tool output). */
-  async create(sessionId: string, input: CanvasCreateInput): Promise<CanvasItem> {
+  /**
+   * Show an item the agent made (canvas_show), or add a revision to one
+   * (canvas_update, with `itemId`). Content is inline text or a file in the
+   * session's folder, an attached folder, or Codekin's screenshots folder.
+   * Returns the item; throws CanvasError for anything the agent should fix.
+   */
+  async publish(sessionId: string, input: CanvasPublishInput, source: CanvasItemSource = { type: 'agent' }): Promise<CanvasItem> {
     const session = this.deps.getSession(sessionId)
     if (!session) throw new CanvasError('Session not found')
-    const item = await this.store.create(sessionId, input)
+    const existing = input.itemId !== undefined
+      ? this.store.list(sessionId).find(i => i.id === input.itemId)
+      : undefined
+    if (input.itemId !== undefined && !existing) throw new CanvasError(`No Canvas item ${String(input.itemId)} in this session. Use canvas_show to create one.`)
+
+    const kind = (existing?.kind ?? input.kind) as CanvasItemKind | undefined
+    if (!kind || !CANVAS_KINDS.includes(kind)) throw new CanvasError(`kind must be one of: ${CANVAS_KINDS.join(', ')}.`)
+    if (input.kind !== undefined && existing && input.kind !== existing.kind) throw new CanvasError(`Item ${existing.id} is a ${existing.kind}; its kind can't change.`)
+    if (input.content !== undefined && input.path !== undefined) throw new CanvasError('Pass either content or path, not both.')
+
+    let content: Buffer | string
+    let mediaType: string
+    let fileName: string | undefined
+    if (input.path !== undefined) {
+      const file = resolveAgentPath(session, input.path)
+      const type = canvasTypeForFile(file)
+      const stat = await fs.stat(file)
+      if (!stat.isFile()) throw new CanvasError(`${String(input.path)} is not a file.`)
+      const limit = kind === 'image' ? CANVAS_LIMITS.maxImageBytes : CANVAS_LIMITS.maxTextBytes
+      if (stat.size > limit) throw new CanvasError(`${String(input.path)} is too large for Canvas (limit ${limit / 1024 / 1024} MiB).`)
+      content = await fs.readFile(file)
+      fileName = path.basename(file)
+      if (kind === 'table' && /\.json$/i.test(file)) mediaType = 'application/json'
+      else if (type && type.kind === kind) mediaType = type.mediaType
+      else if (kind === 'markdown' || kind === 'diagram') mediaType = TEXT_MEDIA[kind]
+      else throw new CanvasError(`${fileName} can't be shown as a ${kind}.`)
+    } else {
+      if (typeof input.content !== 'string') throw new CanvasError('Pass content (text) or path (a file).')
+      if (kind === 'image') throw new CanvasError('Images need a path to the image file.')
+      content = input.content
+      if (kind === 'table') {
+        const format = input.format ?? 'csv'
+        if (typeof format !== 'string' || !TABLE_MEDIA[format]) throw new CanvasError('format must be csv, tsv or json.')
+        mediaType = TABLE_MEDIA[format]
+      } else {
+        mediaType = TEXT_MEDIA[kind]
+      }
+    }
+    const meta = input.nodes !== undefined ? { nodes: input.nodes } as CanvasCreateInput['meta'] : undefined
+
+    if (existing) {
+      const updated = await this.store.addRevision(sessionId, existing.id, {
+        content, mediaType, meta, ...(input.title !== undefined ? { title: input.title as string } : {}),
+      })
+      if (updated) this.changed(session, updated, 'updated')
+      return updated ?? existing
+    }
+    const title = input.title ?? fileName
+    const item = await this.store.create(sessionId, { kind, title: title as string, source, content, mediaType, meta })
     this.changed(session, item, 'created')
     return item
   }
@@ -156,6 +250,7 @@ export class CanvasSessions {
   private changed(session: Session, item: CanvasItem, action: 'created' | 'updated'): void {
     this.deps.broadcastAndHistory(session, {
       type: 'canvas_event', sessionId: session.id, itemId: item.id, kind: item.kind, title: item.title, revision: item.latest, action,
+      by: item.source.type,
     })
     this.broadcastList(session)
   }

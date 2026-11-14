@@ -467,7 +467,18 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
   }, [wsSend])
 
   // Canvas for the joined session (docs/CANVAS-SPEC.md).
-  const canvas = useCanvas(activeSessionId, wsSend)
+  // Auto-open on an agent's new item: per the setting, never on phones or mid-draft.
+  const autoOpenState = useRef({ isMobile, draft: '' })
+  useEffect(() => {
+    autoOpenState.current = { isMobile, draft: activeSessionId ? sessionInputs[activeSessionId] ?? '' : '' }
+  })
+  const canvas = useCanvas(activeSessionId, wsSend, {
+    shouldAutoOpen: (first) => {
+      const mode = getPref('canvasAutoOpen') ?? 'first'
+      if (mode === 'never' || autoOpenState.current.isMobile || autoOpenState.current.draft.trim()) return false
+      return mode === 'every' || first
+    },
+  })
   useEffect(() => {
     canvasRef.current = canvas
     canvasListRef.current = () => { wsSend({ type: 'canvas_list' }) }
@@ -1325,6 +1336,11 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
             canvasCount={canvas.items.length}
             canvasOpen={canvasActive}
             onOpenCanvas={() => { canvas.setOpen(true) }}
+            canvasCards={{
+              items: canvas.loaded ? canvas.items : null,
+              openItemId: canvasActive ? canvas.selected?.id ?? null : null,
+              onOpen: canvas.select,
+            }}
             messages={[...messages, ...tentativeMessages]}
             fontSize={settings.fontSize + (isMobile ? 1 : 0)}
             isMobile={isMobile}

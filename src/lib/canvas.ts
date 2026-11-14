@@ -42,6 +42,17 @@ export function sourceLabel(item: CanvasItem): string {
   }
 }
 
+/**
+ * A readable name for Codekin's Canvas MCP tools, however a harness reports
+ * them (mcp__codekin_canvas__canvas_show, codekin_canvas__canvas_show, or
+ * bare canvas_show); other tool names come back unchanged.
+ */
+export function displayToolName(name: string): string {
+  const m = /^(?:mcp__codekin_canvas__|codekin_canvas(?:__|\.))?canvas_(show|update|list)$/.exec(name)
+  if (!m) return name
+  return { show: 'Canvas: show', update: 'Canvas: update', list: 'Canvas: list' }[m[1] as 'show' | 'update' | 'list']
+}
+
 /** Short relative time: "just now", "4 min ago", "3 h ago", "2 d ago". */
 export function relativeTime(iso: string, now = Date.now()): string {
   const s = Math.max(0, Math.round((now - Date.parse(iso)) / 1000))

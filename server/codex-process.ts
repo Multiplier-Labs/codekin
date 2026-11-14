@@ -240,6 +240,8 @@ export interface CodexProcessOptions {
   permissionMode?: PermissionMode
   /** Folders attached to the session: writable beside the working directory in workspace-write mode. */
   addDirs?: string[]
+  /** Extra `codex app-server` arguments (e.g. `-c` overrides adding Codekin's MCP servers). */
+  extraArgs?: string[]
 }
 
 /**
@@ -312,6 +314,8 @@ export class CodexProcess extends EventEmitter<ClaudeProcessEvents> implements C
   private lastReasoningItemId: string | null = null
   private queuedMessages: string[] = []
 
+  private readonly extraArgs: string[]
+
   constructor(workingDir: string, opts?: Partial<CodexProcessOptions>) {
     super()
     this.workingDir = workingDir
@@ -322,6 +326,7 @@ export class CodexProcess extends EventEmitter<ClaudeProcessEvents> implements C
     this.extraEnv = opts?.extraEnv || {}
     this.permissionMode = opts?.permissionMode
     this.addDirs = opts?.addDirs ?? []
+    this.extraArgs = opts?.extraArgs ?? []
   }
 
   /** Spawn `codex app-server` and run the initialize → thread/start handshake. */
@@ -335,7 +340,7 @@ export class CodexProcess extends EventEmitter<ClaudeProcessEvents> implements C
     }
 
     this.alive = true
-    this.proc = spawn(CODEX_BINARY, ['app-server', ...writableRootsArgs(this.addDirs)], {
+    this.proc = spawn(CODEX_BINARY, ['app-server', ...writableRootsArgs(this.addDirs), ...this.extraArgs], {
       cwd: this.workingDir,
       env: buildHarnessEnv(this.extraEnv),
       stdio: ['pipe', 'pipe', 'pipe'],

@@ -44,6 +44,8 @@ export interface ClaudeProcessOptions {
   allowedTools?: string[]
   /** Extra directories to grant Claude access to via --add-dir. */
   addDirs?: string[]
+  /** `--mcp-config` JSON adding Codekin's own MCP servers (e.g. Canvas) beside the user's. */
+  mcpConfig?: string
 }
 
 /** Accumulated state for an in-progress extended thinking block. */
@@ -156,6 +158,7 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> implements 
   private permissionMode?: PermissionMode
   private allowedTools?: string[]
   private addDirs?: string[]
+  private mcpConfig?: string
 
   constructor(workingDir: string, opts?: Partial<ClaudeProcessOptions>) {
     super()
@@ -169,6 +172,7 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> implements 
     this.resume = !!(o.resume && o.sessionId)
     this.allowedTools = o.allowedTools
     this.addDirs = o.addDirs
+    this.mcpConfig = o.mcpConfig
   }
 
   /** Spawn the Claude CLI process with stream-json I/O and acceptEdits mode. */
@@ -202,6 +206,7 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> implements 
       '--allowedTools', ['Bash(git:*)', ...(this.allowedTools || [])].join(','),
       '--add-dir', SCREENSHOTS_DIR,
       ...(this.addDirs || []).flatMap(d => ['--add-dir', d]),
+      ...(this.mcpConfig ? ['--mcp-config', this.mcpConfig] : []),
       '--include-partial-messages',
       '--verbose',
       ...(this.resume ? ['--resume', this.sessionId] : ['--session-id', this.sessionId]),
@@ -214,6 +219,7 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> implements 
         'Bash commands may require user approval — the system handles this automatically via a UI prompt.',
         'Do not tell the user to click approve or grant permission. Just proceed with your work.',
         'If a tool call fails, read the error message carefully. Common causes: wrong file path, missing dependency, syntax error, or network issue.',
+        ...(this.mcpConfig ? ['A Canvas beside the chat shows substantial output: use the canvas_show tool for reports, tables, Mermaid diagrams and images instead of pasting them into your reply, and canvas_update to revise them.'] : []),
       ].join(' '),
     ]
     // Kill any orphaned Claude process still holding this session ID's lock.

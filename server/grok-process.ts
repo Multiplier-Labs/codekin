@@ -23,6 +23,7 @@
  * Grok stores its own credentials; Codekin never reads them.
  */
 
+import { isCanvasMcpTool, type AcpStdioMcpServer } from './canvas-mcp-config.js'
 import { spawn, type ChildProcess } from 'child_process'
 import { createInterface, type Interface } from 'readline'
 import { existsSync } from 'fs'
@@ -160,6 +161,8 @@ export interface GrokProcessOptions {
   extraEnv?: Record<string, string>
   /** Codekin permission mode — see grok-acp.ts for the mapping. */
   permissionMode?: PermissionMode
+  /** MCP servers Codekin adds to the session (ACP `mcpServers`, e.g. Canvas). */
+  mcpServers?: AcpStdioMcpServer[]
 }
 
 interface PendingRequest {
@@ -224,6 +227,8 @@ export class GrokProcess extends EventEmitter<ClaudeProcessEvents> implements Co
   private thoughtBuffer = ''
   private emittedThought = false
 
+  private readonly mcpServers: AcpStdioMcpServer[]
+
   constructor(workingDir: string, opts?: GrokProcessOptions) {
     super()
     this.workingDir = workingDir
@@ -233,6 +238,7 @@ export class GrokProcess extends EventEmitter<ClaudeProcessEvents> implements Co
     this.effort = opts?.effort
     this.extraEnv = opts?.extraEnv || {}
     this.permissionMode = opts?.permissionMode
+    this.mcpServers = opts?.mcpServers ?? []
   }
 
   start(): void {
@@ -331,7 +337,7 @@ export class GrokProcess extends EventEmitter<ClaudeProcessEvents> implements Co
     }
 
     const meta = sessionMetaForMode(this.permissionMode)
-    const base = { cwd: this.workingDir, mcpServers: [], ...(meta ? { _meta: meta } : {}) }
+    const base = { cwd: this.workingDir, mcpServers: this.mcpServers, ...(meta ? { _meta: meta } : {}) }
     let session: { sessionId?: string; models?: { currentModelId?: string } } | undefined
     if (this.grokSessionId) {
       session = await this.loadOrStartFresh(base)
@@ -532,6 +538,12 @@ export class GrokProcess extends EventEmitter<ClaudeProcessEvents> implements Co
 
     if (isYoloMode(this.permissionMode)) {
       // Grok's yoloMode should not ask at all; if it does, answer as allowed.
+      this.answerPermission(rpcId, options, 'allow')
+      return
+    }
+    // Codekin's own Canvas tools only write to this session's Canvas: allow
+    // them once, without a prompt (Grok wraps MCP calls in use_tool).
+    if (name === 'use_tool' && typeof input.tool_name === 'string' && isCanvasMcpTool(input.tool_name)) {
       this.answerPermission(rpcId, options, 'allow')
       return
     }

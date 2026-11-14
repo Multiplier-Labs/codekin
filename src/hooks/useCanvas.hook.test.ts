@@ -133,3 +133,41 @@ describe('useCanvas', () => {
     expect(handled).toBe(false)
   })
 })
+
+describe('useCanvas auto-open', () => {
+  function AutoHarness({ sessionId, decide }: { sessionId: string; decide: (first: boolean) => boolean }) {
+    hook = useCanvas(sessionId, send, { shouldAutoOpen: decide })
+    return null
+  }
+  function renderAuto(decide: (first: boolean) => boolean) {
+    container = document.createElement('div')
+    document.body.appendChild(container)
+    root = createRoot(container)
+    act(() => { root!.render(createElement(AutoHarness, { sessionId: 's1', decide })) })
+  }
+  const created = (itemId: string, by: 'agent' | 'file' = 'agent') =>
+    ({ type: 'canvas_event', sessionId: 's1', itemId, kind: 'markdown', title: itemId, revision: 1, action: 'created', by }) as const
+
+  it('asks with first=true for the first agent item and opens on it', () => {
+    const asked: boolean[] = []
+    renderAuto(first => { asked.push(first); return first })
+    deliver({ type: 'canvas_items', sessionId: 's1', items: [item('f', { source: { type: 'file', path: 'a.md' } })] })
+    deliver(created('a1'))
+    deliver({ type: 'canvas_items', sessionId: 's1', items: [item('f', { source: { type: 'file', path: 'a.md' } }), item('a1')] })
+    expect(hook.open).toBe(true)
+    expect(hook.selected?.id).toBe('a1')
+
+    act(() => { hook.setOpen(false) })
+    deliver(created('a2'))
+    expect(asked).toEqual([true, false])
+    expect(hook.open).toBe(false)
+  })
+
+  it('never asks for files the user opened or for revisions', () => {
+    const asked: boolean[] = []
+    renderAuto(first => { asked.push(first); return true })
+    deliver(created('f1', 'file'))
+    deliver({ ...created('a1'), action: 'updated' })
+    expect(asked).toEqual([])
+  })
+})
