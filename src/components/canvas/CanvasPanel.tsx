@@ -9,6 +9,7 @@ import { useEffect, useRef, useState } from 'react'
 import { IconChevronLeft, IconCopy, IconGitCompare, IconHierarchy2, IconMessage, IconMessageQuestion, IconPlayerPlay, IconTable, IconWorld, IconX } from '@tabler/icons-react'
 import type { CanvasApi, PreviewApi } from '../../hooks/useCanvas'
 import { CanvasItemPicker } from './CanvasItemPicker'
+import { LaunchCommand } from './LaunchCommand'
 import { CanvasItemView } from './CanvasItemView'
 import { CanvasHeaderActions, RevisionPicker } from './CanvasHeaderActions'
 import { CompareView } from './CompareView'
@@ -310,7 +311,7 @@ function CanvasEmpty({ onSuggest, preview }: { onSuggest: (text: string) => void
 }
 
 /** Dev servers from .claude/launch.json, each with its command shown before it runs. */
-function LaunchConfigs({ configs, onLaunch }: { configs: PreviewApi['configs']; onLaunch: (name: string) => void }) {
+function LaunchConfigs({ configs, onLaunch }: { configs: PreviewApi['configs']; onLaunch: PreviewApi['launch'] }) {
   if (!configs || (!configs.configs.length && !configs.error)) return null
   return (
     <>
@@ -324,11 +325,9 @@ function LaunchConfigs({ configs, onLaunch }: { configs: PreviewApi['configs']; 
               <div className="text-body text-ink"><span className="font-bold">{c.name}</span> <span className="text-ink-muted">· port {c.port}</span></div>
               {c.error
                 ? <div className="text-meta text-error-5">{c.error}</div>
-                : <div className="truncate font-mono text-meta text-ink-muted" title={c.command ?? undefined}>
-                    {c.command ? `$ ${c.command}` : `Shows ${c.url ?? `localhost:${c.port}`}, a server you run`}{c.cwd ? `  (in ${c.cwd})` : ''}{c.envKeys?.length ? `  + ${c.envKeys.join(', ')}` : ''}
-                  </div>}
+                : <LaunchCommand config={c} />}
             </div>
-            <button type="button" disabled={!!c.error} onClick={() => { onLaunch(c.name) }}
+            <button type="button" disabled={!!c.error} onClick={() => { onLaunch(c.name, c.digest) }}
               className="flex shrink-0 items-center gap-1.5 rounded-control bg-primary-fill px-3 py-1.5 text-meta font-medium text-on-primary-fill hover:opacity-90 disabled:opacity-40">
               <IconPlayerPlay size={15} /> {c.command ? 'Run' : 'Show'}
             </button>

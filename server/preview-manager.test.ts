@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import http from 'http'
 import net from 'net'
 import type { AddressInfo } from 'net'
@@ -71,6 +71,11 @@ describe('PreviewManager', () => {
   let proxyPorts: number[]
   const session = () => ({ id: 's1', workingDir: root } as unknown as Session)
 
+  const digestOf = async (name: string) => {
+    const msg = await manager.configs('s1')
+    return msg.type === 'preview_configs' ? msg.configs.find(c => c.name === name)?.digest : undefined
+  }
+  const launch = async (name: string) => manager.launch('s1', name, await digestOf(name))
   const states = () => sent.filter((m): m is Extract<WsServerMessage, { type: 'preview_state' }> => m.type === 'preview_state').map(m => m.preview)
   const last = (): PreviewState | undefined => states().at(-1)
 
@@ -126,7 +131,7 @@ describe('PreviewManager', () => {
   })
 
   it('starts a configuration, reports it running, proxies it, and stops it', async () => {
-    expect(await manager.launch('s1', 'web')).toBeNull()
+    expect(await launch('web')).toBeNull()
     expect(last()).toMatchObject({ status: 'starting', managed: true, config: 'web', command: 'node server.js', targetPort: devPort })
     const running = await until(() => states().find(s => s.status === 'running'))
     expect(proxyPorts).toContain(running.proxyPort)
@@ -149,13 +154,13 @@ describe('PreviewManager', () => {
     const logs = manager.logs('s1', running.itemId)
     expect(logs.type === 'preview_log' && logs.lines.some(l => l.includes('booting on'))).toBe(true)
 
-    expect(manager.stop('s1', running.itemId)).toBeNull()
+    expect(await manager.stop('s1', running.itemId)).toBeNull()
     await until(() => last()?.status === 'stopped' ? true : undefined)
     expect(await probePort(devPort)).toBe(false)
   })
 
   it('reports a crash with its exit code', async () => {
-    await manager.launch('s1', 'crashy')
+    await launch('crashy')
     const crashed = await until(() => states().find(s => s.status === 'crashed'))
     expect(crashed.exitCode).toBe(3)
     expect(crashed.error).toMatch(/exited with code 3/)
@@ -165,7 +170,7 @@ describe('PreviewManager', () => {
     const other = http.createServer((_q, s) => { s.end('other') })
     await new Promise<void>(r => other.listen(devPort, '127.0.0.1', r))
     try {
-      await manager.launch('s1', 'web')
+      await launch('web')
       expect(last()).toMatchObject({ status: 'running', managed: false })
       expect(last()?.notice).toMatch(/already in use/)
     } finally {
@@ -174,8 +179,8 @@ describe('PreviewManager', () => {
   })
 
   it('refuses Codekin\'s own ports and unknown configurations', async () => {
-    expect(await manager.launch('s1', 'codekin')).toMatch(/Codekin's own/)
-    expect(await manager.launch('s1', 'nope')).toMatch(/no launch configuration named "nope"/)
+    expect(await launch('codekin')).toMatch(/Codekin's own/)
+    expect(await manager.launch('s1', 'nope', undefined)).toMatch(/no launch configuration named "nope"/)
     await expect(manager.checkAgentTarget({ port: 1234 })).rejects.toThrow(/Codekin's own/)
     await expect(manager.checkAgentTarget({ port: devPort })).rejects.toThrow(/Nothing is listening/)
   })
@@ -185,7 +190,7 @@ describe('PreviewManager', () => {
     expect(await manager.open('s1', 'agent-1')).toBeNull()
     expect(last()).toMatchObject({ status: 'stopped', managed: false })
     expect(last()?.entry).toContain('to=%2Fa')
-    expect(manager.stop('s1', 'agent-1')).toMatch(/didn't start this server/)
+    expect(await manager.stop('s1', 'agent-1')).toMatch(/didn't start this server/)
 
     const dev = http.createServer((_q, s) => { s.end('ok') })
     await new Promise<void>(r => dev.listen(devPort, '127.0.0.1', r))
@@ -207,10 +212,66 @@ describe('PreviewManager', () => {
   })
 
   it('stops everything when the item is deleted', async () => {
-    await manager.launch('s1', 'web')
+    await launch('web')
     const running = await until(() => states().find(s => s.status === 'running'))
     manager.forget('s1', running.itemId)
     await new Promise(r => setTimeout(r, 500))
     expect(await probePort(devPort)).toBe(false)
+  })
+
+  it('starts one server when Start is pressed twice at once', async () => {
+    const d = await digestOf('web')
+    await Promise.all([manager.launch('s1', 'web', d), manager.launch('s1', 'web', d)])
+    await until(() => states().find(s => s.status === 'running'))
+    const logs = manager.logs('s1', last()!.itemId)
+    expect(logs.type === 'preview_log' && logs.lines.filter(l => l.startsWith('$ ')).length).toBe(1)
+  })
+
+  it('refuses a configuration that changed since the user saw it, and Restart reuses what is running', async () => {
+    const seen = await digestOf('web')
+    const config = JSON.parse(readFileSync(path.join(root, '.claude/launch.json'), 'utf-8'))
+    config.configurations[0].args = ['--evil']
+    writeFileSync(path.join(root, '.claude/launch.json'), JSON.stringify(config))
+    expect(await manager.launch('s1', 'web', seen)).toMatch(/changed since you saw it/)
+    await until(() => sent.some(m => m.type === 'preview_configs') || undefined)
+    expect(await manager.launch('s1', 'web', undefined)).toMatch(/changed since you saw it/)
+
+    // Start what the file says now, then change the file again: Restart runs what was started.
+    expect(await manager.launch('s1', 'web', await digestOf('web'))).toBeNull()
+    const running = await until(() => states().find(s => s.status === 'running'))
+    config.configurations[0].args = ['--other']
+    writeFileSync(path.join(root, '.claude/launch.json'), JSON.stringify(config))
+    expect(await manager.restart('s1', running.itemId)).toBeNull()
+    await until(() => states().filter(s => s.status === 'running').length >= 2 ? true : undefined)
+    const logs = manager.logs('s1', running.itemId)
+    expect(logs.type === 'preview_log' && logs.lines.find(l => l.startsWith('$ '))).toBe('$ node server.js --evil')
+  })
+
+  it('moves the proxy when the configured port changes', async () => {
+    await launch('web')
+    const first = await until(() => states().find(s => s.status === 'running'))
+    expect(await manager.stop('s1', first.itemId)).toBeNull()
+    await until(() => last()?.status === 'stopped' ? true : undefined)
+    const newPort = await freePort()
+    const config = JSON.parse(readFileSync(path.join(root, '.claude/launch.json'), 'utf-8'))
+    config.configurations[0].port = newPort
+    writeFileSync(path.join(root, '.claude/launch.json'), JSON.stringify(config))
+    await launch('web')
+    const moved = await until(() => states().find(s => s.status === 'running' && s.targetPort === newPort))
+    expect(moved.entry).not.toBe(first.entry)
+  })
+
+  it('clears an old crash once the port answers again', async () => {
+    await launch('crashy')
+    const crashed = await until(() => states().find(s => s.status === 'crashed'))
+    const dev = http.createServer((_q, r) => { r.end('ok') })
+    await new Promise<void>(r => dev.listen(devPort, '127.0.0.1', r))
+    try {
+      expect(await manager.open('s1', crashed.itemId)).toBeNull()
+      expect(last()).toMatchObject({ status: 'running' })
+      expect(last()?.error).toBeUndefined()
+    } finally {
+      dev.close()
+    }
   })
 })

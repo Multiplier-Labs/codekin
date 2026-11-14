@@ -18,9 +18,11 @@ afterEach(() => {
 
 const item: CanvasItem = { id: 'p1', kind: 'preview', title: 'web', source: { type: 'launch', config: 'web' }, latest: 1, revisions: [], createdAt: '', updatedAt: '' }
 
+const WEB = { name: 'web', command: 'npm run dev', port: 5173, env: { NODE_OPTIONS: '--inspect' }, digest: 'd1' }
+
 function api(state?: PreviewState, logs: string[] = []): PreviewApi {
   return {
-    state: () => state, logs: () => logs, configs: null,
+    state: () => state, logs: () => logs, configs: { file: '.claude/launch.json', configs: [WEB] },
     requestConfigs: vi.fn(), open: vi.fn(), launch: vi.fn(), stop: vi.fn(), restart: vi.fn(), requestLogs: vi.fn(),
   }
 }
@@ -46,8 +48,11 @@ describe('PreviewView', () => {
     expect(el.querySelector('iframe')).toBeNull()
     expect(el.textContent).toContain('Nothing answers on port 5173')
     const start = [...el.querySelectorAll('button')].find(b => b.textContent?.trim() === 'Start' && b.className.includes('bg-primary-fill'))!
+    // What Start runs is shown, env values included, and its digest goes with it.
+    expect(el.textContent).toContain('$ npm run dev')
+    expect(el.textContent).toContain('NODE_OPTIONS=--inspect')
     act(() => { start.click() })
-    expect(preview.launch).toHaveBeenCalledWith('web')
+    expect(preview.launch).toHaveBeenCalledWith('web', 'd1')
   })
 
   it('shows a crash with the last output', () => {

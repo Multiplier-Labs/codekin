@@ -1,5 +1,5 @@
 /**
- * Launch configurations for Canvas previews (docs/CANVAS-SPEC.md §9).
+ * Launch configurations for Canvas previews (docs/CANVAS-SPEC.md §8).
  *
  * A repository describes its dev servers in `.claude/launch.json`, the file
  * Claude Code's desktop app uses (JSON with comments):
@@ -15,11 +15,13 @@
  * Codekin to run anything.
  */
 
+import { createHash } from 'crypto'
 import { existsSync, promises as fs, realpathSync } from 'fs'
 import path from 'path'
 import type { PreviewLaunchConfig } from './protocol.js'
 
 export const LAUNCH_FILE = '.claude/launch.json'
+const MAX_LAUNCH_FILE = 256 * 1024
 
 /** A configuration ready to start: the resolved command and folder. */
 export interface ResolvedLaunchConfig extends PreviewLaunchConfig {
@@ -176,8 +178,12 @@ export async function readLaunchConfigs(root: string): Promise<{ file: string; c
   if (!existsSync(file)) return { file: LAUNCH_FILE, configs: [] }
   let parsed: unknown
   try {
+    // A plain file of a sane size, checked before reading: the repository
+    // decides what this path is (a symlink to /dev/zero, a huge file).
+    const stat = await fs.lstat(file)
+    if (!stat.isFile()) return { file: LAUNCH_FILE, configs: [], error: `${LAUNCH_FILE} must be a plain file, not a link.` }
+    if (stat.size > MAX_LAUNCH_FILE) return { file: LAUNCH_FILE, configs: [], error: `${LAUNCH_FILE} is too large.` }
     const text = await fs.readFile(file, 'utf-8')
-    if (text.length > 256 * 1024) return { file: LAUNCH_FILE, configs: [], error: `${LAUNCH_FILE} is too large.` }
     parsed = parseJsonc(text)
   } catch (err) {
     return { file: LAUNCH_FILE, configs: [], error: `${LAUNCH_FILE} can't be read: ${err instanceof Error ? err.message : String(err)}` }
@@ -196,11 +202,22 @@ export async function readLaunchConfigs(root: string): Promise<{ file: string; c
   }
 }
 
-/** The wire shape (no absolute paths or env values). */
+/**
+ * What the user approves when they start a configuration: the command, its
+ * folder and its environment. Starting sends this back, and Codekin refuses
+ * when the file says something else by then.
+ */
+export function launchDigest(c: ResolvedLaunchConfig): string {
+  return createHash('sha256').update(JSON.stringify([c.executable, c.args, c.absCwd, Object.entries(c.env).sort(), c.port])).digest('hex').slice(0, 32)
+}
+
+/** The wire shape: everything the user should see before starting it (no absolute paths). */
 export function publicConfig(c: ResolvedLaunchConfig): PreviewLaunchConfig {
   return {
     name: c.name, command: c.command, port: c.port,
     ...(c.cwd ? { cwd: c.cwd } : {}), ...(c.url ? { url: c.url } : {}), ...(c.error ? { error: c.error } : {}),
-    ...(Object.keys(c.env).length ? { envKeys: Object.keys(c.env) } : {}),
+    // Values too: they come from the repository, and they change what runs (NODE_OPTIONS, PATH).
+    ...(Object.keys(c.env).length ? { env: c.env } : {}),
+    ...(c.executable ? { digest: launchDigest(c) } : {}),
   }
 }

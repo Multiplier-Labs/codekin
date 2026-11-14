@@ -1,5 +1,5 @@
 /**
- * Live previews (docs/CANVAS-SPEC.md §9): dev servers on this machine shown
+ * Live previews (docs/CANVAS-SPEC.md §8): dev servers on this machine shown
  * in a session's Canvas.
  *
  * A preview item names a local port. Opening it gives it a proxy on one of
@@ -22,7 +22,7 @@ import net from 'net'
 import type { CanvasPublishInput } from './canvas-sessions.js'
 import { CanvasError } from './canvas-store.js'
 import { buildHarnessEnv } from './harness-env.js'
-import { publicConfig, readLaunchConfigs, type ResolvedLaunchConfig } from './preview-config.js'
+import { launchDigest, publicConfig, readLaunchConfigs, type ResolvedLaunchConfig } from './preview-config.js'
 import { createPreviewProxy, PREVIEW_ENTRY_PATH } from './preview-proxy.js'
 import type { CanvasItem, CanvasItemSource, PreviewState, PreviewStatus, PreviewTarget, Session, WsServerMessage } from './types.js'
 
@@ -33,6 +33,8 @@ export interface PreviewSettings {
   host: string
   /** Target ports a preview may not show: Codekin's own, the sandbox's, the proxies'. */
   denied: Set<number>
+  /** Codekin's own port: the only parent page the preview script answers. */
+  codekinPort?: number
 }
 
 /**
@@ -57,7 +59,7 @@ export function previewSettings(codekinPort: number, sandboxPort: number | null,
   } else {
     for (let p = codekinPort + 10; p < codekinPort + 20 && p <= 65535; p++) ports.push(p)
   }
-  return { ports, host, denied: new Set([codekinPort, ...(sandboxPort ? [sandboxPort] : []), ...ports]) }
+  return { ports, host, denied: new Set([codekinPort, ...(sandboxPort ? [sandboxPort] : []), ...ports]), codekinPort }
 }
 
 /** frame-src entries for Codekin's pages: the preview ports on any host (the browser may reach Codekin by any name). */
@@ -77,19 +79,22 @@ export function probePort(port: number, hosts = ['127.0.0.1', '::1'], timeoutMs 
   return Promise.all(hosts.map(one)).then(r => r.some(Boolean))
 }
 
+/** Credentials in Codekin's environment (API keys, tokens, webhook secrets): a dev server gets none of them. */
+const SECRET_NAME = /(^|_)(TOKEN|SECRET|PASSWORD|PASSWD|API_?KEY|PRIVATE_KEY|CREDENTIALS?|AUTH_FILE)(_|$)/i
+
 /**
  * The dev server's environment: what agent CLIs get, without Codekin's own
- * variables or NODE_ENV (a production NODE_ENV on the host breaks dev
- * servers), plus the configuration's env and PORT.
+ * variables, credentials or NODE_ENV (a production NODE_ENV on the host
+ * breaks dev servers), plus the configuration's env and PORT.
  */
 export function devServerEnv(extra: Record<string, string>, port: number): Record<string, string> {
-  const own = (key: string) => key === 'NODE_ENV' || key.startsWith('CODEKIN_') || key.startsWith('CANVAS_') || key.startsWith('RELAY_')
+  const own = (key: string) => key === 'NODE_ENV' || key.startsWith('CODEKIN_') || key.startsWith('CANVAS_') || key.startsWith('RELAY_') || SECRET_NAME.test(key)
   const env = Object.fromEntries(Object.entries(buildHarnessEnv()).filter(([key]) => !own(key)))
   return { ...env, PORT: String(port), ...extra }
 }
 
 // eslint-disable-next-line no-control-regex
-const ANSI = /\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07]*\x07/g
+const ANSI = /\x1b\[[0-9;?]{0,32}[ -/]{0,8}[@-~]|\x1b\][^\x07\x1b]{0,512}\x07/g
 const MAX_LOG_LINES = 1000
 const MAX_LINE = 2000
 const PROBE_MS = 3000
@@ -98,6 +103,9 @@ const START_TIMEOUT_MS = 120_000
 const KILL_GRACE_MS = 5000
 
 interface Proxy { server: http.Server; port: number; key: string }
+
+/** A launch the user approved no longer matches the file. */
+const CHANGED = 'The launch configuration changed since you saw it. Check the command and start it again.'
 
 interface Entry {
   sessionId: string
@@ -115,6 +123,8 @@ interface Entry {
   notice?: string
   startedAt?: number
   stopping?: boolean
+  /** The configuration it was started with: Restart runs exactly this again. */
+  launched?: ResolvedLaunchConfig
   logs: string[]
   pending: string[]
   partial: Record<'out' | 'err', string>
@@ -140,6 +150,18 @@ export class PreviewManager {
   private entries = new Map<string, Entry>()
   /** Proxy port each preview had last, so its origin (and the app's storage there) stays the same. */
   private sticky = new Map<string, number>()
+  /** Which preview last held each proxy port: a new holder starts with that origin's storage cleared. */
+  private portHolder = new Map<number, string>()
+  /** One operation at a time per session (open, launch, stop, restart): no two starts of one server. */
+  private queues = new Map<string, Promise<unknown>>()
+
+  private serial<T>(sessionId: string, op: () => Promise<T>): Promise<T> {
+    const run = (this.queues.get(sessionId) ?? Promise.resolve()).then(op, op)
+    const tail = run.catch(() => undefined)
+    this.queues.set(sessionId, tail)
+    void tail.then(() => { if (this.queues.get(sessionId) === tail) this.queues.delete(sessionId) })
+    return run
+  }
 
   constructor(private readonly deps: PreviewManagerDeps) {}
 
@@ -177,18 +199,19 @@ export class PreviewManager {
   }
 
   /** Get a preview ready to show: its proxy, and whether its server answers. Returns an error message, or null. */
-  async open(sessionId: string, itemId: string): Promise<string | null> {
+  open(sessionId: string, itemId: string): Promise<string | null> {
+    return this.serial(sessionId, () => this.openNow(sessionId, itemId))
+  }
+
+  private async openNow(sessionId: string, itemId: string): Promise<string | null> {
     try {
       const target = await this.deps.target(sessionId, itemId)
       if (!target) return 'That item is not a preview.'
       const denied = this.checkTarget(target.port)
       if (denied) return denied
       const entry = this.entry(sessionId, itemId, target)
-      if (entry.targetPort !== target.port && !entry.proc) {
-        // A new revision points elsewhere: a fresh proxy for the new port.
-        this.closeProxy(entry)
-        entry.targetPort = target.port
-      }
+      // A new revision may point elsewhere (a server Codekin runs keeps its port).
+      if (!entry.proc) this.retarget(entry, target.port)
       entry.path = target.path
       entry.lastUsed = Date.now()
       await this.ensureProxy(entry)
@@ -201,22 +224,38 @@ export class PreviewManager {
     }
   }
 
-  /** Start a launch configuration (the user asked, having seen the command). Returns an error message, or null. */
-  async launch(sessionId: string, name: string): Promise<string | null> {
+  /**
+   * Start a launch configuration the user approved: `digest` names what they
+   * saw (publicConfig), and a file that says something else by now is
+   * refused. Returns an error message, or null.
+   */
+  launch(sessionId: string, name: string, digest: string | undefined): Promise<string | null> {
+    return this.serial(sessionId, () => this.launchNow(sessionId, name, digest))
+  }
+
+  private async launchNow(sessionId: string, name: string, digest: string | undefined, approved?: ResolvedLaunchConfig): Promise<string | null> {
     try {
       const session = this.deps.getSession(sessionId)
       if (!session) return 'Session not found'
-      const { configs, error } = await readLaunchConfigs(session.workingDir)
-      const config = configs.find(c => c.name === name)
-      if (!config) return error ?? `There is no launch configuration named "${name}" in .claude/launch.json.`
-      if (config.error) return `${config.name}: ${config.error}`
+      let config = approved
+      if (!config) {
+        const { configs, error } = await readLaunchConfigs(session.workingDir)
+        config = configs.find(c => c.name === name)
+        if (!config) return error ?? `There is no launch configuration named "${name}" in .claude/launch.json.`
+        if (config.error) return `${config.name}: ${config.error}`
+        if (config.executable && digest !== launchDigest(config)) {
+          // Show the user what the file says now.
+          void this.configs(sessionId).then(msg => { this.deps.broadcast(session, msg) })
+          return CHANGED
+        }
+      }
       const denied = this.checkTarget(config.port)
       if (denied) return denied
       const item = await this.deps.publish(sessionId, { port: config.port }, { type: 'launch', config: config.name })
       const target = await this.deps.target(sessionId, item.id)
       const entry = this.entry(sessionId, item.id, target ?? { port: config.port, path: '/', config: config.name })
       if (entry.proc) { this.emit(entry); return null }
-      entry.targetPort = config.port
+      this.retarget(entry, config.port)
       entry.config = config.name
       entry.lastUsed = Date.now()
       entry.error = undefined
@@ -243,27 +282,34 @@ export class PreviewManager {
   }
 
   /** Stop a server Codekin started. Returns an error message, or null. */
-  stop(sessionId: string, itemId: string): string | null {
-    const entry = this.entries.get(key(sessionId, itemId))
-    if (!entry?.proc) return 'Codekin didn\'t start this server, so it can\'t stop it. Stop it where it runs.'
-    this.kill(entry)
-    return null
+  stop(sessionId: string, itemId: string): Promise<string | null> {
+    return this.serial(sessionId, async () => {
+      const entry = this.entries.get(key(sessionId, itemId))
+      if (!entry?.proc) return 'Codekin didn\'t start this server, so it can\'t stop it. Stop it where it runs.'
+      this.kill(entry)
+      return null
+    })
   }
 
-  async restart(sessionId: string, itemId: string): Promise<string | null> {
-    const entry = this.entries.get(key(sessionId, itemId))
-    if (!entry?.config) return 'Only servers started from a launch configuration can be restarted here.'
-    if (entry.proc) {
-      const proc = entry.proc
-      await new Promise<void>((resolve) => {
-        const timer = setTimeout(resolve, KILL_GRACE_MS + 1000)
-        proc.once('exit', () => { clearTimeout(timer); resolve() })
-        this.kill(entry)
-      })
-    }
-    entry.logs = []
-    this.sendLog(entry, [], true)
-    return this.launch(sessionId, entry.config)
+  /** Stop and start again, with the configuration it was started with (not what the file says now). */
+  restart(sessionId: string, itemId: string): Promise<string | null> {
+    return this.serial(sessionId, async () => {
+      const entry = this.entries.get(key(sessionId, itemId))
+      const launched = entry?.launched
+      if (!entry || !launched) return 'Only a server Codekin started can be restarted here. Start it from its launch configuration.'
+      if (entry.proc) {
+        const proc = entry.proc
+        await new Promise<void>((resolve) => {
+          const timer = setTimeout(resolve, KILL_GRACE_MS + 1000)
+          proc.once('exit', () => { clearTimeout(timer); resolve() })
+          this.kill(entry)
+        })
+      }
+      entry.logs = []
+      entry.pending = []
+      this.sendLog(entry, [], true)
+      return this.launchNow(sessionId, launched.name, undefined, launched)
+    })
   }
 
   logs(sessionId: string, itemId: string): WsServerMessage {
@@ -288,7 +334,12 @@ export class PreviewManager {
   async shutdown(): Promise<void> {
     const running = [...this.entries.values()].filter(e => e.proc)
     await Promise.all(running.map(e => new Promise<void>((resolve) => {
-      const timer = setTimeout(resolve, 2000)
+      const pid = e.proc!.pid
+      const timer = setTimeout(() => {
+        // Codekin is going away: whatever is left of the group goes too.
+        if (pid) signalGroup(pid, 'SIGKILL')
+        resolve()
+      }, 2000)
       e.proc!.once('exit', () => { clearTimeout(timer); resolve() })
       this.kill(e)
     })))
@@ -349,10 +400,17 @@ export class PreviewManager {
       const order = [...(preferred !== undefined ? [preferred] : []), ...this.settings.ports].filter((p, i, a) => !used.has(p) && a.indexOf(p) === i)
       for (const port of order) {
         const proxyKey = randomBytes(24).toString('base64url')
-        const server = createPreviewProxy({ targetPort: entry.targetPort, key: proxyKey, cookieName: `codekin_preview_${port}` })
+        // An origin another preview used (or an earlier Codekin) may hold its
+        // storage and service workers: the new holder starts with them cleared.
+        const clearSiteData = this.portHolder.get(port) !== k
+        const server = createPreviewProxy({
+          targetPort: entry.targetPort, key: proxyKey, cookieName: `codekin_preview_${port}`, clearSiteData,
+          ...(this.settings.codekinPort ? { hostPorts: [this.settings.codekinPort] } : {}),
+        })
         if (await listen(server, port, this.settings.host)) {
           entry.proxy = { server, port, key: proxyKey }
           this.sticky.set(k, port)
+          this.portHolder.set(port, k)
           if (entry.error?.startsWith('No preview port')) entry.error = undefined
           return
         }
@@ -364,6 +422,15 @@ export class PreviewManager {
       this.emit(oldest)
     }
     entry.error = `No preview port is free (Codekin uses ${this.settings.ports[0]}–${this.settings.ports.at(-1)}).`
+  }
+
+  /** Point the preview at another port: its proxy forwards to one port only, so it is replaced. */
+  private retarget(entry: Entry, port: number): void {
+    if (entry.targetPort === port) return
+    this.closeProxy(entry)
+    entry.targetPort = port
+    entry.error = undefined
+    entry.notice = undefined
   }
 
   private closeProxy(entry: Entry): void {
@@ -394,7 +461,8 @@ export class PreviewManager {
       }
     } else if (entry.status !== 'crashed' || up) {
       entry.status = up ? 'running' : 'stopped'
-      if (up && entry.status === 'running' && entry.exitCode !== undefined) entry.exitCode = undefined
+      // Something answers again (the agent restarted it): an old crash or timeout no longer applies.
+      if (up) { entry.exitCode = undefined; entry.error = undefined }
     }
     return before !== `${entry.status}|${entry.error ?? ''}`
   }
@@ -414,6 +482,7 @@ export class PreviewManager {
   }
 
   private spawn(entry: Entry, config: ResolvedLaunchConfig): void {
+    entry.launched = config
     entry.managed = true
     entry.command = config.command ?? undefined
     entry.status = 'starting'
@@ -469,15 +538,13 @@ export class PreviewManager {
     const child = entry.proc
     if (!child?.pid) return
     entry.stopping = true
-    const signal = (sig: NodeJS.Signals) => {
-      try {
-        // The whole process group: npm/yarn wrappers start the real server as a child.
-        if (process.platform !== 'win32') process.kill(-child.pid!, sig)
-        else child.kill(sig)
-      } catch { /* already gone */ }
-    }
-    signal('SIGTERM')
-    const timer = setTimeout(() => { if (entry.proc === child) signal('SIGKILL') }, KILL_GRACE_MS)
+    const pid = child.pid
+    if (process.platform === 'win32') { child.kill('SIGTERM'); return }
+    // The whole process group: npm/yarn wrappers start the real server as a
+    // child, and it may outlive the wrapper. Whatever is left after the grace
+    // period is killed, whether or not the wrapper already exited.
+    signalGroup(pid, 'SIGTERM')
+    const timer = setTimeout(() => { signalGroup(pid, 'SIGKILL') }, KILL_GRACE_MS)
     timer.unref?.()
   }
 
@@ -490,7 +557,8 @@ export class PreviewManager {
   }
 
   private addLog(entry: Entry, raw: string): void {
-    const line = raw.replace(ANSI, '').replace(/\r/g, '').slice(0, MAX_LINE)
+    // Clipped first: the line comes from the dev server, at any length.
+    const line = raw.slice(0, MAX_LINE * 2).replace(ANSI, '').replace(/\r/g, '').slice(0, MAX_LINE)
     entry.logs.push(line)
     if (entry.logs.length > MAX_LOG_LINES) entry.logs.splice(0, entry.logs.length - MAX_LOG_LINES)
     entry.pending.push(line)
@@ -508,6 +576,12 @@ export class PreviewManager {
     const session = this.deps.getSession(entry.sessionId)
     if (session) this.deps.broadcast(session, { type: 'preview_log', sessionId: entry.sessionId, itemId: entry.itemId, lines, ...(reset ? { reset: true } : {}) })
   }
+}
+
+/** Signal a process group; false when it is gone. */
+function signalGroup(pid: number, sig: NodeJS.Signals): boolean {
+  if (pid <= 1) return false
+  try { process.kill(-pid, sig); return true } catch { return false }
 }
 
 function key(sessionId: string, itemId: string): string {

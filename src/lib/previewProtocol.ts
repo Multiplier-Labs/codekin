@@ -1,5 +1,5 @@
 /**
- * Messages between Canvas and a live preview (docs/CANVAS-SPEC.md §9).
+ * Messages between Canvas and a live preview (docs/CANVAS-SPEC.md §8).
  *
  * The preview proxy adds a small script to every page of the previewed app
  * (server/preview-proxy.ts). It says `ready`; Canvas answers `hello` from

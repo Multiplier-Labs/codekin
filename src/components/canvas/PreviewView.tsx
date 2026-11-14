@@ -1,5 +1,5 @@
 /**
- * A live preview in Canvas (docs/CANVAS-SPEC.md §9): a dev server on this
+ * A live preview in Canvas (docs/CANVAS-SPEC.md §8): a dev server on this
  * machine, framed through Codekin's preview proxy on its own origin.
  *
  * The toolbar has back/forward/reload, the page's path, viewport sizes, the
@@ -14,7 +14,8 @@ import {
   IconExternalLink, IconInfoCircle, IconLoader2, IconPlayerPlay, IconPlayerStop, IconRefresh, IconRotateClockwise, IconSend, IconTerminal2, IconX,
 } from '@tabler/icons-react'
 import type { PreviewApi } from '../../hooks/useCanvas'
-import type { CanvasItem, PreviewState, PreviewTarget } from '../../types'
+import type { CanvasItem, PreviewLaunchConfig, PreviewState, PreviewTarget } from '../../types'
+import { LaunchCommand } from './LaunchCommand'
 import type { CanvasSelectionKind } from '../../lib/canvasContext'
 import {
   consoleContext, entryUrl, parseFromPreview, pickedContext, previewOrigin, serverLogContext,
@@ -53,6 +54,10 @@ export function PreviewView({ item, content, preview, onAttach, isMobile }: Prop
   const target = useMemo(() => parseTarget(content), [content])
   const state = preview.state(item.id)
   const frameRef = useRef<HTMLIFrameElement>(null)
+
+  // Starting from a launch configuration shows its command: load the configurations.
+  const requestConfigs = preview.requestConfigs
+  useEffect(() => { if (target?.config) requestConfigs() }, [target?.config, requestConfigs])
 
   // Ask for the proxy whenever the item (or where it points) changes.
   const openPreview = preview.open
@@ -169,6 +174,10 @@ export function PreviewView({ item, content, preview, onAttach, isMobile }: Prop
   const errors = consoleEntries.filter(e => e.level === 'error').length
   const warnings = consoleEntries.length - errors
   const config = state?.config ?? target.config
+  // Start runs what the file says now: shown before it runs, and sent back so a changed file is refused.
+  const launchConfig = config ? preview.configs?.configs.find(c => c.name === config) : undefined
+  const startable = !!launchConfig && !launchConfig.error
+  const start = () => { if (config && launchConfig) preview.launch(config, launchConfig.digest) }
   const canStart = !!config && !state?.managed && state?.status !== 'running' && state?.status !== 'starting'
   const shownPath = pathDraft ?? current?.path ?? loadPath
   const logs = preview.logs(item.id)
@@ -237,7 +246,8 @@ export function PreviewView({ item, content, preview, onAttach, isMobile }: Prop
           </>
         )}
         {canStart && (
-          <button type="button" onClick={() => { preview.launch(config) }} className={SERVER_BTN} title={state?.command ? `Run ${state.command}` : `Start ${config}`}>
+          <button type="button" onClick={start} disabled={!startable} className={`${SERVER_BTN} disabled:opacity-40`}
+            title={launchConfig?.command ? `Run ${launchConfig.command}` : launchConfig?.error ?? `"${config}" isn't in .claude/launch.json any more`}>
             <IconPlayerPlay size={15} className="text-success-5" /> Start
           </button>
         )}
@@ -271,7 +281,8 @@ export function PreviewView({ item, content, preview, onAttach, isMobile }: Prop
             target={target}
             mixed={mixed}
             logs={logs}
-            onStart={config && !state?.managed ? () => { preview.launch(config) } : undefined}
+            onStart={config && !state?.managed && startable ? start : undefined}
+            launchConfig={launchConfig}
             onOpenTab={origin && state?.entry ? openInTab : undefined}
           />
         )}
@@ -325,7 +336,8 @@ function StatusPill({ state }: { state: PreviewState | undefined }) {
   )
 }
 
-function PreviewStatus({ state, target, mixed, logs, onStart, onOpenTab }: {
+function PreviewStatus({ state, target, mixed, logs, onStart, onOpenTab, launchConfig }: {
+  launchConfig?: PreviewLaunchConfig
   state: PreviewState | undefined
   target: PreviewTarget
   mixed: boolean
@@ -368,6 +380,12 @@ function PreviewStatus({ state, target, mixed, logs, onStart, onOpenTab }: {
         {title}
       </div>
       {body && <p className="mt-1 text-body text-ink-muted">{body}</p>}
+      {onStart && launchConfig && !HOSTED && state?.status !== 'starting' && (
+        <div className="mt-4 rounded-control border border-edge bg-surface px-3 py-2">
+          <div className="mb-1 text-micro font-bold uppercase tracking-wide text-ink-muted">Start runs</div>
+          <LaunchCommand config={launchConfig} />
+        </div>
+      )}
       {(onStart || (onOpenTab && mixed)) && !HOSTED && (
         <div className="mt-4 flex gap-2">
           {onStart && state?.status !== 'starting' && (

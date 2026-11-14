@@ -111,7 +111,7 @@ for (let i = 0; i < args.length; i++) {
 
 // Canvas sandbox origin for charts and HTML items (docs/CANVAS-SPEC.md §8).
 const canvasSandbox = sandboxConfig(port)
-// Live previews of dev servers (docs/CANVAS-SPEC.md §9): one proxy port per open preview.
+// Live previews of dev servers (docs/CANVAS-SPEC.md §8): one proxy port per open preview.
 const canvasPreviews = previewSettings(port, canvasSandbox.port, BIND_HOST)
 const canvasFrameSrc = [sandboxFrameSrc(canvasSandbox), previewFrameSrc(canvasPreviews)].filter(Boolean).join(' ')
 
