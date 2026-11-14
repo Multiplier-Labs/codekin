@@ -23,10 +23,18 @@ function describe(item: CanvasItem) {
   return { id: item.id, title: item.title, kind: item.kind, revision: item.latest }
 }
 
+/** OpenCode's Canvas tools (opencode-canvas.ts): a shared server, so calls name the OpenCode session. */
+export interface OpenCodeCanvasAccess {
+  verify: (token: string | undefined) => boolean
+  /** The Codekin session an OpenCode session id belongs to. */
+  resolve: (openCodeSessionId: string) => string | undefined
+}
+
 export function createCanvasRouter(
   extractToken: ExtractFn,
   verifySessionToken: VerifySessionFn,
   canvas: () => CanvasSessions,
+  opencode?: OpenCodeCanvasAccess,
 ): Router {
   const router = Router()
   const json = express.json({ limit: '1536kb' })
@@ -58,6 +66,37 @@ export function createCanvasRouter(
   router.post('/api/sessions/:id/canvas/items/:itemId', json, (req: Request<{ id: string; itemId: string }, unknown, CanvasPublishInput>, res) => {
     void publish(req.params.itemId)(req, res)
   })
+
+  // OpenCode: the token authorizes the tools; the OpenCode session id picks the Codekin session.
+  if (opencode) {
+    const resolveSession = (req: Request<{ oc: string }>, res: express.Response): string | null => {
+      if (!opencode.verify(extractToken(req))) { res.status(401).json({ error: 'Unauthorized' }); return null }
+      const sessionId = opencode.resolve(req.params.oc)
+      if (!sessionId) { res.status(404).json({ error: 'This OpenCode session is not a Codekin session, so it has no Canvas.' }); return null }
+      return sessionId
+    }
+    router.get('/api/opencode-canvas/:oc/items', (req: Request<{ oc: string }>, res) => {
+      const sessionId = resolveSession(req, res)
+      if (!sessionId) return
+      const list = canvas().list(sessionId)
+      res.json({ items: list.type === 'canvas_items' ? list.items.map(describe) : [] })
+    })
+    const publishFor = async (req: Request<{ oc: string; itemId?: string }, unknown, CanvasPublishInput>, res: express.Response, itemId?: string) => {
+      const sessionId = resolveSession(req, res)
+      if (!sessionId) return
+      const body: CanvasPublishInput = typeof req.body === 'object' ? req.body : {}
+      try {
+        const item = await canvas().publish(sessionId, { ...body, itemId })
+        res.json({ item: describe(item) })
+      } catch (err) {
+        if (err instanceof CanvasError) return res.status(400).json({ error: err.message })
+        console.error('[canvas] OpenCode publish failed', err)
+        res.status(500).json({ error: 'The Canvas request failed.' })
+      }
+    }
+    router.post('/api/opencode-canvas/:oc/items', json, (req: Request<{ oc: string }, unknown, CanvasPublishInput>, res) => { void publishFor(req, res) })
+    router.post('/api/opencode-canvas/:oc/items/:itemId', json, (req: Request<{ oc: string; itemId: string }, unknown, CanvasPublishInput>, res) => { void publishFor(req, res, req.params.itemId) })
+  }
 
   return router
 }

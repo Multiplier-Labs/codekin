@@ -14,6 +14,8 @@
 // Must stay the first import: takes exclusive ownership of the state
 // directories before any module opens state (desktop plan D7).
 import { createCanvasRouter } from './canvas-routes.js'
+import { prepareOpenCodeCanvas, verifyOpenCodeCanvasToken } from './opencode-canvas.js'
+import { configureOpenCodeServerEnv } from './opencode-process.js'
 import './data-ownership-boot.js'
 import express from 'express'
 import { createServer } from 'http'
@@ -259,7 +261,11 @@ app.post(
 
 // Canvas items agents publish can be up to 1 MiB, past the default 100 kB
 // limit, so these routes parse their own bodies — register BEFORE express.json().
-app.use(createCanvasRouter(extractToken, verifyTokenOrSessionToken, () => sessions.canvas))
+configureOpenCodeServerEnv(prepareOpenCodeCanvas({ dataDir: DATA_DIR, port, masterToken: authToken }))
+app.use(createCanvasRouter(extractToken, verifyTokenOrSessionToken, () => sessions.canvas, {
+  verify: (token) => verifyOpenCodeCanvasToken(authToken, token),
+  resolve: (oc) => sessions.findOpenCodeSession(oc),
+}))
 
 // JSON body parser for all other routes
 app.use(express.json())

@@ -923,6 +923,15 @@ export class SessionManager {
     }
   }
 
+  /** The Codekin session an OpenCode session belongs to (OpenCode's Canvas tools name it). */
+  findOpenCodeSession(openCodeSessionId: string): string | undefined {
+    for (const s of this.sessions.values()) {
+      if (s.provider !== 'opencode') continue
+      if (s.claudeSessionId === openCodeSessionId || s.claudeProcess?.getSessionId() === openCodeSessionId) return s.id
+    }
+    return undefined
+  }
+
   list(): SessionInfo[] {
     return Array.from(this.sessions.values())
       .filter((s) => s.source !== 'orchestrator' && !s.archivedAt)

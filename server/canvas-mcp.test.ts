@@ -99,6 +99,7 @@ describe('per-harness config', () => {
 describe('Canvas REST routes', () => {
   let tmp: string
   let base: string
+  let root: string
   let close: () => void
 
   beforeEach(async () => {
@@ -111,10 +112,14 @@ describe('Canvas REST routes', () => {
       getSession: id => (id === 's1' ? session : undefined), broadcast: () => {}, broadcastAndHistory: () => {}, sessionsChanged: () => {},
     })
     const app = express()
-    app.use(createCanvasRouter(req => req.headers.authorization?.replace(/^Bearer /, ''), (token, sid) => token === `tok-${sid}`, () => canvas))
+    app.use(createCanvasRouter(req => req.headers.authorization?.replace(/^Bearer /, ''), (token, sid) => token === `tok-${sid}`, () => canvas, {
+      verify: token => token === 'oc-token',
+      resolve: oc => (oc === 'ses_1' ? 's1' : undefined),
+    }))
     const server = app.listen(0)
     await new Promise(r => server.once('listening', r))
-    base = `http://127.0.0.1:${(server.address() as AddressInfo).port}/api/sessions`
+    root = `http://127.0.0.1:${(server.address() as AddressInfo).port}/api`
+    base = `${root}/sessions`
     close = () => { server.close() }
   })
   afterEach(() => { close(); rmSync(tmp, { recursive: true, force: true }) })
@@ -136,6 +141,17 @@ describe('Canvas REST routes', () => {
     const bad = await call('POST', '/s1/canvas/items', 'tok-s1', { kind: 'image', content: 'x' })
     expect(bad.status).toBe(400)
     expect(await bad.json()).toEqual({ error: 'Images need a path to the image file.' })
+  })
+
+  it('serves OpenCode tools by OpenCode session id, with their own token', async () => {
+    const oc = (method: string, url: string, token: string, body?: unknown) =>
+      fetch(`${root}/opencode-canvas${url}`, { method, headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) })
+    expect((await oc('GET', '/ses_1/items', 'tok-s1')).status).toBe(401)
+    expect((await oc('GET', '/ses_9/items', 'oc-token')).status).toBe(404)
+    const created = await (await oc('POST', '/ses_1/items', 'oc-token', { title: 'From OpenCode', kind: 'markdown', content: '# hi' })).json() as { item: { id: string } }
+    expect(created.item).toMatchObject({ title: 'From OpenCode', revision: 1 })
+    expect(await (await oc('POST', `/ses_1/items/${created.item.id}`, 'oc-token', { content: '# v2' })).json()).toMatchObject({ item: { revision: 2 } })
+    expect(await (await call('GET', '/s1/canvas/items', 'tok-s1')).json()).toMatchObject({ items: [{ title: 'From OpenCode', revision: 2 }] })
   })
 
   it('accepts bodies past the default 100 kB JSON limit', async () => {
