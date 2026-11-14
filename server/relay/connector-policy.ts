@@ -298,11 +298,15 @@ export function checkServerFrame(policy: ChannelPolicy, state: ChannelState, fra
   return true
 }
 
-/** A Canvas item's content read from a repository file: code, so diff-gated. */
+/**
+ * A Canvas item's content read from a file: opened by the user from the
+ * repository, or a revision an agent showed by path. Code, so diff-gated.
+ */
 function isFileCanvasItem(msg: LocalFrame): boolean {
   if (msg.type !== 'canvas_item') return false
-  const source = (msg as { item?: { source?: { type?: unknown } } }).item?.source
-  return source?.type === 'file'
+  const m = msg as { revision?: unknown; item?: { source?: { type?: unknown }; revisions?: Array<{ n?: unknown; fromFile?: unknown }> } }
+  if (m.item?.source?.type === 'file') return true
+  return !!m.item?.revisions?.some(r => r.n === m.revision && r.fromFile === true)
 }
 
 /** Prompt options that save a standing approval rule in the owner's project. */

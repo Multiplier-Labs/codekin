@@ -42,6 +42,11 @@ export function createCanvasRouter(
   const json = express.json({ limit: '1536kb' })
 
   const authorized = (req: Request<{ id: string }>) => verifySessionToken(extractToken(req), req.params.id)
+  /** The token is checked before a body of up to 1.5 MB is parsed. */
+  const sessionAuth = (req: Request<{ id: string }>, res: express.Response, next: express.NextFunction) => {
+    if (!authorized(req)) { res.status(401).json({ error: 'Unauthorized' }); return }
+    next()
+  }
 
   router.get('/api/sessions/:id/canvas/items', (req: Request<{ id: string }>, res) => {
     if (!authorized(req)) return res.status(401).json({ error: 'Unauthorized' })
@@ -75,15 +80,15 @@ export function createCanvasRouter(
       res.status(500).json({ error: 'The Canvas request failed.' })
     }
   }
-  router.post('/api/sessions/:id/canvas/preview', json, (req: Request<{ id: string }, unknown, PreviewPublishInput>, res) => {
+  router.post('/api/sessions/:id/canvas/preview', sessionAuth, json, (req: Request<{ id: string }, unknown, PreviewPublishInput>, res) => {
     if (!authorized(req)) return res.status(401).json({ error: 'Unauthorized' })
     void preview(req.params.id, typeof req.body === 'object' && req.body ? req.body : { port: undefined }, res)
   })
 
-  router.post('/api/sessions/:id/canvas/items', json, (req: Request<{ id: string }, unknown, CanvasPublishInput>, res) => {
+  router.post('/api/sessions/:id/canvas/items', sessionAuth, json, (req: Request<{ id: string }, unknown, CanvasPublishInput>, res) => {
     void publish()(req, res)
   })
-  router.post('/api/sessions/:id/canvas/items/:itemId', json, (req: Request<{ id: string; itemId: string }, unknown, CanvasPublishInput>, res) => {
+  router.post('/api/sessions/:id/canvas/items/:itemId', sessionAuth, json, (req: Request<{ id: string; itemId: string }, unknown, CanvasPublishInput>, res) => {
     void publish(req.params.itemId)(req, res)
   })
 
@@ -94,6 +99,10 @@ export function createCanvasRouter(
       const sessionId = opencode.resolve(req.params.oc)
       if (!sessionId) { res.status(404).json({ error: 'This OpenCode session is not a Codekin session, so it has no Canvas.' }); return null }
       return sessionId
+    }
+    const openCodeAuth = (req: Request, res: express.Response, next: express.NextFunction) => {
+      if (!opencode.verify(extractToken(req))) { res.status(401).json({ error: 'Unauthorized' }); return }
+      next()
     }
     router.get('/api/opencode-canvas/:oc/items', (req: Request<{ oc: string }>, res) => {
       const sessionId = resolveSession(req, res)
@@ -114,13 +123,13 @@ export function createCanvasRouter(
         res.status(500).json({ error: 'The Canvas request failed.' })
       }
     }
-    router.post('/api/opencode-canvas/:oc/preview', json, (req: Request<{ oc: string }, unknown, PreviewPublishInput>, res) => {
+    router.post('/api/opencode-canvas/:oc/preview', openCodeAuth, json, (req: Request<{ oc: string }, unknown, PreviewPublishInput>, res) => {
       const sessionId = resolveSession(req, res)
       if (!sessionId) return
       void preview(sessionId, typeof req.body === 'object' && req.body ? req.body : { port: undefined }, res)
     })
-    router.post('/api/opencode-canvas/:oc/items', json, (req: Request<{ oc: string }, unknown, CanvasPublishInput>, res) => { void publishFor(req, res) })
-    router.post('/api/opencode-canvas/:oc/items/:itemId', json, (req: Request<{ oc: string; itemId: string }, unknown, CanvasPublishInput>, res) => { void publishFor(req, res, req.params.itemId) })
+    router.post('/api/opencode-canvas/:oc/items', openCodeAuth, json, (req: Request<{ oc: string }, unknown, CanvasPublishInput>, res) => { void publishFor(req, res) })
+    router.post('/api/opencode-canvas/:oc/items/:itemId', openCodeAuth, json, (req: Request<{ oc: string; itemId: string }, unknown, CanvasPublishInput>, res) => { void publishFor(req, res, req.params.itemId) })
   }
 
   return router

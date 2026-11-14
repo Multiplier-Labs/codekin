@@ -326,6 +326,10 @@ describe('canvas', () => {
     expect(checkServerFrame(watcher, joined(watcher), fromFile)).toBe(false)
     expect(checkServerFrame(viewer, joined(viewer), fromFile)).toBe(true)
     expect(checkServerFrame(watcher, joined(watcher), fromAgent)).toBe(true)
+    // An agent showing a file by path: that revision is file content too.
+    const agentFile = frame({ type: 'canvas_item', sessionId: 's1', revision: 2, item: { source: { type: 'agent' }, revisions: [{ n: 1 }, { n: 2, fromFile: true }] }, content: 'SECRET=1' })
+    expect(checkServerFrame(watcher, joined(watcher), agentFile)).toBe(false)
+    expect(checkServerFrame(viewer, joined(viewer), agentFile)).toBe(true)
     for (const type of ['canvas_items', 'canvas_event']) {
       expect(checkServerFrame(watcher, joined(watcher), frame({ type, sessionId: 's1' }))).toBe(true)
       expect(checkServerFrame(watcher, joined(watcher), frame({ type, sessionId: 's2' }))).toBe(false)

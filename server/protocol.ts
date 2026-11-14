@@ -333,6 +333,8 @@ export interface CanvasRevision {
   /** Content size in bytes. */
   size: number
   mediaType: string
+  /** Read from a file (an agent showing a file by path): repository content, gated like code. */
+  fromFile?: true
 }
 
 /** Kind-specific data stored with a revision. */

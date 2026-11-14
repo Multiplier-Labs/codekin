@@ -451,6 +451,16 @@ describe('PromptRouter', () => {
       expect(cp.sendControlResponse).toHaveBeenCalledWith('ctrl-req', 'allow')
     })
 
+    it('does not approve a different call of the same tool while the hook asks about one', () => {
+      session.pendingToolApprovals.set('hook-req', { resolve: vi.fn(), toolName: 'Bash', toolInput: { command: 'ls' }, requestId: 'hook-req' })
+      const cp = { sendControlResponse: vi.fn() } as any
+
+      router.onControlRequestEvent(cp, session, 'sess-1', 'ctrl-req', 'Bash', { command: 'rm -rf build' })
+
+      expect(cp.sendControlResponse).not.toHaveBeenCalledWith('ctrl-req', 'allow')
+      expect(session.pendingControlRequests.has('ctrl-req')).toBe(true)
+    })
+
     it('broadcasts prompt when manual approval needed', () => {
       const cp = { sendControlResponse: vi.fn() } as any
 

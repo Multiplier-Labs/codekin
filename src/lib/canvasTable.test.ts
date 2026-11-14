@@ -42,3 +42,14 @@ describe('numeric columns and sorting', () => {
     expect(sortRows(rows, 2, 'asc', false).map(r => r[0])).toEqual(['a', 'c', 'd', 'b'])
   })
 })
+
+describe('parseTable on large inputs', () => {
+  it('handles very many rows and columns without overflowing or slowing down', () => {
+    const csv = 'a,b\n' + '1,2\n'.repeat(250_000)
+    const start = performance.now()
+    expect(parseTable(csv, 'text/csv').rows).toHaveLength(250_000)
+    const wide = JSON.stringify([Object.fromEntries(Array.from({ length: 50_000 }, (_, i) => [`k${i}`, i]))])
+    expect(parseTable(wide, 'application/json').columns).toHaveLength(50_000)
+    expect(performance.now() - start).toBeLessThan(3000)
+  })
+})
