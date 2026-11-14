@@ -19,7 +19,8 @@ export interface CanvasCardContext {
 
 type CardMsg = Extract<ChatMessage, { type: 'canvas_card' }>
 
-export function CanvasChatCard({ msg, ctx }: { msg: CardMsg; ctx: CanvasCardContext }) {
+/** `latest`: this is the item's most recent card; only that one shows the item's live state (open, pinned). */
+export function CanvasChatCard({ msg, ctx, latest = true }: { msg: CardMsg; ctx: CanvasCardContext; latest?: boolean }) {
   const item = ctx.items?.find(i => i.id === msg.itemId)
   const base = 'flex min-h-[var(--row-h,36px)] w-full max-w-[560px] items-center gap-2.5 rounded-control border px-3 py-1.5 text-left text-meta'
 
@@ -32,9 +33,9 @@ export function CanvasChatCard({ msg, ctx }: { msg: CardMsg; ctx: CanvasCardCont
     )
   }
 
-  const isOpen = ctx.openItemId === msg.itemId
+  const isOpen = latest && ctx.openItemId === msg.itemId
   const title = item?.title ?? msg.title
-  const pinnedBehind = item?.pinnedRevision !== undefined && item.latest > item.pinnedRevision
+  const pinnedBehind = latest && item?.pinnedRevision !== undefined && item.latest > item.pinnedRevision
   const detail = isOpen
     ? 'open'
     : pinnedBehind

@@ -1,6 +1,6 @@
 # Session Canvas
 
-**Status:** Slices 1 (item model and store, #896), 2 (layout shell, #897), 3a (agent publishing, chat cards, auto-open, #898) and 3b (table and diagram renderers) implemented; 3c (revisions UI) next.
+**Status:** Slices 1–3 implemented: item model and store (#896), layout shell (#897), agent publishing with chat cards and auto-open (#898), table and diagram renderers (#899), and the revisions UI. Slice 4 (selection → context and the composer) is next.
 
 ## 1. Summary
 
