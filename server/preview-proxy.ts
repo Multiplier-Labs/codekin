@@ -272,9 +272,25 @@ export function createPreviewProxy(opts: PreviewProxyOptions): http.Server {
     forward(req, res, order())
   }
 
+  // Upgraded connections leave the server's HTTP bookkeeping, so close() and
+  // closeAllConnections() miss them: track both ends here and destroy them too,
+  // or a closed preview keeps talking to its old dev server.
+  const upgraded = new Set<net.Socket>()
+  const track = (s: net.Socket) => {
+    upgraded.add(s)
+    s.once('close', () => { upgraded.delete(s) })
+  }
+  const closeAll = server.closeAllConnections.bind(server)
+  server.closeAllConnections = () => {
+    closeAll()
+    for (const s of upgraded) s.destroy()
+    upgraded.clear()
+  }
+
   // WebSockets (hot reload): the same admission and header rewriting, then raw bytes both ways.
   server.on('upgrade', (req: http.IncomingMessage, socket: net.Socket, head: Buffer) => {
     if (!admitted(req, opts)) { socket.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n'); return }
+    track(socket)
     const headers = upstreamHeaders(req, opts.targetPort)
     delete headers['accept-encoding']
     const lines = [`${req.method ?? 'GET'} ${req.url ?? '/'} HTTP/1.1`]
@@ -291,6 +307,7 @@ export function createPreviewProxy(opts: PreviewProxyOptions): http.Server {
       if (done) return
       const host = tries[i]
       const upstream = net.connect(opts.targetPort, host)
+      track(upstream)
       let connected = false
       upstream.once('connect', () => {
         connected = true

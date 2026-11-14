@@ -1,5 +1,8 @@
 /** Tests for PromptRouter — verifies auto-approval decision tree, control request handling, and prompt routing. */
 /* eslint-disable @typescript-eslint/no-explicit-any */
+import fs from 'fs'
+import os from 'os'
+import path from 'path'
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { PromptRouter, type PromptRouterDeps } from './prompt-router.js'
 import type { Session } from './types.js'
@@ -122,6 +125,45 @@ describe('PromptRouter', () => {
       }
       session.permissionMode = 'bypassPermissions'
       expect(router.resolveAutoApproval(session, 'Write', { file_path: '/home/u/.bashrc' })).toBe('permissionMode')
+    })
+
+    it('resolves symlinks before accepting edits, including new files under a linked folder', () => {
+      const tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'pr-symlink-')))
+      try {
+        const repo = path.join(tmp, 'repo')
+        const outside = path.join(tmp, 'outside')
+        fs.mkdirSync(path.join(repo, 'src'), { recursive: true })
+        fs.mkdirSync(outside)
+        fs.writeFileSync(path.join(outside, 'secret'), '')
+        fs.symlinkSync(outside, path.join(repo, 'link'))
+        fs.symlinkSync(path.join(outside, 'secret'), path.join(repo, 'file-link'))
+        fs.symlinkSync(path.join(outside, 'missing'), path.join(repo, 'dangling'))
+        fs.symlinkSync(path.join(repo, 'src'), path.join(repo, 'src-link'))
+        session.workingDir = repo
+        session.permissionMode = 'acceptEdits'
+        const decide = (tool: string, file: string) => router.resolveAutoApproval(session, tool, { file_path: file })
+        // Out through a linked folder (new and existing files), a linked file, a dangling link.
+        expect(decide('Write', path.join(repo, 'link', 'new-file'))).toBe('prompt')
+        expect(decide('Write', 'link/deep/new/file')).toBe('prompt')
+        expect(decide('Edit', path.join(repo, 'link', 'secret'))).toBe('prompt')
+        expect(decide('Edit', path.join(repo, 'file-link'))).toBe('prompt')
+        expect(decide('Write', path.join(repo, 'dangling'))).toBe('prompt')
+        session.permissionMode = 'default'
+        expect(decide('Read', path.join(repo, 'link', 'secret'))).toBe('prompt')
+        expect(decide('Read', path.join(repo, 'src-link'))).toBe('readOnly')
+        session.permissionMode = 'acceptEdits'
+        // Inside: plain new files, new folders, and links that stay inside.
+        expect(decide('Write', path.join(repo, 'src', 'new.ts'))).toBe('permissionMode')
+        expect(decide('Write', path.join(repo, 'new-dir', 'a', 'b.ts'))).toBe('permissionMode')
+        expect(decide('Write', path.join(repo, 'src-link', 'c.ts'))).toBe('permissionMode')
+        // A working dir reached through a symlink still counts as itself.
+        fs.symlinkSync(repo, path.join(tmp, 'repo-alias'))
+        session.workingDir = path.join(tmp, 'repo-alias')
+        expect(decide('Write', path.join(repo, 'src', 'd.ts'))).toBe('permissionMode')
+        expect(decide('Write', 'src/e.ts')).toBe('permissionMode')
+      } finally {
+        fs.rmSync(tmp, { recursive: true, force: true })
+      }
     })
 
     it('accepts every tool in the bypass modes, except questions to the user', () => {

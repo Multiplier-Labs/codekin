@@ -167,6 +167,34 @@ describe('createPreviewProxy', () => {
     expect(up.cookie).toBe('app=1')
   })
 
+  it('closeAllConnections also ends upgraded connections, both ends', async () => {
+    let upstreamSide: net.Socket | undefined
+    upstream.prependListener('upgrade', (_req, socket: net.Socket) => { upstreamSide = socket })
+    const socket = net.connect(proxyPort, '127.0.0.1')
+    await new Promise<void>((resolve, reject) => {
+      socket.on('connect', () => {
+        socket.write([
+          'GET /hmr HTTP/1.1', `Host: 127.0.0.1:${proxyPort}`, 'Upgrade: websocket', 'Connection: Upgrade',
+          `Origin: http://127.0.0.1:${proxyPort}`, `Cookie: ${cookie()}`, 'Sec-WebSocket-Key: x', '', '',
+        ].join('\r\n'))
+      })
+      let buf = ''
+      socket.on('data', (d) => {
+        buf += d.toString()
+        if (buf.includes('101') && !buf.includes('echo')) socket.write('ping')
+        if (buf.includes('echo:ping')) resolve()
+      })
+      socket.on('error', reject)
+    })
+    const clientClosed = new Promise<void>(r => socket.on('close', () => r()))
+    // The dev server sees the proxy hang up (http.Server keeps its end half-open).
+    const upstreamEnded = new Promise<void>(r => upstreamSide!.on('end', () => r()))
+    proxy.closeAllConnections()
+    proxy.close()
+    await Promise.all([clientClosed, upstreamEnded])
+    expect(socket.destroyed).toBe(true)
+  })
+
   it('refuses an upgrade without the key', async () => {
     const reply = await new Promise<string>((resolve) => {
       const socket = net.connect(proxyPort, '127.0.0.1', () => {

@@ -91,6 +91,12 @@ export function TableView({ content, mediaType, onAttachRows }: Props) {
           {filter.trim() ? `${rows.length.toLocaleString()} of ${total.toLocaleString()} rows` : `${total.toLocaleString()} row${total === 1 ? '' : 's'}`}
         </span>
       </div>
+      {parsed.table.truncated && (
+        <p className="shrink-0 border-b border-edge px-6 py-1.5 text-meta text-warning-5" role="status">
+          This table is too large to show in full: showing {total.toLocaleString()} of {parsed.table.truncated.rows.toLocaleString()} rows
+          and {columns.length.toLocaleString()} of {parsed.table.truncated.columns.toLocaleString()} columns.
+        </p>
+      )}
       <div className="min-h-0 flex-1 overflow-auto">
         <table className="min-w-full border-separate border-spacing-0 text-meta">
           <thead>
