@@ -55,6 +55,17 @@ export function mountSvg(host: HTMLElement, svgText: string): () => void {
   const svg = doc.documentElement
   if (svg.nodeName !== 'svg') throw new Error('Mermaid did not return an SVG')
 
+  // Diagrams are untrusted (agent items, repo files) and render in Codekin's
+  // origin: no links that navigate the app, no form controls in labels.
+  // Codekin's own node clicks come from the node metadata, not from these.
+  for (const el of Array.from(svg.querySelectorAll('form, input, button, textarea, select, script, foreignObject iframe'))) el.remove()
+  for (const a of Array.from(svg.querySelectorAll('a'))) {
+    a.removeAttribute('href')
+    a.removeAttributeNS('http://www.w3.org/1999/xlink', 'href')
+    a.removeAttribute('xlink:href')
+    a.removeAttribute('target')
+  }
+
   let css = ''
   for (const style of Array.from(svg.querySelectorAll('style'))) {
     css += style.textContent ?? ''

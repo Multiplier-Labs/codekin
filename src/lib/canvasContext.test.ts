@@ -14,8 +14,8 @@ describe('canvas context messages', () => {
     expect(parseWithContext(message)).toEqual({
       text: 'Why there?',
       context: [
-        { itemTitle: 'Item model', itemId: 'i1', revision: 3, what: 'text', label: '“Each lives under…”' },
-        { itemTitle: 'Failures', itemId: 'i2', revision: 1, what: 'rows', label: '2 rows' },
+        { itemTitle: 'Item model', itemId: 'i1', revision: 3, what: 'text', label: '“Each lives under…”', excerpt: 'Each lives under ~/.codekin' },
+        { itemTitle: 'Failures', itemId: 'i2', revision: 1, what: 'rows', label: '2 rows', excerpt: '| a |\n| --- |\n| 1 |' },
       ],
     })
   })
@@ -50,5 +50,12 @@ describe('canvas context messages', () => {
 
   it('formats selected rows as a Markdown table', () => {
     expect(rowsExcerpt(['test', 'note'], [['a|b', 'x\ny']])).toBe('| test | note |\n| --- | --- |\n| a\\|b | x y |')
+  })
+
+  it('parses in linear time, however many newlines a message has', () => {
+    const start = performance.now()
+    parseWithContext('\n'.repeat(200_000) + 'x')
+    parseWithContext(formatWithContext('q', [att()]) + '\n'.repeat(200_000))
+    expect(performance.now() - start).toBeLessThan(500)
   })
 })

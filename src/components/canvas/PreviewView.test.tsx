@@ -25,11 +25,11 @@ function api(state?: PreviewState, logs: string[] = []): PreviewApi {
   }
 }
 
-function render(preview: PreviewApi, content = JSON.stringify({ port: 5173, path: '/', config: 'web' })) {
+function render(preview: PreviewApi, content = JSON.stringify({ port: 5173, path: '/', config: 'web' }), onAttach = vi.fn()) {
   container = document.createElement('div')
   document.body.appendChild(container)
   root = createRoot(container)
-  act(() => { root!.render(<PreviewView item={item} content={content} preview={preview} onAttach={vi.fn()} />) })
+  act(() => { root!.render(<PreviewView item={item} content={content} preview={preview} onAttach={onAttach} />) })
   return container
 }
 
@@ -72,5 +72,23 @@ describe('PreviewView', () => {
     const el = render(api({ itemId: 'p1', status: 'running', targetPort: 5173, managed: false, proxyPort: 40000, entry: '/__codekin/enter?k=abc&to=%2F' }), JSON.stringify({ port: 5173, path: '/' }))
     expect(el.querySelector('iframe')).not.toBeNull()
     expect(el.querySelector('[aria-label="Stop server"]')).toBeNull()
+  })
+
+  it('ignores picks the page sends on its own, and takes one pick per press of Pick', () => {
+    const onAttach = vi.fn()
+    const el = render(api({ itemId: 'p1', status: 'running', targetPort: 5173, managed: false, proxyPort: 40000, entry: '/__codekin/enter?k=abc&to=%2F' }), JSON.stringify({ port: 5173, path: '/' }), onAttach)
+    const frame = el.querySelector('iframe')!
+    const fromFrame = (data: unknown) => {
+      act(() => { window.dispatchEvent(new MessageEvent('message', { data, origin: 'http://localhost:40000', source: frame.contentWindow })) })
+    }
+    const picked = { type: 'codekin-preview:picked', selector: '#a', tag: 'button', label: 'button', text: 'Approve', html: '<button>x</button>', rect: {}, path: '/' }
+    fromFrame({ type: 'codekin-preview:ready' })
+    fromFrame(picked)
+    expect(onAttach).not.toHaveBeenCalled()
+
+    act(() => { [...el.querySelectorAll('button')].find(b => b.textContent?.includes('Pick'))!.click() })
+    fromFrame(picked)
+    fromFrame(picked)
+    expect(onAttach).toHaveBeenCalledTimes(1)
   })
 })

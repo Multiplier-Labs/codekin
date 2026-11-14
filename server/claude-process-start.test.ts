@@ -161,7 +161,7 @@ describe('ClaudeProcess.start() — process event handlers', () => {
       const pending = cp.callAppTool({ server: 'latency', tool: 'refresh', arguments: {}, confirmed: false })
       await settle(); answer('mcp_status', status); await settle()
       answer('mcp_call', 'The tool did not run: denied by the user', false)
-      expect(await pending).toEqual({ ok: false, error: 'The tool did not run: denied by the user' })
+      expect(await pending).toEqual({ ok: false, error: 'The tool did not run: denied by the user', refused: true })
     })
 
     it('refuses agent-only tools and asks for confirmation when the CLI cannot check permissions', async () => {

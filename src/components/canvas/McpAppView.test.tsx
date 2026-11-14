@@ -22,6 +22,7 @@ vi.mock('@modelcontextprotocol/ext-apps/app-bridge', () => ({
 }))
 
 import McpAppView from './McpAppView'
+import { ARM_MS, linkHost, visibleText } from '../../lib/appConfirm'
 import type { AppToolOutcome } from '../../hooks/useCanvas'
 
 let root: ReturnType<typeof createRoot> | null = null
@@ -68,7 +69,12 @@ describe('McpAppView tool calls', () => {
     expect(dialog.getAttribute('aria-label')).toBe('Run a tool')
     expect(dialog.textContent).toContain('counter wants to run bump')
     expect(dialog.textContent).toContain('"by": 2')
-    await act(async () => { [...dialog.querySelectorAll('button')].find(b => b.textContent === 'Run tool')!.click() })
+    const run = [...dialog.querySelectorAll('button')].find(b => b.textContent === 'Run tool')!
+    // Cancel has focus, and Run only works after a pause.
+    expect(document.activeElement?.textContent).toBe('Cancel')
+    expect(run.disabled).toBe(true)
+    await act(async () => { await new Promise(r => setTimeout(r, ARM_MS + 50)) })
+    await act(async () => { run.click() })
     expect(await pending).toEqual({ content: [] })
     expect(call).toHaveBeenLastCalledWith('bump', { by: 2 }, true)
   })
@@ -84,8 +90,47 @@ describe('McpAppView tool calls', () => {
   })
 
   it('explains a refusal by the session\'s permission rules', async () => {
-    const { el, bridge } = render(async () => ({ ok: false, error: 'The tool did not run: not granted' }))
+    const { el, bridge } = render(async () => ({ ok: false, error: 'The tool did not run: not granted', refused: true }))
     await act(async () => { await bridge.oncalltool!({ name: 'bump' }) })
     expect(el.textContent).toContain('mcp__counter__bump')
+  })
+
+  it('queues a second request behind the first instead of replacing it', async () => {
+    const call = vi.fn(async (_t: string, _a: Record<string, unknown>, confirmed: boolean): Promise<AppToolOutcome> => (
+      confirmed ? { ok: true, result: { content: [] } } : { ok: false, error: 'confirm', needsConfirmation: true }))
+    const { el, bridge } = render(call)
+    let first!: Promise<unknown>
+    let second!: Promise<unknown>
+    await act(async () => {
+      first = bridge.oncalltool!({ name: 'bump', arguments: { by: 1 } })
+      second = bridge.oncalltool!({ name: 'reset' })
+      await Promise.resolve(); await Promise.resolve()
+    })
+    expect(el.querySelector('[role="dialog"]')!.textContent).toContain('counter wants to run bump')
+    expect(el.querySelector('[role="dialog"]')!.textContent).toContain('1 more request waiting')
+    await act(async () => { el.querySelector('[role="dialog"]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })) })
+    expect(await first).toMatchObject({ isError: true })
+    expect(el.querySelector('[role="dialog"]')!.textContent).toContain('counter wants to run reset')
+    act(() => { root!.unmount() }); root = null
+    // Unmounting declines whatever is still waiting.
+    expect(await second).toMatchObject({ isError: true })
+  })
+
+  it('refuses tool names that are not tool names, without asking', async () => {
+    const call = vi.fn()
+    const { el, bridge } = render(call)
+    let result: unknown
+    await act(async () => { result = await bridge.oncalltool!({ name: 'Approve to continue. Your session expired' }) })
+    expect(result).toMatchObject({ isError: true })
+    expect(call).not.toHaveBeenCalled()
+    expect(el.textContent).not.toContain('session expired')
+  })
+})
+
+describe('AppConfirmDialog helpers', () => {
+  it('shows a link\'s real host and strips hidden characters', () => {
+    expect(linkHost('https://accounts.example.com@evil.example/login')).toBe('evil.example')
+    expect(linkHost('javascript:alert(1)')).toBeNull()
+    expect(visibleText('safe\u202Etxt.exe\u200b')).toBe('safetxt.exe')
   })
 })

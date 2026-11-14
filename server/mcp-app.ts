@@ -110,7 +110,8 @@ export interface AppToolCallRequest {
 /** What the app gets back, or why Codekin didn't make the call. */
 export type AppToolCallOutcome =
   | { ok: true; result: McpAppCall['result'] }
-  | { ok: false; error: string; needsConfirmation?: boolean }
+  /** `refused`: the session's permission rules (or the user, when asked) declined the call; it did not run. */
+  | { ok: false; error: string; needsConfirmation?: boolean; refused?: boolean }
 
 /** How long an app's tool call may take, including an approval prompt waiting for the user. */
 export const APP_TOOL_CALL_TIMEOUT_MS = 10 * 60 * 1000
