@@ -1367,6 +1367,7 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
               onOpen: canvas.select,
               onOpenAt: canvas.openAt,
             }}
+            onSelectInCanvas={() => { canvas.setOpen(true) }}
             canvasContext={{
               attachments: activeAttachments,
               onRemove: (id) => { setCanvasAttachments(prev => ({ ...prev, [activeSessionId]: (prev[activeSessionId] ?? []).filter(a => a.id !== id) })) },
@@ -1426,6 +1427,8 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
                 disabled={!settings.token}
                 onAttach={handleAttach}
                 onDetach={handleDetach}
+                worktree={activeSession.worktreePath ? { path: activeSession.worktreePath, branch: activeSession.worktreeBranch } : undefined}
+                onMoveToWorktree={!activeSession.worktreePath && activeSession.place.git && activeSession.place.kind !== 'org' ? moveToWorktree : undefined}
               />
             ) : undefined}
             onExecuteTentative={() => handleExecuteTentative(activeSessionId)}

@@ -13,7 +13,7 @@ import { useOutsideClick } from '../hooks/useOutsideClick'
 import { useAutoGrow } from '../hooks/useAutoGrow'
 import { useAgentHealth } from '../hooks/useAgentHealth'
 import { providerAvailability } from '../lib/agentHealth'
-import { IconRobotFace, IconLock, IconPlus, IconX, IconTerminal2, IconChevronDown, IconChevronLeft, IconChevronRight, IconArrowRight, IconArrowsRightLeft, IconDots, IconGitBranch, IconGitBranchDeleted, IconShieldCheck, IconPencil, IconMap2, IconAlertTriangle, IconCheck, IconCornerDownLeft } from '@tabler/icons-react'
+import { IconRobotFace, IconLock, IconPlus, IconX, IconTerminal2, IconPaperclip, IconLayoutSidebarRight, IconChevronDown, IconChevronLeft, IconChevronRight, IconArrowRight, IconArrowsRightLeft, IconDots, IconGitBranch, IconGitBranchDeleted, IconShieldCheck, IconPencil, IconMap2, IconAlertTriangle, IconCheck, IconCornerDownLeft } from '@tabler/icons-react'
 import { SkillMenu, type SkillGroup } from './SkillMenu'
 import { SlashAutocomplete } from './SlashAutocomplete'
 import { DropZone } from './DropZone'
@@ -71,6 +71,59 @@ function AttachButton({ onClick, disabled }: { onClick: () => void; disabled: bo
 }
 
 /**
+ * The running session's `+` menu (design handoff C4): attach files, select
+ * something in Canvas, skills (also `/`) and Agent Joe (also `@joe`). It
+ * replaces the separate skills and Joe buttons so the toolbar has three
+ * controls: `+`, the session chip, and Send.
+ */
+function PlusMenu({ disabled, open, onToggle, menuRef, onAttach, onSelectInCanvas, onSkills, joe, children }: {
+  disabled: boolean
+  open: boolean
+  onToggle: () => void
+  menuRef: React.RefObject<HTMLDivElement | null>
+  onAttach: () => void
+  onSelectInCanvas?: () => void
+  onSkills?: () => void
+  /** Ask Joe: the current recipient decides the label; omit without Joe. */
+  joe?: { name: string; toJoe: boolean; onToggle: () => void }
+  /** Popovers anchored to the + button (the skill menu). */
+  children?: React.ReactNode
+}) {
+  const row = 'flex w-full items-center gap-2.5 px-3 py-2 text-left text-body text-ink transition-colors hover:bg-edge'
+  const hint = 'ml-auto font-mono text-meta text-ink-faint'
+  return (
+    <div className="relative" ref={menuRef}>
+      <ToolbarAction onClick={onToggle} disabled={disabled} title="Attach, Canvas, skills, Joe">
+        <IconPlus className="density-icon" stroke={2} />
+      </ToolbarAction>
+      {open && (
+        <div role="menu" className="absolute bottom-full left-0 z-50 mb-1 min-w-[240px] rounded-floating border border-edge-strong bg-surface-raised py-1 shadow-floating">
+          <button role="menuitem" onClick={onAttach} className={row} title="Attach images, markdown or PDFs">
+            <IconPaperclip size={16} stroke={2} className="text-ink-muted" />Attach files<span className={hint}>images, md, pdf</span>
+          </button>
+          {onSelectInCanvas && (
+            <button role="menuitem" onClick={onSelectInCanvas} className={row} title="Open Canvas and select something to ask about">
+              <IconLayoutSidebarRight size={16} stroke={2} className="text-ink-muted" />Add from Canvas<span className={hint}>select</span>
+            </button>
+          )}
+          {onSkills && (
+            <button role="menuitem" onClick={onSkills} className={row} title="Claude Skills">
+              <IconTerminal2 size={16} stroke={2} className="text-ink-muted" />Skills<span className={hint}>/</span>
+            </button>
+          )}
+          {joe && (
+            <button role="menuitem" onClick={joe.onToggle} className={row} title={joe.toJoe ? 'Send to the coding agent instead' : `Ask Agent ${joe.name}`}>
+              <IconRobotFace size={16} stroke={2} className="text-accent-4" />{joe.toJoe ? 'Send to the coding agent' : `Ask ${joe.name}`}<span className={hint}>@{joe.name.toLowerCase()}</span>
+            </button>
+          )}
+        </div>
+      )}
+      {children}
+    </div>
+  )
+}
+
+/**
  * The composer's only filled control. Labelled rather than icon-only, and
  * sized from --row-h so touch density lifts it to 44px. Disabled state uses a
  * muted fill instead of a faded primary, which is hard to find.
@@ -112,7 +165,7 @@ function StateItem({ children, title, onClick, danger = false, innerRef }: {
   // dangerous mode, and error-4 clears 4.5:1 in every theme on the card's own
   // surface where warning-4 doesn't (Light: 3.8:1).
   const tone = danger ? 'text-error-4' : 'text-ink-muted hover:text-ink'
-  const className = `group/state flex items-center gap-1.5 font-mono text-meta whitespace-nowrap transition-colors ${tone}`
+  const className = `group/state flex min-w-0 max-w-full items-center gap-1.5 overflow-hidden font-mono text-meta whitespace-nowrap transition-colors ${tone}`
   if (!onClick) return <span className={className} title={title}>{children}</span>
   return (
     <button ref={innerRef} onClick={onClick} className={className} title={title}>
@@ -393,8 +446,14 @@ function ModelRow({ model, effort, isCurrent, isActive, buttonRef, onClick }: {
  * harness is a session handoff, not a peer of picking a model, so it lives
  * behind a CTA that opens a second pane.
  */
-function AgentDropdown({ provider, handoffTargets, currentModel, currentEffort, models, isOpen, menuRef, onToggle, onModelChange, onEffortChange, onProviderChange, pickProvider = false, below = false }: {
+function AgentDropdown({ provider, handoffTargets, currentModel, currentEffort, models, isOpen, menuRef, onToggle, onModelChange, onEffortChange, onProviderChange, pickProvider = false, below = false, permission }: {
   provider?: import('../types').CodingProvider
+  /**
+   * The session chip (a running session's composer): the chip also carries
+   * the permission mode, changed from a row in this menu. A dangerous mode
+   * shows on the chip itself at every width.
+   */
+  permission?: { current: PermissionMode; modes: typeof PERMISSION_MODES; onSelect: (mode: PermissionMode) => void }
   /**
    * Choose the agent directly (a session not started yet) instead of handing
    * a running session off to another agent.
@@ -420,6 +479,7 @@ function AgentDropdown({ provider, handoffTargets, currentModel, currentEffort, 
   const [activeIndex, setActiveIndex] = useState(0)
   const [showHandoff, setShowHandoff] = useState(false)
   const [showEffort, setShowEffort] = useState(false)
+  const [showPermissions, setShowPermissions] = useState(false)
   const [prevIsOpen, setPrevIsOpen] = useState(isOpen)
   const itemRefs = useRef<(HTMLButtonElement | null)[]>([])
 
@@ -430,6 +490,7 @@ function AgentDropdown({ provider, handoffTargets, currentModel, currentEffort, 
     setActiveIndex(0)
     setShowHandoff(false)
     setShowEffort(false)
+    setShowPermissions(false)
   }
 
   const getRecents = (): string[] => {
@@ -493,21 +554,31 @@ function AgentDropdown({ provider, handoffTargets, currentModel, currentEffort, 
   // harness that keeps its default to itself would just be noise there.
   const chipEffort = canPickEffort ? effectiveEffort(currentEffort, currentOption) : null
   const rowEffort = (m: ModelOption) => m.id === currentModel ? (currentEffort ?? null) : rememberedEffort(m)
+  const mode = permission ? PERMISSION_MODES.find(m => m.id === permission.current) : undefined
+  const ModeIcon = PERMISSION_MODE_ICONS[mode?.icon ?? 'shield']
+  const dangerous = !!mode?.dangerous
 
   return (
-    <div className="relative" ref={menuRef}>
+    <div className="relative min-w-0" ref={menuRef}>
       <StateItem
         onClick={onToggle}
-        title={`${harnessLabel ?? 'Agent'}${modelLabel ? ` · ${modelLabel}` : ''}${chipEffort ? ` · ${effortLabel(chipEffort)} effort` : ''} — ${pickProvider ? 'choose the agent, model, or effort' : 'change model, effort, or hand off'}`}
+        danger={dangerous}
+        title={`${harnessLabel ?? 'Agent'}${modelLabel ? ` · ${modelLabel}` : ''}${chipEffort ? ` · ${effortLabel(chipEffort)} effort` : ''}${mode ? ` · Permission mode: ${mode.label}${dangerous ? ' — tools run without asking' : ''}` : ''} — ${pickProvider ? 'choose the agent, model, or effort' : permission ? 'change model, effort, permissions, or hand off (Shift+Tab cycles permissions)' : 'change model, effort, or hand off'}`}
       >
+        {mode && <ModeIcon size={14} stroke={2} className="shrink-0" />}
+        {/* A dangerous mode is named on the chip at every width (short form). */}
+        {dangerous && mode && <><span className="shrink-0">{mode.id === 'bypassPermissions' ? 'Bypass' : 'Skip'}</span><span>·</span></>}
         {/* Harness and model are one fact, so they carry one tone — the
             separator included. StateItem's muted colour (and its hover
-            brightening) reaches all three. */}
-        {harnessLabel}
-        {harnessLabel && modelLabel && <span>·</span>}
-        {modelLabel}
-        {chipEffort && <><span>·</span>{effortLabel(chipEffort)}</>}
-        <IconChevronDown size={12} stroke={2} className="opacity-70" />
+            brightening) reaches all three. The session chip leaves the
+            harness to its title: the sidebar row already names it. */}
+        <span className="min-w-0 truncate">
+          {!permission && harnessLabel}
+          {!permission && harnessLabel && modelLabel && ' · '}
+          {modelLabel ?? (permission ? harnessLabel : null)}
+          {chipEffort && ` · ${effortLabel(chipEffort)}`}
+        </span>
+        <IconChevronDown size={12} stroke={2} className="shrink-0 opacity-70" />
       </StateItem>
       {isOpen && (
         // A menu that opens downward (the start view) has the screen below it,
@@ -550,7 +621,36 @@ function AgentDropdown({ provider, handoffTargets, currentModel, currentEffort, 
               })()}
             </div>
           )}
-          {showHandoff && provider && onProviderChange ? (
+          {showPermissions && permission ? (
+            <div className="min-h-0 flex-1 overflow-y-auto py-1" role="menu" aria-label="Permission mode">
+              <button
+                onClick={() => setShowPermissions(false)}
+                className="flex w-full items-center gap-1.5 px-3 py-1.5 text-left text-meta text-ink-muted hover:text-ink"
+              >
+                <IconChevronLeft size={14} stroke={2} /> Permissions
+              </button>
+              {permission.modes.map(m => {
+                const Icon = PERMISSION_MODE_ICONS[m.icon]
+                const isActive = m.id === permission.current
+                return (
+                  <button
+                    key={m.id}
+                    role="menuitemradio"
+                    aria-checked={isActive}
+                    onClick={() => { permission.onSelect(m.id) }}
+                    className={`flex w-full items-start gap-2.5 px-3 py-2 text-left transition-colors hover:bg-edge ${m.dangerous ? 'hover:bg-error-9/20' : ''}`}
+                  >
+                    <Icon size={16} stroke={2} className={`mt-0.5 flex-shrink-0 ${m.dangerous ? 'text-error-5' : isActive ? 'text-primary-4' : 'text-ink-muted'}`} />
+                    <div className="min-w-0 flex-1">
+                      <div className={`text-body font-medium ${m.dangerous ? 'text-error-5' : isActive ? 'text-primary-4' : 'text-ink'}`}>{m.label}</div>
+                      <div className={`text-meta ${m.dangerous ? 'text-error-6' : 'text-ink-muted'}`}>{m.description}</div>
+                    </div>
+                    {isActive && <IconCheck size={14} stroke={2.5} className="mt-0.5 flex-shrink-0 text-primary-4" />}
+                  </button>
+                )
+              })}
+            </div>
+          ) : showHandoff && provider && onProviderChange ? (
             <HandoffPane
               current={provider}
               targets={handoffTargets}
@@ -645,6 +745,23 @@ function AgentDropdown({ provider, handoffTargets, currentModel, currentEffort, 
                     {/* The shortcut sits on the row it drives, not in a footer of its own. */}
                     <kbd className="rounded-control border border-edge-strong px-1.5 font-sans text-micro text-ink-muted">{CYCLE_EFFORT_KEYS}</kbd>
                     <span className="ml-auto text-ink-muted">{effortDisplay(currentEffort, currentOption)}</span>
+                    <IconChevronRight size={14} stroke={2} className="flex-shrink-0 text-ink-muted opacity-70" />
+                  </button>
+                </div>
+              )}
+
+              {permission && mode && (
+                <div className="flex-shrink-0 border-t border-edge-strong p-1">
+                  <button
+                    onClick={() => setShowPermissions(true)}
+                    className="flex w-full items-center gap-2 rounded-control px-2 py-1.5 text-left text-body text-ink transition-colors hover:bg-edge"
+                    title="How tools are approved in this session — Shift+Tab cycles"
+                  >
+                    Permissions
+                    <kbd className="rounded-control border border-edge-strong px-1.5 font-sans text-micro text-ink-muted">⇧Tab</kbd>
+                    <span className={`ml-auto flex min-w-0 items-center gap-1 truncate ${dangerous ? 'text-error-5' : 'text-ink-muted'}`}>
+                      <ModeIcon size={14} stroke={2} className="flex-shrink-0" />{mode.label}
+                    </span>
                     <IconChevronRight size={14} stroke={2} className="flex-shrink-0 text-ink-muted opacity-70" />
                   </button>
                 </div>
@@ -760,9 +877,13 @@ interface InputBarProps {
   contextSlot?: React.ReactNode
   /** Canvas context is attached: the message can be sent without text. */
   hasContext?: boolean
+  /** "Add from Canvas" in the + menu: open Canvas to select something. */
+  onSelectInCanvas?: () => void
+  /** The session's worktree shows in the bar above the chat, not here. */
+  worktreeInHeader?: boolean
 }
 
-export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function InputBar({ onSendInput, isWaiting, disabled, onEscape, onInterrupt, pendingFiles, onAddFiles, onRemoveFile, skillGroups, slashCommands, initialValue = '', onValueChange, currentModel, onModelChange, currentEffort = null, onEffortChange, availableModels = [], sessionProvider, onProviderChange, placeholder, isMobile = false, showWorktreeToggle = false, useWorktree = false, onWorktreeChange, currentPermissionMode, onPermissionModeChange, onMoveToWorktree, worktreePath, variant = 'default', joeName, lockedReason, placeSlot, permissionNote, contextSlot, hasContext = false }, ref) {
+export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function InputBar({ onSendInput, isWaiting, disabled, onEscape, onInterrupt, pendingFiles, onAddFiles, onRemoveFile, skillGroups, slashCommands, initialValue = '', onValueChange, currentModel, onModelChange, currentEffort = null, onEffortChange, availableModels = [], sessionProvider, onProviderChange, placeholder, isMobile = false, showWorktreeToggle = false, useWorktree = false, onWorktreeChange, currentPermissionMode, onPermissionModeChange, onMoveToWorktree, worktreePath, variant = 'default', joeName, lockedReason, placeSlot, permissionNote, contextSlot, hasContext = false, onSelectInCanvas, worktreeInHeader = false }, ref) {
   const isDraft = variant === 'draft'
   const enabledModes = resolveEnabledModes(usePref('enabledPermissionModes'))
   const providerModes = permissionModesFor(sessionProvider)
@@ -775,6 +896,7 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
   /** The dangerous mode just picked from the menu, while its note is showing. */
   const [dangerNote, setDangerNote] = useState<PermissionMode | null>(null)
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+  const [plusMenuOpen, setPlusMenuOpen] = useState(false)
   const [slashMenuOpen, setSlashMenuOpen] = useState(false)
 
   /** Close all toolbar popups, optionally keeping one open. */
@@ -785,6 +907,7 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
   }, [])
   const [slashFilter, setSlashFilter] = useState('')
   const mobileMenuRef = useRef<HTMLDivElement>(null)
+  const plusMenuRef = useRef<HTMLDivElement>(null)
   const permMenuRef = useRef<HTMLDivElement>(null)
   const agentMenuRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -844,6 +967,7 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
   useOutsideClick(mobileMenuRef, mobileMenuOpen, useCallback(() => setMobileMenuOpen(false), []))
   useOutsideClick(permMenuRef, permMenuOpen, useCallback(() => setPermMenuOpen(false), []))
   useOutsideClick(agentMenuRef, agentMenuOpen, useCallback(() => setAgentMenuOpen(false), []))
+  useOutsideClick(plusMenuRef, plusMenuOpen, useCallback(() => setPlusMenuOpen(false), []))
 
   // The recipient is decided by the text, and shown before sending.
   const toJoe = !!joeName && isAddressedToJoe(value, joeName)
@@ -1011,6 +1135,37 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
   // narrow composer; a dangerous mode must stay visible at every width.
   const hasOverflow = showAgent || showWorktree
 
+  // Where the session runs: its worktree, the choice before the first message, or the offer to move.
+  const worktreeState = worktreePath ? (
+                    <StateItem title={`In a worktree: ${worktreePath}`}>
+                      <IconGitBranch size={14} stroke={2} className="text-primary-5" />
+                      <StateLabel>
+                        <span className="inline-block max-w-[140px] truncate align-bottom text-primary-5">{worktreePath.split('/').pop()}</span>
+                      </StateLabel>
+                    </StateItem>
+                  ) : showWorktreeToggle && onWorktreeChange ? (
+                    <StateItem
+                      onClick={() => onWorktreeChange(!useWorktree)}
+                      title={useWorktree
+                        ? 'This session will start in a git worktree — click to use the repo directly'
+                        : 'This session will run in the repo directly — click to use a git worktree'}
+                    >
+                      {useWorktree
+                        ? <IconGitBranch size={14} stroke={2} className="text-primary-5" />
+                        : <IconGitBranchDeleted size={14} stroke={2} />}
+                      <StateLabel>
+                        <span className={useWorktree ? 'text-primary-5' : undefined}>
+                          {useWorktree ? 'Worktree' : 'No worktree'}
+                        </span>
+                      </StateLabel>
+                    </StateItem>
+                  ) : onMoveToWorktree ? (
+                    <StateItem onClick={onMoveToWorktree} title="Not in a worktree — click to move this session into one">
+                      <IconGitBranchDeleted size={14} stroke={2} />
+                      <StateLabel>No worktree</StateLabel>
+                    </StateItem>
+                  ) : null
+
   return (
     <div className="app-input-bar @container relative flex flex-col">
       {/* Exactly the transcript row's padding, so the card's edges land on the
@@ -1104,12 +1259,67 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
               permission chip stays out of that trade: it is icon-only, and a
               dangerous mode must be visible everywhere. */}
           <div className="flex items-center gap-3">
-            <AttachButton onClick={handleFileSelect} disabled={disabled} />
+            {isDraft ? <AttachButton onClick={handleFileSelect} disabled={disabled} /> : (
+              <PlusMenu
+                disabled={disabled}
+                open={plusMenuOpen}
+                onToggle={() => { closeAllPopups(); setPlusMenuOpen(o => !o) }}
+                menuRef={plusMenuRef}
+                onAttach={() => { setPlusMenuOpen(false); handleFileSelect() }}
+                onSelectInCanvas={onSelectInCanvas ? () => { setPlusMenuOpen(false); onSelectInCanvas() } : undefined}
+                onSkills={hasSkills ? () => { setPlusMenuOpen(false); setSkillMenuOpen(true) } : undefined}
+                joe={joeName ? { name: joeName, toJoe, onToggle: () => { setPlusMenuOpen(false); toggleJoe() } } : undefined}
+              >
+                {skillMenuOpen && (
+                  <SkillMenu
+                    groups={skillGroups ?? []}
+                    onSelectSkill={(command) => {
+                      setValue(command + ' ')
+                      setSkillMenuOpen(false)
+                      setTimeout(() => textareaRef.current?.focus(), 0)
+                    }}
+                    onClose={() => setSkillMenuOpen(false)}
+                  />
+                )}
+              </PlusMenu>
+            )}
             {placeSlot}
 
             <div className="flex-1" />
 
-            <div className="flex min-w-0 items-center gap-3.5">
+            {!isDraft && (
+              <div className="flex min-w-0 items-center gap-3.5">
+                {showWorktree && !worktreeInHeader && worktreeState}
+                {showAgent ? (
+                  <AgentDropdown
+                    provider={showProvider ? sessionProvider : undefined}
+                    handoffTargets={PROVIDERS}
+                    currentModel={showModel ? currentModel : null}
+                    currentEffort={currentEffort}
+                    models={availableModels}
+                    isOpen={agentMenuOpen}
+                    menuRef={agentMenuRef}
+                    onToggle={() => { closeAllPopups('agent'); setPlusMenuOpen(false); setAgentMenuOpen(!agentMenuOpen) }}
+                    onModelChange={showModel ? (id) => { onModelChange(id); setAgentMenuOpen(false) } : undefined}
+                    onEffortChange={showModel ? onEffortChange : undefined}
+                    onProviderChange={showProvider ? (provider, carryContext) => { onProviderChange(provider, carryContext); setAgentMenuOpen(false) } : undefined}
+                    permission={showPermission ? { current: currentPermissionMode, modes: visibleModes, onSelect: (m) => { handlePermissionModeSelect(m); setAgentMenuOpen(false) } } : undefined}
+                  />
+                ) : showPermission && (
+                  <PermissionModeDropdown
+                    currentMode={currentPermissionMode}
+                    modes={visibleModes}
+                    isOpen={permMenuOpen}
+                    menuRef={permMenuRef}
+                    onToggle={() => { closeAllPopups('perm'); setPermMenuOpen(!permMenuOpen) }}
+                    onSelect={handlePermissionModeSelect}
+                    note={permissionNote}
+                  />
+                )}
+              </div>
+            )}
+
+            {isDraft && <div className="flex min-w-0 items-center gap-3.5">
               {showPermission && (
                 <PermissionModeDropdown
                   currentMode={currentPermissionMode}
@@ -1124,35 +1334,7 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
               )}
               {showWorktree && (
                 <div className="hidden @[34rem]:flex">
-                  {worktreePath ? (
-                    <StateItem title={`In a worktree: ${worktreePath}`}>
-                      <IconGitBranch size={14} stroke={2} className="text-primary-5" />
-                      <StateLabel>
-                        <span className="inline-block max-w-[140px] truncate align-bottom text-primary-5">{worktreePath.split('/').pop()}</span>
-                      </StateLabel>
-                    </StateItem>
-                  ) : showWorktreeToggle && onWorktreeChange ? (
-                    <StateItem
-                      onClick={() => onWorktreeChange(!useWorktree)}
-                      title={useWorktree
-                        ? 'This session will start in a git worktree — click to use the repo directly'
-                        : 'This session will run in the repo directly — click to use a git worktree'}
-                    >
-                      {useWorktree
-                        ? <IconGitBranch size={14} stroke={2} className="text-primary-5" />
-                        : <IconGitBranchDeleted size={14} stroke={2} />}
-                      <StateLabel>
-                        <span className={useWorktree ? 'text-primary-5' : undefined}>
-                          {useWorktree ? 'Worktree' : 'No worktree'}
-                        </span>
-                      </StateLabel>
-                    </StateItem>
-                  ) : onMoveToWorktree ? (
-                    <StateItem onClick={onMoveToWorktree} title="Not in a worktree — click to move this session into one">
-                      <IconGitBranchDeleted size={14} stroke={2} />
-                      <StateLabel>No worktree</StateLabel>
-                    </StateItem>
-                  ) : null}
+                  {worktreeState}
                 </div>
               )}
               {showAgent && (
@@ -1174,11 +1356,11 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
                   />
                 </div>
               )}
-            </div>
+            </div>}
 
             <div className="flex items-center gap-1">
-              {/* Overflow — carries the state items that collapsed */}
-              {hasOverflow && (
+              {/* Overflow — carries the state items that collapsed (start view only) */}
+              {isDraft && hasOverflow && (
                 <div className="relative @[34rem]:hidden" ref={mobileMenuRef}>
                   <ToolbarAction onClick={() => setMobileMenuOpen(!mobileMenuOpen)} disabled={disabled} title="More options">
                     <IconDots className="density-icon" stroke={2} />
@@ -1253,7 +1435,7 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
                 </div>
               )}
 
-              {joeName && (
+              {isDraft && joeName && (
                 <ToolbarAction
                   onClick={toggleJoe}
                   disabled={disabled}
@@ -1264,7 +1446,7 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
                 </ToolbarAction>
               )}
 
-              {hasSkills && (
+              {isDraft && hasSkills && (
                 <div className="relative">
                   <ToolbarAction
                     onClick={() => { closeAllPopups('skill'); setSkillMenuOpen(!skillMenuOpen) }}
