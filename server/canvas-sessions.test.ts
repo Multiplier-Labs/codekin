@@ -92,7 +92,7 @@ describe('CanvasSessions reads and changes', () => {
     await canvas.openFile('s1', 'data.csv')
     const [item] = (canvas.list('s1') as Extract<WsServerMessage, { type: 'canvas_items' }>).items
     expect(await canvas.get('s1', item.id)).toMatchObject({ type: 'canvas_item', revision: 1, content: 'a,b\n1,2', encoding: 'utf8' })
-    expect(await canvas.get('s1', item.id, 0)).toMatchObject({ type: 'canvas_error', message: 'Invalid revision.' })
+    expect(await canvas.get('s1', item.id, 0)).toEqual({ type: 'canvas_error', sessionId: 's1', message: 'Invalid revision.', itemId: item.id, revision: 0 })
     expect(await canvas.get('s1', 'not-an-id')).toMatchObject({ type: 'canvas_error', message: 'Unknown Canvas item.' })
   })
 

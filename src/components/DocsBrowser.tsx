@@ -5,7 +5,7 @@
  * followed by the rendered markdown content or raw source.
  */
 
-import { IconChevronLeft, IconLoader2, IconStar, IconStarFilled } from '@tabler/icons-react'
+import { IconChevronLeft, IconLayoutSidebarRight, IconLoader2, IconStar, IconStarFilled } from '@tabler/icons-react'
 import { MarkdownRenderer } from './MarkdownRenderer'
 
 interface Props {
@@ -19,6 +19,8 @@ interface Props {
   onToggleRaw: () => void
   onToggleStar: () => void
   onClose: () => void
+  /** Show this file in the session's Canvas. */
+  onOpenInCanvas?: () => void
 }
 
 export function DocsBrowser({
@@ -32,6 +34,7 @@ export function DocsBrowser({
   onToggleRaw,
   onToggleStar,
   onClose,
+  onOpenInCanvas,
 }: Props) {
   return (
     <div className="relative flex flex-1 min-h-0 w-full flex-col">
@@ -47,6 +50,16 @@ export function DocsBrowser({
         <span className="docs-header-path flex-1 text-meta text-center truncate">
           {repoName} <span className="docs-header-slash">/</span> {filePath}
         </span>
+        {onOpenInCanvas && (
+          <button
+            onClick={onOpenInCanvas}
+            className="docs-header-toggle flex items-center gap-1 rounded-control px-2 py-0.5 text-body transition-colors cursor-pointer"
+            title="Show this file in the session's Canvas"
+          >
+            <IconLayoutSidebarRight size={15} />
+            Open in Canvas
+          </button>
+        )}
         <button
           onClick={onToggleStar}
           className={`docs-header-star transition-colors cursor-pointer ${isStarred ? 'is-starred' : ''}`}

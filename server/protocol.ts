@@ -175,7 +175,8 @@ export type WsServerMessage =
   | { type: 'canvas_item'; sessionId: string; item: CanvasItem; revision: number; content: string; encoding: 'utf8' | 'base64'; meta?: CanvasItemMeta }
   /** Transcript entry for a new item or revision; renders as a chat card. */
   | { type: 'canvas_event'; sessionId: string; itemId: string; kind: CanvasItemKind; title: string; revision: number; action: 'created' | 'updated' }
-  | { type: 'canvas_error'; message: string; sessionId?: string }
+  /** A failed request. `itemId`/`revision` are set when it was a canvas_get for that revision. */
+  | { type: 'canvas_error'; message: string; sessionId?: string; itemId?: string; revision?: number }
 
 /** Task milestones Joe posts back into the conversation a task came from. */
 export type JoeMilestone = 'accepted' | 'decision' | 'blocked' | 'review'

@@ -9,7 +9,7 @@
  */
 
 import { useState } from 'react'
-import { IconChevronDown, IconChevronUp, IconCopy, IconTrash, IconFile, IconMessage2, IconSelector } from '@tabler/icons-react'
+import { IconChevronDown, IconChevronUp, IconCopy, IconTrash, IconFile, IconLayoutSidebarRight, IconMessage2, IconSelector } from '@tabler/icons-react'
 import type { DiffFile } from '../../types'
 import { DiffHunkView, type DiffCommenting } from './DiffHunkView'
 import { Counts, StatusChip } from './diffFileMeta'
@@ -38,9 +38,11 @@ interface DiffFileCardProps {
   /** Phone: the bar is a file switcher that opens the list. */
   touch?: boolean
   onOpenList?: () => void
+  /** Show this file in the session's Canvas (supported file types only). */
+  onOpenInCanvas?: () => void
 }
 
-export function DiffFileCard({ file, index, total, onPrev, onNext, onDiscard, commenting, narrow, touch, onOpenList }: DiffFileCardProps) {
+export function DiffFileCard({ file, index, total, onPrev, onNext, onDiscard, commenting, narrow, touch, onOpenList, onOpenInCanvas }: DiffFileCardProps) {
   const totalChanges = file.additions + file.deletions
   const isLarge = totalChanges > LARGE_DIFF_THRESHOLD
   const [expanded, setExpanded] = useState(!isLarge)
@@ -68,6 +70,11 @@ export function DiffFileCard({ file, index, total, onPrev, onNext, onDiscard, co
       {commentCount}
     </span>
   )
+  const canvasButton = onOpenInCanvas && (
+    <button className={ICON_BTN} onClick={onOpenInCanvas} title="Open in Canvas" aria-label="Open in Canvas">
+      <IconLayoutSidebarRight size={touch ? 20 : 16} />
+    </button>
+  )
   const discardButton = onDiscard && (
     <button className={`${ICON_BASE} text-error-5 hover:bg-error-11`} onClick={onDiscard} title="Discard this file's changes" aria-label="Discard this file's changes">
       <IconTrash size={16} />
@@ -91,6 +98,7 @@ export function DiffFileCard({ file, index, total, onPrev, onNext, onDiscard, co
           {commentBadge}
           {prev}
           {next}
+          {canvasButton}
           {discardButton}
         </div>
       ) : (
@@ -115,6 +123,7 @@ export function DiffFileCard({ file, index, total, onPrev, onNext, onDiscard, co
               <IconCopy size={16} />
             </button>
           )}
+          {canvasButton}
           {discardButton}
         </div>
       )}

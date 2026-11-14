@@ -65,7 +65,10 @@ export class CanvasSessions {
         ...(r.meta ? { meta: r.meta } : {}),
       }
     } catch (err) {
-      return { type: 'canvas_error', sessionId, message: errorMessage(err) }
+      return {
+        type: 'canvas_error', sessionId, message: errorMessage(err),
+        ...(typeof itemId === 'string' ? { itemId } : {}), ...(typeof revision === 'number' ? { revision } : {}),
+      }
     }
   }
 
