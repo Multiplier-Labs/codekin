@@ -9,20 +9,21 @@ import { IconAlertTriangle, IconLoader2 } from '@tabler/icons-react'
 import type { CanvasView } from '../../hooks/useCanvas'
 import { MarkdownRenderer } from '../MarkdownRenderer'
 import { markdownHeadings } from '../../lib/canvasItems'
+import type { CanvasSelectionKind } from '../../lib/canvasContext'
 import { DiagramView } from './DiagramView'
 import { TableView } from './TableView'
 
 interface Props {
   view: Exclude<CanvasView, { state: 'empty' }>
-  /** Put a question in the composer (diagram nodes). */
-  onAsk: (text: string) => void
+  /** Attach a selection (table rows, a diagram node) to the next message. */
+  onAttach: (what: CanvasSelectionKind, excerpt: string, label: string, ask: boolean) => void
   /** Show a file in Canvas (diagram nodes). */
   onOpenFile: (path: string) => void
   /** Wide Canvas: Markdown items show a table of contents. */
   toc?: boolean
 }
 
-export function CanvasItemView({ view, onAsk, onOpenFile, toc }: Props) {
+export function CanvasItemView({ view, onAttach, onOpenFile, toc }: Props) {
   if (view.state === 'loading') {
     return (
       <div className="flex flex-1 items-center justify-center gap-2 text-meta text-ink-muted" role="status">
@@ -56,8 +57,12 @@ export function CanvasItemView({ view, onAsk, onOpenFile, toc }: Props) {
       </div>
     )
   }
-  if (item.kind === 'table') return <TableView content={content.content} mediaType={content.mediaType} />
-  return <DiagramView source={content.content} meta={content.meta} onAsk={onAsk} onOpenFile={onOpenFile} />
+  if (item.kind === 'table') {
+    return <TableView content={content.content} mediaType={content.mediaType}
+      onAttachRows={(excerpt, count, ask) => { onAttach('rows', excerpt, `${count} row${count === 1 ? '' : 's'}`, ask) }} />
+  }
+  return <DiagramView source={content.content} meta={content.meta} onOpenFile={onOpenFile}
+    onAttachNode={(label, excerpt, ask) => { onAttach('node', excerpt, label, ask) }} />
 }
 
 /** A Markdown item, with a table of contents beside it when there is room and more than one heading. */

@@ -215,3 +215,18 @@ describe('useCanvas revisions', () => {
     expect(hook.revisionContent(3)).toEqual({ error: 'gone' })
   })
 })
+
+describe('useCanvas openAt', () => {
+  it('opens an item at an earlier revision, or reports a deleted one', () => {
+    render('s1')
+    const revs = [1, 2, 3].map(n => ({ n, createdAt: '', size: 1, mediaType: 'text/markdown' }))
+    deliver({ type: 'canvas_items', sessionId: 's1', items: [item('a', { latest: 3, revisions: revs }), item('b')] })
+    act(() => { hook.select('b') })
+    act(() => { hook.openAt('a', 2) })
+    expect(hook.open).toBe(true)
+    expect(hook.selected?.id).toBe('a')
+    expect(hook.view).toMatchObject({ revision: 2 })
+    act(() => { hook.openAt('gone', 1) })
+    expect(hook.notice).toBe('That Canvas item no longer exists.')
+  })
+})

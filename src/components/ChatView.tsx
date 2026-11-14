@@ -12,6 +12,8 @@
 
 import { CanvasChatCard, type CanvasCardContext } from './canvas/CanvasChatCard'
 import { displayToolName } from '../lib/canvas'
+import { parseWithContext } from '../lib/canvasContext'
+import { SentContextChips } from './canvas/ContextChips'
 import { memo, useEffect, useLayoutEffect, useRef, useCallback, useState } from 'react'
 import Markdown, { type Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -162,13 +164,23 @@ function SystemMessage({ msg }: { msg: ChatMessage & { type: 'system' } }) {
   )
 }
 
-function UserMessage({ msg, fontSize }: { msg: ChatMessage & { type: 'user' }; fontSize: number }) {
-  return (
+function UserMessage({ msg, fontSize, canvas }: { msg: ChatMessage & { type: 'user' }; fontSize: number; canvas?: CanvasCardContext }) {
+  // Canvas selections sent with the message show as chips, not as raw blocks.
+  const { text, context } = parseWithContext(msg.text)
+  const bubble = text && (
     <div
       className="user-bubble rounded-control border border-edge bg-surface px-3 py-2 text-ink whitespace-pre-wrap"
       style={{ fontSize: `${fontSize}px` }}
     >
-      {formatUserText(msg.text)}
+      {formatUserText(text)}
+    </div>
+  )
+  if (context.length === 0) return bubble
+  const onOpen = canvas?.onOpenAt
+  return (
+    <div className="flex flex-col items-end">
+      {bubble}
+      <SentContextChips context={context} onOpen={onOpen ? (c) => { onOpen(c.itemId, c.revision) } : undefined} />
     </div>
   )
 }
@@ -783,7 +795,7 @@ export function ChatView({ messages, fontSize, disabled, planningMode, activityL
                   }
                   node = <SystemMessage msg={msg} />; break
                 case 'user':
-                  node = <UserMessage msg={msg} fontSize={fontSize} />; break
+                  node = <UserMessage msg={msg} fontSize={fontSize} canvas={canvas} />; break
                 case 'assistant':
                   node = <AssistantMessage msg={msg} fontSize={fontSize} variant={variant} />; break
                 case 'planning_mode':

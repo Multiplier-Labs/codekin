@@ -117,7 +117,12 @@ Selecting text, table rows, a diagram node, an image region, or later a chart ra
 - **Ask about this** attaches the selection and focuses the composer.
 - **Add to prompt** attaches the selection without moving focus.
 
-Each attachment records `{ itemId, revision, anchor }`. In the message sent to the agent, each attachment is a fenced block labelled with the item title, revision and source. In the transcript, attachments show as chips above the user's message; clicking a chip reopens the item at that revision with the selection highlighted.
+Each attachment records the item, its revision, what was selected (`text`, `rows` or `node`) and an excerpt.
+
+- **In the message to the agent,** each attachment is a `<canvas_context item="…" item_id="…" revision="N" what="…" label="…">` block after the user's text. Table rows are sent as a Markdown table, and a diagram node as its label, file and description.
+- **In the transcript,** the blocks show as chips under the user's message, and clicking a chip reopens the item at that revision. Highlighting the original selection is not built yet.
+- **In the composer,** more than two attachments fold into one summary chip that expands into a list.
+- **Image region selection** is not built yet.
 
 ## 6. Composer
 

@@ -71,6 +71,7 @@ import { CanvasPanel } from './components/canvas/CanvasPanel'
 import { ChangesStrip } from './components/canvas/ChangesStrip'
 import { useCanvas, type CanvasApi } from './hooks/useCanvas'
 import { CANVAS_CHAT_WIDTH, CANVAS_SIDE_BY_SIDE_MIN, canvasKindForPath, clampChatWidth } from './lib/canvas'
+import { formatWithContext, type CanvasAttachment } from './lib/canvasContext'
 import { RepoDrawer, type RepoDrawerTab } from './components/RepoDrawer'
 import type { PermissionMode, CodingProvider } from './types'
 import { applyTheme } from './themes/registry'
@@ -742,7 +743,7 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
 
   // Message sending: file uploads, skill expansion, tentative queue
   const {
-    handleSend: handleSendWithFiles,
+    handleSend: handleSendPlain,
     handleExecuteTentative,
     handleDiscardTentative,
     tentativeMessages,
@@ -771,6 +772,17 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
     askJoe,
     agentName,
   })
+
+  // Canvas selections attached to the next message, per session (docs/CANVAS-SPEC.md §5).
+  const [canvasAttachments, setCanvasAttachments] = useState<Record<string, CanvasAttachment[]>>({})
+  const activeAttachments = useMemo(() => (activeSessionId ? canvasAttachments[activeSessionId] ?? [] : []), [canvasAttachments, activeSessionId])
+  const handleSendWithFiles = useCallback((text: string) => {
+    if (activeSessionId && activeAttachments.length) {
+      setCanvasAttachments(prev => ({ ...prev, [activeSessionId]: [] }))
+      return handleSendPlain(formatWithContext(text, activeAttachments))
+    }
+    return handleSendPlain(text)
+  }, [activeSessionId, activeAttachments, handleSendPlain])
 
   // Keep sendInputRef in sync so onSessionCreated can use it
   useEffect(() => { sendInputRef.current = sendInput }, [sendInput])
@@ -1069,6 +1081,19 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
     ? [...messages].reverse().find((m): m is Extract<typeof m, { type: 'assistant' }> => m.type === 'assistant')
       ?.text.split('\n').map(l => l.replace(/^[#>*\-\s]+/, '').trim()).find(Boolean)?.slice(0, 200)
     : undefined
+  // A Canvas selection: attach it to the next message; "Ask" also brings the composer up.
+  const attachCanvasContext = (att: CanvasAttachment, ask: boolean) => {
+    if (!activeSessionId) return
+    setCanvasAttachments(prev => ({
+      ...prev,
+      [activeSessionId]: [...(prev[activeSessionId] ?? []).filter(a => !(a.itemId === att.itemId && a.excerpt === att.excerpt)), att],
+    }))
+    if (ask) {
+      if (canvasReplacesChat) canvas.setOpen(false)
+      inputBarRef.current?.focus()
+    }
+  }
+
   // A file shown in Docs can open in Canvas when it belongs to the session's folder or an attached one.
   const docsCanvasRoot = (() => {
     const dir = docsBrowser.repoWorkingDir
@@ -1340,6 +1365,11 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
               items: canvas.loaded ? canvas.items : null,
               openItemId: canvasActive ? canvas.selected?.id ?? null : null,
               onOpen: canvas.select,
+              onOpenAt: canvas.openAt,
+            }}
+            canvasContext={{
+              attachments: activeAttachments,
+              onRemove: (id) => { setCanvasAttachments(prev => ({ ...prev, [activeSessionId]: (prev[activeSessionId] ?? []).filter(a => a.id !== id) })) },
             }}
             messages={[...messages, ...tentativeMessages]}
             fontSize={settings.fontSize + (isMobile ? 1 : 0)}
@@ -1465,6 +1495,7 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
                 if (canvasReplacesChat) canvas.setOpen(false)
                 inputBarRef.current?.insertText(text)
               }}
+              onAttach={attachCanvasContext}
               onPointerDown={diffPanelOpen && canvasDesktop ? () => { setDiffPanelOpen(false) } : undefined}
             />
           )}

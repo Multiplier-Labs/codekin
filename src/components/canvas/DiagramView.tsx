@@ -16,8 +16,8 @@ type NodeInfo = NonNullable<CanvasItemMeta['nodes']>[string]
 interface Props {
   source: string
   meta?: CanvasItemMeta
-  /** Put a question about a node in the composer. */
-  onAsk: (text: string) => void
+  /** Attach a node to the next message (ask: also bring the composer up). */
+  onAttachNode: (label: string, excerpt: string, ask: boolean) => void
   /** Show a file in Canvas (only offered for files Canvas can show). */
   onOpenFile: (path: string) => void
 }
@@ -29,7 +29,7 @@ function currentScheme(): 'light' | 'dark' {
   return document.documentElement.dataset.scheme === 'dark' ? 'dark' : 'light'
 }
 
-export function DiagramView({ source, meta, onAsk, onOpenFile }: Props) {
+export function DiagramView({ source, meta, onAttachNode, onOpenFile }: Props) {
   const viewportRef = useRef<HTMLDivElement>(null)
   const hostRef = useRef<HTMLDivElement>(null)
   const [state, setState] = useState<{ status: 'loading' } | { status: 'ready' } | { status: 'error'; message: string }>({ status: 'loading' })
@@ -161,8 +161,12 @@ export function DiagramView({ source, meta, onAsk, onOpenFile }: Props) {
     )
   }
 
-  const askText = (p: NonNullable<typeof popover>) =>
-    `About "${p.label}"${p.info.file ? ` (${p.info.file}${p.info.line ? `:${p.info.line}` : ''})` : ''}: `
+  /** What the agent receives for a node: its label, file and description. */
+  const nodeExcerpt = (p: NonNullable<typeof popover>) => [
+    `Diagram node "${p.label}" (id ${p.id})`,
+    p.info.file ? `File: ${p.info.file}${p.info.line ? `:${p.info.line}` : ''}` : '',
+    p.info.description ?? '',
+  ].filter(Boolean).join('\n')
 
   return (
     <div
@@ -196,10 +200,17 @@ export function DiagramView({ source, meta, onAsk, onOpenFile }: Props) {
           <div className="mt-3 flex gap-2">
             <button
               type="button"
-              onClick={() => { onAsk(askText(popover)); setPopover(null) }}
+              onClick={() => { onAttachNode(popover.label, nodeExcerpt(popover), true); setPopover(null) }}
               className="rounded-control bg-primary-fill px-3 py-1.5 text-meta font-medium text-on-primary-fill hover:opacity-90"
             >
               Ask about this
+            </button>
+            <button
+              type="button"
+              onClick={() => { onAttachNode(popover.label, nodeExcerpt(popover), false); setPopover(null) }}
+              className="rounded-control border border-edge-strong bg-page px-3 py-1.5 text-meta text-ink hover:border-focus"
+            >
+              Add to prompt
             </button>
             {popover.info.file && canvasKindForPath(popover.info.file) && (
               <button

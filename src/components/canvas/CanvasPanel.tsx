@@ -6,13 +6,14 @@
  */
 
 import { useEffect, useRef, useState } from 'react'
-import { IconChevronLeft, IconGitCompare, IconHierarchy2, IconMessage, IconTable, IconX } from '@tabler/icons-react'
+import { IconChevronLeft, IconCopy, IconGitCompare, IconHierarchy2, IconMessage, IconMessageQuestion, IconTable, IconX } from '@tabler/icons-react'
 import type { CanvasApi } from '../../hooks/useCanvas'
 import { CanvasItemPicker } from './CanvasItemPicker'
 import { CanvasItemView } from './CanvasItemView'
 import { CanvasHeaderActions, RevisionPicker } from './CanvasHeaderActions'
 import { CompareView } from './CompareView'
 import { RevisionBar } from './RevisionBar'
+import { makeAttachment, textLabel, type CanvasAttachment, type CanvasSelectionKind } from '../../lib/canvasContext'
 
 /** Below this Canvas width, view source and copy fold into the ⋯ menu. */
 const NARROW = 520
@@ -31,6 +32,8 @@ interface Props {
   onSuggest: (text: string) => void
   /** Pointer down anywhere in Canvas (closes a Changes slide-over). */
   onPointerDown?: () => void
+  /** Attach a selection to the next message; `ask` also brings the composer up. */
+  onAttach?: (attachment: CanvasAttachment, ask: boolean) => void
 }
 
 const SUGGESTIONS = [
@@ -38,7 +41,7 @@ const SUGGESTIONS = [
   { Icon: IconTable, className: 'text-secondary-5', text: 'Put the failing tests in a table' },
 ]
 
-export function CanvasPanel({ canvas, replacesChat, isMobile, onBackToChat, lastAgentLine, onSuggest, onPointerDown }: Props) {
+export function CanvasPanel({ canvas, replacesChat, isMobile, onBackToChat, lastAgentLine, onSuggest, onPointerDown, onAttach }: Props) {
   const { items, selected, view, compare } = canvas
   const mainRef = useRef<HTMLElement>(null)
   const [width, setWidth] = useState(1000)
@@ -77,6 +80,36 @@ export function CanvasPanel({ canvas, replacesChat, isMobile, onBackToChat, last
     document.addEventListener('selectionchange', onSelection)
     return () => { document.removeEventListener('selectionchange', onSelection) }
   }, [canvas.setReading]) // eslint-disable-line react-hooks/exhaustive-deps -- setReading is stable
+
+  // Selected text in the item: a floating toolbar to ask about it or add it to the prompt.
+  const [selection, setSelection] = useState<{ text: string; x: number; y: number } | null>(null)
+  useEffect(() => {
+    const onSelection = () => {
+      const sel = document.getSelection()
+      const body = scrollRef.current
+      if (!sel || sel.isCollapsed || !body || !sel.anchorNode || !body.contains(sel.anchorNode) || !onAttach) { setSelection(null); return }
+      // Tables and diagrams have their own selection.
+      if ((sel.anchorNode.parentElement ?? null)?.closest('table, svg, [data-diagram-popover]')) { setSelection(null); return }
+      const text = sel.toString().trim()
+      if (text.length < 2) { setSelection(null); return }
+      const rect = sel.getRangeAt(0).getBoundingClientRect()
+      const host = mainRef.current!.getBoundingClientRect()
+      setSelection({ text, x: rect.left + rect.width / 2 - host.left, y: rect.top - host.top })
+    }
+    document.addEventListener('selectionchange', onSelection)
+    return () => { document.removeEventListener('selectionchange', onSelection) }
+  }, [onAttach])
+
+  const attach = (what: CanvasSelectionKind, excerpt: string, label: string, ask: boolean) => {
+    if (!onAttach || view.state === 'empty') return
+    onAttach(makeAttachment({ itemId: view.item.id, itemTitle: view.item.title, revision: view.revision, what, excerpt, label }), ask)
+  }
+  const attachSelection = (ask: boolean) => {
+    if (!selection) return
+    attach('text', selection.text, textLabel(selection.text), ask)
+    document.getSelection()?.removeAllRanges()
+    setSelection(null)
+  }
 
   const narrow = width < NARROW
   const revisionPicker = selected && view.state !== 'empty'
@@ -126,7 +159,7 @@ export function CanvasPanel({ canvas, replacesChat, isMobile, onBackToChat, last
     <main
       ref={mainRef}
       aria-label="Canvas"
-      className="canvas-panel flex min-h-0 min-w-0 flex-1 flex-col bg-page"
+      className="canvas-panel relative flex min-h-0 min-w-0 flex-1 flex-col bg-page"
       onPointerDown={onPointerDown}
     >
       {isMobile ? (
@@ -193,8 +226,39 @@ export function CanvasPanel({ canvas, replacesChat, isMobile, onBackToChat, last
             ? <CompareView item={selected} from={compare.from} to={compare.to} a={canvas.revisionContent(compare.from)} b={canvas.revisionContent(compare.to)} source={sourceMode} />
             : sourceMode && view.state === 'ready'
               ? <pre className="px-8 py-6 font-mono text-meta text-ink whitespace-pre-wrap break-words">{view.content.content}</pre>
-              : <CanvasItemView key={viewKey} view={view} onAsk={onSuggest} onOpenFile={canvas.openFile} toc={width >= TOC_FROM} />}
+              : <CanvasItemView key={viewKey} view={view} onAttach={attach} onOpenFile={canvas.openFile} toc={width >= TOC_FROM} />}
       </div>
+
+      {selection && !compare && (isMobile ? (
+        <div className="absolute inset-x-3 bottom-3 z-30 flex gap-2 rounded-floating border border-edge-strong bg-surface-raised p-2 shadow-floating" role="toolbar" aria-label="Selection">
+          <button type="button" onMouseDown={e => { e.preventDefault() }} onClick={() => { attachSelection(true) }}
+            className="flex h-12 flex-1 items-center justify-center gap-2 rounded-control bg-primary-fill text-body font-medium text-on-primary-fill">
+            <IconMessageQuestion size={18} aria-hidden /> Ask about this
+          </button>
+          <button type="button" onMouseDown={e => { e.preventDefault() }} onClick={() => { attachSelection(false) }}
+            className="h-12 rounded-control border border-edge-strong bg-page px-4 text-body text-ink">Add</button>
+          <button type="button" onMouseDown={e => { e.preventDefault() }} onClick={() => { document.getSelection()?.removeAllRanges(); setSelection(null) }}
+            className="flex h-12 w-12 items-center justify-center text-ink-muted" aria-label="Dismiss"><IconX size={18} /></button>
+        </div>
+      ) : (
+        <div
+          className="absolute z-30 flex -translate-x-1/2 items-center gap-0.5 rounded-floating border border-edge-strong bg-surface-raised p-1 shadow-floating"
+          style={{ left: Math.min(Math.max(150, selection.x), width - 150), top: selection.y < 52 ? selection.y + 28 : selection.y - 44 }}
+          role="toolbar"
+          aria-label="Selection"
+        >
+          <button type="button" onMouseDown={e => { e.preventDefault() }} onClick={() => { attachSelection(true) }}
+            className="flex h-[30px] items-center gap-1.5 rounded-control bg-primary-fill px-2.5 text-meta font-medium text-on-primary-fill hover:opacity-90">
+            <IconMessageQuestion size={15} aria-hidden /> Ask about this
+          </button>
+          <button type="button" onMouseDown={e => { e.preventDefault() }} onClick={() => { attachSelection(false) }}
+            className="h-[30px] rounded-control px-2.5 text-meta text-ink hover:bg-surface">Add to prompt</button>
+          <button type="button" onMouseDown={e => { e.preventDefault() }} onClick={() => { void navigator.clipboard.writeText(selection.text) }}
+            className="flex h-[30px] w-[30px] items-center justify-center rounded-control text-ink-muted hover:bg-surface hover:text-ink" aria-label="Copy" title="Copy">
+            <IconCopy size={15} />
+          </button>
+        </div>
+      ))}
 
       {replacesChat && !isMobile && lastAgentLine && (
         <div className="flex shrink-0 items-center gap-2.5 border-t border-edge bg-surface px-4 py-2.5 text-meta text-ink-muted">
