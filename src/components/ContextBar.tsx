@@ -11,7 +11,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { IconBuilding, IconChevronLeft, IconFolder, IconGitBranch, IconPencil, IconPlus, IconX } from '@tabler/icons-react'
+import { IconBuilding, IconChevronLeft, IconFolder, IconGitBranch, IconGitBranchDeleted, IconPencil, IconPlus, IconX } from '@tabler/icons-react'
 import type { RepoGroup } from '../hooks/useRepos'
 import type { AttachedPlace, SessionPlace } from '../types'
 import { sessionPlaceLabel, type DraftPlace } from '../lib/places'
@@ -32,6 +32,10 @@ interface Props {
   /** Resolve and attach a picked place; reports progress, throws on failure. */
   onAttach: (place: DraftPlace, onProgress: (text: string) => void) => Promise<void>
   onDetach: (path: string) => Promise<void>
+  /** The session's git worktree (shown here rather than in the composer). */
+  worktree?: { path: string; branch?: string }
+  /** Offered when the session runs in the shared checkout of a repository. */
+  onMoveToWorktree?: () => void
 }
 
 function KindIcon({ place }: { place: SessionPlace }) {
@@ -44,7 +48,7 @@ function KindIcon({ place }: { place: SessionPlace }) {
 const CHIP = 'flex shrink-0 items-center gap-1.5 rounded-control border border-edge-strong px-2 py-0.5 text-meta text-ink-muted'
 
 export function ContextBar({
-  token, path, place, attached, home, groups, recent, isMobile = false, disabled = false, onAttach, onDetach,
+  token, path, place, attached, home, groups, recent, isMobile = false, disabled = false, onAttach, onDetach, worktree, onMoveToWorktree,
 }: Props) {
   const [pickerOpen, setPickerOpen] = useState(false)
   const [progress, setProgress] = useState<string | null>(null)
@@ -111,6 +115,23 @@ export function ContextBar({
           <KindIcon place={place} />
           <span className={place.kind === 'folder' || place.kind === 'scratch' ? 'font-mono' : ''}>{placeLabel(path, place)}</span>
         </span>
+        {worktree ? (
+          <span className={`${CHIP} border-transparent text-primary-5`} title={`In a worktree: ${worktree.path}`}>
+            <IconGitBranch size={14} stroke={2} className="shrink-0" />
+            <span className="max-w-[220px] truncate font-mono">{worktree.branch ?? worktree.path.split('/').pop()}</span>
+          </span>
+        ) : onMoveToWorktree && (
+          <button
+            type="button"
+            onClick={onMoveToWorktree}
+            disabled={disabled || busy}
+            className={`${CHIP} border-transparent hover:text-ink disabled:opacity-50`}
+            title="This session works in the repository's own checkout — move it into a git worktree"
+          >
+            <IconGitBranchDeleted size={14} stroke={2} className="shrink-0" />
+            No worktree
+          </button>
+        )}
         {attached.map(a => (
           <span key={a.path} className={`${CHIP} pr-1`} title={a.path}>
             <KindIcon place={a.place} />

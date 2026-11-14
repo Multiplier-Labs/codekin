@@ -57,6 +57,8 @@ export interface SessionContentProps {
   canvasCards?: CanvasCardContext
   /** Canvas selections attached to the next message. */
   canvasContext?: { attachments: CanvasAttachment[]; onRemove: (id: string) => void }
+  /** "Add from Canvas" in the composer's + menu. */
+  onSelectInCanvas?: () => void
   activePrompt: PromptEntry | null
   promptQueueSize: number
   sendPromptResponse: (value: string | string[], requestId?: string) => void
@@ -142,6 +144,7 @@ export function SessionContent({
   onOpenCanvas,
   canvasCards,
   canvasContext,
+  onSelectInCanvas,
   activePrompt,
   promptQueueSize,
   sendPromptResponse,
@@ -386,6 +389,8 @@ export function SessionContent({
         placeholder={claudeDisabled ? 'Claude Code is disabled' : isOpenCodeDisconnected ? 'OpenCode is not connected' : isCodexDisconnected ? 'Codex is not connected' : isGrokDisconnected ? 'Grok is not connected' : contextPlaceholder(canvasContext?.attachments)}
         contextSlot={canvasContext && <ComposerContextChips attachments={canvasContext.attachments} onRemove={canvasContext.onRemove} />}
         hasContext={!!canvasContext?.attachments.length}
+        onSelectInCanvas={onSelectInCanvas}
+        worktreeInHeader={!!contextBar}
         onEscape={() => {}}
         pendingFiles={pendingFiles}
         onAddFiles={onAddFiles}

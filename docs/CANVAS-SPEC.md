@@ -1,6 +1,6 @@
 # Session Canvas
 
-**Status:** Slices 1–3 implemented: item model and store (#896), layout shell (#897), agent publishing with chat cards and auto-open (#898), table and diagram renderers (#899), and the revisions UI. Slice 4 (selection → context and the composer) is next.
+**Status:** Slices 1–4 implemented: item model and store (#896), layout shell (#897), agent publishing (#898), renderers (#899), revisions (#900), selection → context (#901) and the composer. Slice 5 (sandbox origin) is next.
 
 ## 1. Summary
 
@@ -136,7 +136,9 @@ The in-session composer is redesigned for the 440 px chat column. It must stay c
   - permission modes (`⇧Tab` still cycles them);
   - "Hand off to another agent" in place of the segmented agent row, since the agent of a running session changes only by handoff.
 - **Typed triggers:** `/` opens skills as today. Typing `@joe` addresses Joe and shows a "To Joe" recipient chip and "Send to Joe".
-- **Worktree:** the branch moves from the composer to the session header.
+- **Worktree:** the branch moves from the composer to the bar above the chat (where the session works). That bar also offers "No worktree" (move into one). Sessions without that bar, such as webhook sessions and Joe-driven ones, keep the worktree in the composer.
+- **Permission menu:** permissions are a row in the session chip's menu that opens a pane, like Effort, so the model list keeps most of the menu.
+- **"Add from Canvas":** opens Canvas so you can select what to ask about. Whole items are not attached.
 - **Attachments:** one chip style for files and Canvas context. More than two fold into a summary chip that expands into a list.
 - **Dangerous permission modes** stay visible on the chip at every width.
 

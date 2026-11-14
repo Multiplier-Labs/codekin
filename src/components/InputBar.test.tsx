@@ -174,9 +174,12 @@ describe('InputBar addressing Joe', () => {
   it('Ask Joe addresses the draft to Joe and back', async () => {
     await renderBar()
     await type('what are you monitoring?')
+    const plus = () => container.querySelector('button[title="Attach, Canvas, skills, Joe"]') as HTMLButtonElement
+    await act(async () => { plus().click() })
     const ask = container.querySelector('button[title="Ask Agent Joe"]') as HTMLButtonElement
     await act(async () => { ask.click() })
     expect(container.querySelector('textarea')!.value).toBe('@Joe what are you monitoring?')
+    await act(async () => { plus().click() })
     const back = container.querySelector('button[title="Send to the coding agent instead"]') as HTMLButtonElement
     await act(async () => { back.click() })
     expect(container.querySelector('textarea')!.value).toBe('what are you monitoring?')
@@ -405,5 +408,72 @@ describe('InputBar draft agent picker', () => {
     expect(container.textContent).not.toContain('Cycle effort')
     await act(async () => { (radios[2] as HTMLButtonElement).click() })
     expect(onProviderChange).toHaveBeenCalledWith('codex', false)
+  })
+})
+
+describe('InputBar session toolbar', () => {
+  const models = [{ id: 'claude-opus-5', label: 'Opus 5', efforts: ['low', 'medium', 'high'] }]
+  async function renderBar(props: Partial<Parameters<typeof InputBar>[0]> = {}) {
+    const onPermissionModeChange = vi.fn()
+    await act(async () => {
+      root.render(
+        <InputBar
+          onSendInput={vi.fn()} isWaiting={false} disabled={false} onEscape={vi.fn()}
+          pendingFiles={[]} onAddFiles={vi.fn()} onRemoveFile={vi.fn()}
+          sessionProvider="claude" onProviderChange={vi.fn()}
+          currentModel="claude-opus-5" onModelChange={vi.fn()} availableModels={models}
+          currentPermissionMode="acceptEdits" onPermissionModeChange={onPermissionModeChange}
+          joeName="Joe" skillGroups={[{ label: 'Repo', skills: [{ id: 's', name: 'review', description: 'Review', command: '/review' }] }] as never}
+          {...props}
+        />,
+      )
+    })
+    return onPermissionModeChange
+  }
+  const chip = () => container.querySelector('button[title*="change model, effort, permissions"]') as HTMLButtonElement
+  const byText = (text: string) => Array.from(container.querySelectorAll('button')).find(b => b.textContent?.trim().startsWith(text)) as HTMLButtonElement
+
+  it('has three controls: +, the session chip and Send', async () => {
+    await renderBar()
+    expect(container.querySelector('button[title="Attach, Canvas, skills, Joe"]')).not.toBeNull()
+    expect(chip()).not.toBeNull()
+    expect(container.querySelector('button[title="Send (Enter)"]')).not.toBeNull()
+    // Joe, skills and the separate permission chip are no longer toolbar buttons.
+    expect(container.querySelector('button[title="Ask Agent Joe"]')).toBeNull()
+    expect(container.querySelector('button[title="Claude Skills"]')).toBeNull()
+    expect(container.querySelector('button[title^="Permission mode:"]')).toBeNull()
+  })
+
+  it('changes the permission mode from the session chip', async () => {
+    const onChange = await renderBar()
+    expect(chip().title).toMatch(/Permission mode: \w/)
+    await act(async () => { chip().click() })
+    await act(async () => { byText('Permissions').click() })
+    await act(async () => { byText('Plan').click() })
+    expect(onChange).toHaveBeenCalledWith('plan')
+  })
+
+  it('keeps a dangerous mode visible on the chip', async () => {
+    await renderBar({ currentPermissionMode: 'bypassPermissions' })
+    expect(chip().textContent).toContain('Bypass')
+    expect(chip().title).toContain('Permission mode: Bypass permissions')
+  })
+
+  it('offers Add from Canvas and Skills from the + menu', async () => {
+    const onSelectInCanvas = vi.fn()
+    await renderBar({ onSelectInCanvas })
+    await act(async () => { (container.querySelector('button[title="Attach, Canvas, skills, Joe"]') as HTMLButtonElement).click() })
+    await act(async () => { byText('Add from Canvas').click() })
+    expect(onSelectInCanvas).toHaveBeenCalled()
+    await act(async () => { (container.querySelector('button[title="Attach, Canvas, skills, Joe"]') as HTMLButtonElement).click() })
+    await act(async () => { byText('Skills').click() })
+    expect(container.textContent).toContain('/review')
+  })
+
+  it('leaves the worktree to the bar above the chat when that bar shows it', async () => {
+    await renderBar({ worktreePath: '/r/.worktrees/wt-1', worktreeInHeader: true })
+    expect(container.querySelector('[title^="In a worktree"]')).toBeNull()
+    await renderBar({ worktreePath: '/r/.worktrees/wt-1' })
+    expect(container.querySelector('[title^="In a worktree"]')).not.toBeNull()
   })
 })
