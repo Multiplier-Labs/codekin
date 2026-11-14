@@ -709,8 +709,10 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> implements 
    * plus harmless internal tools. Everything else is forwarded to the session manager
    * for UI-based approval (or auto-approval registry check).
    */
+  // File tools are not here: when the CLI asks about one, its own rules did
+  // not allow the call (a path outside the project, typically), so the
+  // session's approval rules decide, and may ask the user.
   private static readonly AUTO_APPROVE_TOOLS = new Set([
-    'Read', 'Write', 'Edit', 'Glob', 'Grep', 'NotebookEdit',
     'EnterPlanMode', 'TodoWrite', 'TodoRead', 'Task', 'TaskCreate', 'TaskUpdate',
   ])
 
