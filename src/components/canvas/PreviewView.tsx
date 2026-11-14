@@ -61,7 +61,9 @@ export function PreviewView({ item, content, preview, onAttach, isMobile }: Prop
 
   // Ask for the proxy whenever the item (or where it points) changes.
   const openPreview = preview.open
-  useEffect(() => { openPreview(item.id) }, [item.id, content, openPreview])
+  // …and after every (re)join: a restarted Codekin has new proxies.
+  const joinGeneration = preview.generation
+  useEffect(() => { openPreview(item.id) }, [item.id, content, openPreview, joinGeneration])
 
   const origin = state?.proxyPort ? previewOrigin(state.proxyPort, window.location) : null
   const mixed = window.location.protocol === 'https:'

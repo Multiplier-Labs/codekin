@@ -33,11 +33,13 @@ interface Props {
   /** Live previews: their state and controls. */
   preview?: PreviewApi
   isMobile?: boolean
+  /** Ask again after the item failed to load. */
+  onRetry?: () => void
   /** An MCP App calls a tool on its own server. */
   onCallAppTool?: (itemId: string, tool: string, args: Record<string, unknown>, confirmed: boolean) => Promise<AppToolOutcome>
 }
 
-export function CanvasItemView({ view, onAttach, onOpenFile, toc, sandboxOrigin, onSendMessage, preview, isMobile, onCallAppTool }: Props) {
+export function CanvasItemView({ view, onAttach, onOpenFile, toc, sandboxOrigin, onSendMessage, preview, isMobile, onCallAppTool, onRetry }: Props) {
   if (view.state === 'loading') {
     return (
       <div className="flex flex-1 items-center justify-center gap-2 text-meta text-ink-muted" role="status">
@@ -53,6 +55,7 @@ export function CanvasItemView({ view, onAttach, onOpenFile, toc, sandboxOrigin,
         <div>
           <div className="font-bold">Couldn't load {view.item.title}</div>
           <div className="text-meta">{view.message}</div>
+          {onRetry && <button type="button" onClick={onRetry} className="mt-2 rounded-control border border-error-8 px-2.5 py-1 text-meta font-medium hover:bg-error-10">Try again</button>}
         </div>
       </div>
     )
