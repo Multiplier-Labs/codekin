@@ -39,6 +39,25 @@ describe('buildHarnessEnv', () => {
     expect(env.CLAUDE_CODE_USE_BEDROCK).toBe('1')
   })
 
+  it('strips the per-session variables of a Codekin session the server was started from', () => {
+    vi.stubEnv('CODEKIN_SESSION_ID', 'parent')
+    vi.stubEnv('CODEKIN_TOKEN', 'parent-token')
+    vi.stubEnv('CODEKIN_AUTH_TOKEN', 'parent-token')
+    vi.stubEnv('CODEKIN_SESSION_TYPE', 'manual')
+    vi.stubEnv('CODEKIN_SKIP_PERMISSIONS', '1')
+    vi.stubEnv('CODEKIN_PORT', '1')
+    vi.stubEnv('CODEKIN_HOOK_URL', 'http://localhost:9/api/hook-decision')
+
+    const env = buildHarnessEnv()
+    for (const key of ['CODEKIN_SESSION_ID', 'CODEKIN_TOKEN', 'CODEKIN_AUTH_TOKEN', 'CODEKIN_SESSION_TYPE', 'CODEKIN_SKIP_PERMISSIONS', 'CODEKIN_PORT']) {
+      expect(env[key]).toBeUndefined()
+    }
+    // Configuration, not session state, still passes through.
+    expect(env.CODEKIN_HOOK_URL).toBe('http://localhost:9/api/hook-decision')
+    // A session that does skip permissions still says so.
+    expect(buildHarnessEnv({ CODEKIN_SKIP_PERMISSIONS: '1' }).CODEKIN_SKIP_PERMISSIONS).toBe('1')
+  })
+
   it('applies extraEnv last', () => {
     vi.stubEnv('CODEKIN_SESSION_ID', 'from-parent')
     const env = buildHarnessEnv({ CODEKIN_SESSION_ID: 'from-session', CODEKIN_TOKEN: 'scoped' })
