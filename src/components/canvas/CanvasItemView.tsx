@@ -4,7 +4,7 @@
  * a sortable, filterable grid, and diagrams through Mermaid in strict mode.
  */
 
-import { useMemo, useRef } from 'react'
+import { lazy, Suspense, useMemo, useRef } from 'react'
 import { IconAlertTriangle, IconLoader2, IconShieldLock } from '@tabler/icons-react'
 import type { CanvasView } from '../../hooks/useCanvas'
 import { MarkdownRenderer } from '../MarkdownRenderer'
@@ -13,6 +13,9 @@ import type { CanvasSelectionKind } from '../../lib/canvasContext'
 import { DiagramView } from './DiagramView'
 import { TableView } from './TableView'
 import { SandboxFrame } from './SandboxFrame'
+
+// ext-apps and the MCP protocol code load only when an MCP App is shown.
+const McpAppView = lazy(() => import('./McpAppView'))
 
 interface Props {
   view: Exclude<CanvasView, { state: 'empty' }>
@@ -24,9 +27,11 @@ interface Props {
   toc?: boolean
   /** Sandbox origin for charts and HTML pages; null when there is none, undefined while finding out. */
   sandboxOrigin?: string | null
+  /** An MCP App asked to send a message as the user (already confirmed). */
+  onSendMessage?: (text: string) => void
 }
 
-export function CanvasItemView({ view, onAttach, onOpenFile, toc, sandboxOrigin }: Props) {
+export function CanvasItemView({ view, onAttach, onOpenFile, toc, sandboxOrigin, onSendMessage }: Props) {
   if (view.state === 'loading') {
     return (
       <div className="flex flex-1 items-center justify-center gap-2 text-meta text-ink-muted" role="status">
@@ -59,6 +64,16 @@ export function CanvasItemView({ view, onAttach, onOpenFile, toc, sandboxOrigin 
         />
       </div>
     )
+  }
+  if (item.kind === 'mcp_app') {
+    if (sandboxOrigin) {
+      return (
+        <Suspense fallback={<div className="flex flex-1 items-center justify-center gap-2 text-meta text-ink-muted"><IconLoader2 size={18} className="animate-spin" /> Loading…</div>}>
+          <McpAppView origin={sandboxOrigin} content={content.content} onSendMessage={onSendMessage ?? (() => {})} />
+        </Suspense>
+      )
+    }
+    return <McpAppFallback content={content.content} />
   }
   if (item.kind === 'chart' || item.kind === 'html') {
     if (sandboxOrigin) {
@@ -125,6 +140,28 @@ function MarkdownItem({ content, toc }: { content: string; toc: boolean }) {
         </ul>
       </nav>
       <div className="min-w-0 flex-1">{doc}</div>
+    </div>
+  )
+}
+
+/** Without a sandbox, an MCP App shows the tool's text result instead of its interface. */
+function McpAppFallback({ content }: { content: string }) {
+  const text = useMemo(() => {
+    try {
+      const r = JSON.parse(content) as { server?: string; tool?: string; result?: { content?: Array<{ type?: string; text?: string }> } }
+      const body = (r.result?.content ?? []).filter(c => c.type === 'text' && c.text).map(c => c.text).join('\n\n')
+      return { head: `${r.tool ?? 'Tool'} from ${r.server ?? 'an MCP server'}`, body }
+    } catch {
+      return { head: 'MCP App', body: '' }
+    }
+  }, [content])
+  return (
+    <div className="px-8 py-6">
+      <p className="mb-4 flex items-start gap-2 rounded-control border border-edge bg-surface px-3 py-2 text-meta text-ink-muted" role="note">
+        <IconShieldLock size={16} className="mt-0.5 shrink-0" aria-hidden />
+        {text.head} has an interactive view, which runs in a sandbox on a separate web address. This Codekin has none set up, so the tool's text result is shown instead.
+      </p>
+      <pre className="font-mono text-meta text-ink whitespace-pre-wrap break-words">{text.body || '(no text result)'}</pre>
     </div>
   )
 }

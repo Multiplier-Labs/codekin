@@ -1502,6 +1502,7 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
               }}
               onAttach={attachCanvasContext}
               sandboxOrigin={sandboxOrigin}
+              onSendMessage={(text) => { void handleSendPlain(text) }}
               onPointerDown={diffPanelOpen && canvasDesktop ? () => { setDiffPanelOpen(false) } : undefined}
             />
           )}

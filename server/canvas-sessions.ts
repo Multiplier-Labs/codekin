@@ -9,6 +9,7 @@ import { promises as fs, realpathSync } from 'fs'
 import path from 'path'
 import { CANVAS_KINDS, CANVAS_LIMITS, CanvasError, CanvasStore, canvasTypeForFile, type CanvasCreateInput } from './canvas-store.js'
 import { SCREENSHOTS_DIR } from './config.js'
+import type { McpAppCall } from './mcp-app.js'
 import type { CanvasItem, CanvasItemKind, CanvasItemSource, Session, WsServerMessage } from './types.js'
 
 /** What an agent sends to show or revise an item (canvas_show / canvas_update). */
@@ -27,8 +28,11 @@ export interface CanvasPublishInput {
   nodes?: unknown
 }
 
+type AgentKind = Exclude<CanvasItemKind, 'mcp_app'>
+const AGENT_KINDS = CANVAS_KINDS.filter((k): k is AgentKind => k !== 'mcp_app')
+
 const TABLE_MEDIA: Record<string, string> = { csv: 'text/csv', tsv: 'text/tab-separated-values', json: 'application/json' }
-const TEXT_MEDIA: Record<Exclude<CanvasItemKind, 'image' | 'table'>, string> = { markdown: 'text/markdown', diagram: 'text/vnd.mermaid', chart: 'application/vnd.vegalite+json', html: 'text/html' }
+const TEXT_MEDIA: Record<Exclude<CanvasItemKind, 'image' | 'table' | 'mcp_app'>, string> = { markdown: 'text/markdown', diagram: 'text/vnd.mermaid', chart: 'application/vnd.vegalite+json', html: 'text/html' }
 
 export interface CanvasSessionsDeps {
   getSession: (id: string) => Session | undefined
@@ -169,8 +173,9 @@ export class CanvasSessions {
       : undefined
     if (input.itemId !== undefined && !existing) throw new CanvasError(`No Canvas item ${String(input.itemId)} in this session. Use canvas_show to create one.`)
 
-    const kind = (existing?.kind ?? input.kind) as CanvasItemKind | undefined
-    if (!kind || !CANVAS_KINDS.includes(kind)) throw new CanvasError(`kind must be one of: ${CANVAS_KINDS.join(', ')}.`)
+    // MCP Apps come from tool calls (publishMcpApp), never from the agent's own tools.
+    const kind = (existing?.kind ?? input.kind) as AgentKind | undefined
+    if (!kind || !AGENT_KINDS.includes(kind)) throw new CanvasError(`kind must be one of: ${AGENT_KINDS.join(', ')}.`)
     if (input.kind !== undefined && existing && input.kind !== existing.kind) throw new CanvasError(`Item ${existing.id} is a ${existing.kind}; its kind can't change.`)
     if (input.content !== undefined && input.path !== undefined) throw new CanvasError('Pass either content or path, not both.')
 
@@ -215,6 +220,31 @@ export class CanvasSessions {
     const item = await this.store.create(sessionId, { kind, title: title as string, source, content, mediaType, meta })
     this.changed(session, item, 'created')
     return item
+  }
+
+  /**
+   * Show a tool call with a UI (MCP Apps) as a Canvas item: one item per
+   * call, holding its input, result and UI document, so reopening it later
+   * restores the view without running the tool again.
+   */
+  async publishMcpApp(sessionId: string, call: McpAppCall): Promise<CanvasItem | null> {
+    const session = this.deps.getSession(sessionId)
+    if (!session) return null
+    try {
+      const title = call.tool.replace(/[_-]+/g, ' ').replace(/^\w/, c => c.toUpperCase())
+      const item = await this.store.create(sessionId, {
+        kind: 'mcp_app',
+        title,
+        source: { type: 'mcp', server: call.server },
+        mediaType: 'application/vnd.codekin.mcp-app+json',
+        content: JSON.stringify({ ...call, at: new Date().toISOString() }),
+      })
+      this.changed(session, item, 'created')
+      return item
+    } catch (err) {
+      console.warn('[canvas] Could not store the MCP App for', call.server, call.tool, err instanceof Error ? err.message : err)
+      return null
+    }
   }
 
   async pin(sessionId: string, itemId: string, revision: unknown): Promise<string | null> {

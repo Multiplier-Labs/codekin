@@ -11,6 +11,7 @@
  * - Turn results and process exit
  */
 
+import { appDocument, findClaudeAppTool, showsApp, toContentBlocks, type McpAppCall } from './mcp-app.js'
 import { spawn, execFileSync, type ChildProcess } from 'child_process'
 import { createInterface, type Interface } from 'readline'
 import { existsSync } from 'fs'
@@ -77,6 +78,8 @@ export interface ClaudeProcessEvents {
   result: [text: string, isError: boolean]
   usage: [usage: SessionUsage]
   rate_limit: [event: Record<string, unknown>]
+  /** A finished MCP tool call whose tool has a UI (MCP Apps); see mcp-app.ts. */
+  mcp_app: [call: McpAppCall]
   error: [message: string]
   exit: [code: number | null, signal: string | null]
 }
@@ -144,7 +147,13 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> implements 
   private taskSeq = 0
 
   /** Outbound control requests (server → CLI, e.g. set_permission_mode) awaiting a control_response. */
-  private pendingOutboundControl = new Map<string, (ok: boolean) => void>
+  private pendingOutboundControl = new Map<string, (ok: boolean, response?: Record<string, unknown>) => void>
+  /** The CLI can describe tool UIs and read their resources (init capabilities). */
+  private mcpAppsSupported = false
+  /** MCP tool calls in flight: tool_use id → name and input (for MCP Apps). */
+  private mcpToolUses = new Map<string, { name: string; input: Record<string, unknown> }>()
+  /** Cached `mcp_status` (tool definitions with their UI metadata). */
+  private mcpStatus: { at: number; value: unknown } | null = null
 
   /** Additional env vars passed to the child process (session ID, port, token). */
   private extraEnv: Record<string, string>
@@ -359,6 +368,8 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> implements 
       case 'system':
         if (event.subtype === 'init') {
           this.sessionId = (event as ClaudeSystemInit).session_id || this.sessionId
+          const caps = (event as { capabilities?: unknown }).capabilities
+          this.mcpAppsSupported = Array.isArray(caps) && caps.includes('mcp_tool_ui_meta_v1') && caps.includes('mcp_read_resource_v1')
           const model = ('model' in event ? (event as Record<string, unknown>).model : 'unknown') as string
           this.emit('system_init', model)
         }
@@ -369,7 +380,7 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> implements 
         break
 
       case 'assistant':
-        this.handleAssistantMessage()
+        this.handleAssistantMessage(event)
         break
 
       case 'user':
@@ -410,7 +421,7 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> implements 
           const resolve = this.pendingOutboundControl.get(resp.request_id)
           if (resolve) {
             this.pendingOutboundControl.delete(resp.request_id)
-            resolve(resp.subtype === 'success')
+            resolve(resp.subtype === 'success', (resp as { response?: Record<string, unknown> }).response)
           }
         }
         break
@@ -514,7 +525,51 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> implements 
    * Note: assistant events with --include-partial-messages contain tool_use blocks,
    * but tool_results come in separate 'user' events — see handleUserEvent.
    */
-  private handleAssistantMessage(): void {}
+  private handleAssistantMessage(event: ClaudeEvent): void {
+    // Remember MCP tool calls, so their results can be shown as MCP Apps.
+    if (!this.mcpAppsSupported) return
+    const content = (event as unknown as { message?: { content?: unknown } }).message?.content
+    if (!Array.isArray(content)) return
+    for (const block of content as Array<{ type?: string; id?: string; name?: string; input?: unknown }>) {
+      if (block.type === 'tool_use' && block.id && block.name?.startsWith('mcp__') && !block.name.startsWith('mcp__codekin_canvas__')) {
+        this.mcpToolUses.set(block.id, { name: block.name, input: (typeof block.input === 'object' && block.input !== null ? block.input : {}) as Record<string, unknown> })
+      }
+    }
+  }
+
+  /** Send a control request to the CLI and wait for its response (null on failure or timeout). */
+  private controlRequest(request: Record<string, unknown>, timeoutMs = 10_000): Promise<Record<string, unknown> | null> {
+    return new Promise((resolve) => {
+      const requestId = randomUUID()
+      const timer = setTimeout(() => { this.pendingOutboundControl.delete(requestId); resolve(null) }, timeoutMs)
+      this.pendingOutboundControl.set(requestId, (ok, response) => { clearTimeout(timer); resolve(ok ? response ?? {} : null) })
+      this.sendRaw(JSON.stringify({ type: 'control_request', request_id: requestId, request }))
+    })
+  }
+
+  /**
+   * A finished MCP tool call: if its tool declares a UI, read the resource
+   * through the CLI and emit it as an MCP App. Tool definitions come from a
+   * cached `mcp_status`, refreshed once when a tool isn't in it.
+   */
+  private async resolveMcpApp(use: { name: string; input: Record<string, unknown> }, result: McpAppCall['result']): Promise<void> {
+    if (!showsApp(result)) return
+    try {
+      const status = async (fresh: boolean) => {
+        if (fresh || !this.mcpStatus) this.mcpStatus = { at: Date.now(), value: await this.controlRequest({ subtype: 'mcp_status' }) }
+        return this.mcpStatus.value
+      }
+      let found = findClaudeAppTool(await status(false), use.name)
+      if (!found && this.mcpStatus && Date.now() - this.mcpStatus.at > 5_000) found = findClaudeAppTool(await status(true), use.name)
+      if (!found) return
+      const read = await this.controlRequest({ subtype: 'mcp_read_resource', serverName: found.server, uri: found.resourceUri })
+      const doc = appDocument(read)
+      if (!doc) { console.warn(`[mcp-app] ${found.server}/${found.tool}: no usable HTML resource at ${found.resourceUri}`); return }
+      this.emit('mcp_app', { server: found.server, tool: found.tool, toolInput: use.input, result, resourceUri: found.resourceUri, ...doc })
+    } catch (err) {
+      console.warn('[mcp-app] Could not resolve the app for', use.name, err)
+    }
+  }
 
   /** Extract tool_result blocks from 'user' events and emit as tool_output. */
   private handleUserEvent(event: ClaudeEvent): void {
@@ -525,6 +580,18 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> implements 
     for (const block of blocks as Array<{ type: string; tool_use_id?: string; content?: unknown; is_error?: boolean }>) {
       if (block.type === 'tool_result') {
         const isError = block.is_error === true
+        const mcpUse = block.tool_use_id ? this.mcpToolUses.get(block.tool_use_id) : undefined
+        if (mcpUse && block.tool_use_id) {
+          this.mcpToolUses.delete(block.tool_use_id)
+          // The top-level tool_use_result keeps structuredContent and _meta, which the block drops.
+          const full = (event as unknown as { tool_use_result?: { structuredContent?: unknown; _meta?: unknown } }).tool_use_result
+          void this.resolveMcpApp(mcpUse, {
+            content: toContentBlocks(block.content),
+            ...(full?.structuredContent !== undefined ? { structuredContent: full.structuredContent } : {}),
+            ...(full?._meta !== undefined ? { _meta: full._meta } : {}),
+            ...(isError ? { isError } : {}),
+          })
+        }
 
         // When content is an array of content blocks, extract images and stringify the rest
         const contentBlocks = Array.isArray(block.content) ? block.content : null

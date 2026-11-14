@@ -22,6 +22,7 @@
  * ~/.codex/auth.json, reused by app-server with automatic token refresh).
  */
 
+import { appDocument, isOwnServer, toContentBlocks } from './mcp-app.js'
 import { spawn, type ChildProcess } from 'child_process'
 import { createInterface, type Interface } from 'readline'
 import { existsSync } from 'fs'
@@ -58,6 +59,11 @@ interface CodexThreadItem {
   /** mcpToolCall */
   server?: string
   tool?: string
+  arguments?: unknown
+  result?: { content?: unknown; structuredContent?: unknown; _meta?: unknown } | null
+  /** MCP Apps: the tool's UI resource (mcpAppUi when a display mode is declared, else the legacy field). */
+  mcpAppUi?: { resourceUri?: string } | null
+  mcpAppResourceUri?: string
   /** webSearch */
   query?: string
 }
@@ -774,11 +780,40 @@ export class CodexProcess extends EventEmitter<ClaudeProcessEvents> implements C
 
       case 'mcpToolCall':
         this.emit('tool_done', item.tool || 'MCP', item.status === 'failed' ? 'Error' : undefined)
+        void this.resolveMcpApp(item)
         break
 
       case 'webSearch':
         this.emit('tool_done', 'WebSearch', item.query)
         break
+    }
+  }
+
+  /**
+   * A finished MCP tool call whose tool has a UI (MCP Apps): read the
+   * resource through the app-server, bound to the originating call, and emit it.
+   */
+  private async resolveMcpApp(item: CodexThreadItem): Promise<void> {
+    const uri = item.mcpAppUi?.resourceUri ?? item.mcpAppResourceUri
+    if (!uri || !item.server || !item.tool || !item.result || item.status === 'failed' || isOwnServer(item.server)) return
+    try {
+      const read = await this.request('mcpServer/resource/read', { server: item.server, uri, threadId: this.threadId, originCallId: item.id })
+      const doc = appDocument(read)
+      if (!doc) { console.warn(`[mcp-app] ${item.server}/${item.tool}: no usable HTML resource at ${uri}`); return }
+      this.emit('mcp_app', {
+        server: item.server,
+        tool: item.tool,
+        toolInput: (typeof item.arguments === 'object' && item.arguments !== null ? item.arguments : {}) as Record<string, unknown>,
+        result: {
+          content: toContentBlocks(item.result.content),
+          ...(item.result.structuredContent != null ? { structuredContent: item.result.structuredContent } : {}),
+          ...(item.result._meta != null ? { _meta: item.result._meta } : {}),
+        },
+        resourceUri: uri,
+        ...doc,
+      })
+    } catch (err) {
+      console.warn('[mcp-app] Could not read the app for', item.server, item.tool, err)
     }
   }
 
