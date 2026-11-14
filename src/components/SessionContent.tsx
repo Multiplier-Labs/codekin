@@ -18,6 +18,16 @@ import { InputBar, type InputBarHandle } from './InputBar'
 import { IconEye, IconFolder, IconLayoutSidebarRight, IconPencil, IconRobotFace } from '@tabler/icons-react'
 import type { JoeChatContext } from './JoeChatMessage'
 import type { CanvasCardContext } from './canvas/CanvasChatCard'
+import { ComposerContextChips } from './canvas/ContextChips'
+import type { CanvasAttachment } from '../lib/canvasContext'
+
+/** "Ask about this paragraph…" while Canvas context is attached. */
+function contextPlaceholder(attachments: CanvasAttachment[] | undefined): string | undefined {
+  if (!attachments?.length) return undefined
+  if (attachments.length > 1) return 'Ask about these…'
+  const what = attachments[0].what
+  return what === 'rows' ? 'Ask about these rows…' : what === 'node' ? `Ask about ${attachments[0].label}…` : 'Ask about this…'
+}
 import type { SkillGroup } from './SkillMenu'
 import type { SlashCommand } from '../lib/slashCommands'
 import type { ChatMessage, PermissionMode, TaskItem } from '../types'
@@ -45,6 +55,8 @@ export interface SessionContentProps {
   onOpenCanvas?: () => void
   /** Canvas chat cards in the transcript. */
   canvasCards?: CanvasCardContext
+  /** Canvas selections attached to the next message. */
+  canvasContext?: { attachments: CanvasAttachment[]; onRemove: (id: string) => void }
   activePrompt: PromptEntry | null
   promptQueueSize: number
   sendPromptResponse: (value: string | string[], requestId?: string) => void
@@ -129,6 +141,7 @@ export function SessionContent({
   canvasOpen = false,
   onOpenCanvas,
   canvasCards,
+  canvasContext,
   activePrompt,
   promptQueueSize,
   sendPromptResponse,
@@ -370,7 +383,9 @@ export function SessionContent({
         onInterrupt={isProcessing ? onInterrupt : undefined}
         isWaiting={!!activePrompt}
         disabled={disabled || isProviderDisabled}
-        placeholder={claudeDisabled ? 'Claude Code is disabled' : isOpenCodeDisconnected ? 'OpenCode is not connected' : isCodexDisconnected ? 'Codex is not connected' : isGrokDisconnected ? 'Grok is not connected' : undefined}
+        placeholder={claudeDisabled ? 'Claude Code is disabled' : isOpenCodeDisconnected ? 'OpenCode is not connected' : isCodexDisconnected ? 'Codex is not connected' : isGrokDisconnected ? 'Grok is not connected' : contextPlaceholder(canvasContext?.attachments)}
+        contextSlot={canvasContext && <ComposerContextChips attachments={canvasContext.attachments} onRemove={canvasContext.onRemove} />}
+        hasContext={!!canvasContext?.attachments.length}
         onEscape={() => {}}
         pendingFiles={pendingFiles}
         onAddFiles={onAddFiles}

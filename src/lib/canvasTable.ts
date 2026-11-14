@@ -80,3 +80,13 @@ export function sortRows(rows: string[][], index: number, dir: 'asc' | 'desc', n
     return sign * (numeric ? numberOf(x) - numberOf(y) : x.localeCompare(y, undefined, { numeric: true, sensitivity: 'base' }))
   })
 }
+
+/** Selected rows as a Markdown table the agent can read. */
+export function rowsExcerpt(columns: string[], rows: string[][]): string {
+  const esc = (v: string) => v.replace(/\|/g, '\\|').replace(/\n/g, ' ')
+  return [
+    `| ${columns.map(esc).join(' | ')} |`,
+    `| ${columns.map(() => '---').join(' | ')} |`,
+    ...rows.map(r => `| ${r.map(esc).join(' | ')} |`),
+  ].join('\n')
+}

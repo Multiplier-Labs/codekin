@@ -50,6 +50,8 @@ export interface CanvasApi {
   handleMessage: (msg: WsServerMessage) => boolean
   /** Ask for the joined session's items (after joining or reconnecting). */
   refresh: () => void
+  /** Open an item at a revision (a sent context chip); the latest when it is gone. */
+  openAt: (itemId: string, revision: number) => void
   /** View a specific revision of the selected item; null follows the pinned or latest one. */
   showRevision: (revision: number | null) => void
   /** Pin the selected item at a revision (new ones then wait), or unpin with null. */
@@ -203,6 +205,15 @@ export function useCanvas(sessionId: string | null, send: (msg: WsClientMessage)
     if (sessionId) send({ type: 'canvas_list' })
   }, [sessionId, send])
 
+  const openAt = useCallback((itemId: string, n: number) => {
+    if (!sessionId) return
+    const item = items.find(i => i.id === itemId)
+    if (!item) { setNotice('That Canvas item no longer exists.'); return }
+    const shown = item.pinnedRevision ?? item.latest
+    setViewRev(prev => ({ ...prev, [`${sessionId}/${itemId}`]: item.revisions.some(r => r.n === n) && n !== shown ? n : undefined }))
+    updateSessionState(sessionId, { itemId, open: true })
+  }, [sessionId, items])
+
   const showRevision = useCallback((n: number | null) => {
     if (!itemKey) return
     setViewRev(prev => ({ ...prev, [itemKey]: n ?? undefined }))
@@ -278,6 +289,6 @@ export function useCanvas(sessionId: string | null, send: (msg: WsClientMessage)
     items, loaded: !!sessionId && sessionId in itemsBySession, selected, view, open, notice,
     dismissNotice: () => { setNotice(null) },
     setOpen, toggle, select, step, openFile, handleMessage, refresh,
-    showRevision, pin, remove, setReading, compare, setCompare, revisionContent,
+    openAt, showRevision, pin, remove, setReading, compare, setCompare, revisionContent,
   }
 }

@@ -15,6 +15,8 @@ export interface CanvasCardContext {
   /** The item showing in an open Canvas, if any. */
   openItemId: string | null
   onOpen: (itemId: string) => void
+  /** Reopen an item at the revision a sent context chip came from. */
+  onOpenAt?: (itemId: string, revision: number) => void
 }
 
 type CardMsg = Extract<ChatMessage, { type: 'canvas_card' }>

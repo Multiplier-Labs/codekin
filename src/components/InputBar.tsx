@@ -674,6 +674,8 @@ function AgentDropdown({ provider, handoffTargets, currentModel, currentEffort, 
 /** Imperative handle for programmatic text insertion (e.g. from skill menu). */
 export interface InputBarHandle {
   insertText: (text: string) => void
+  /** Focus the textarea, keeping its text. */
+  focus: () => void
 }
 
 /** `draft`: the composer of a session not created yet (agent picked, not handed off; menus open downward). */
@@ -754,9 +756,13 @@ interface InputBarProps {
   placeSlot?: React.ReactNode
   /** A line under the permission menu (draft: why Skip is missing for this agent). */
   permissionNote?: string
+  /** Canvas context chips, shown above the file chips. */
+  contextSlot?: React.ReactNode
+  /** Canvas context is attached: the message can be sent without text. */
+  hasContext?: boolean
 }
 
-export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function InputBar({ onSendInput, isWaiting, disabled, onEscape, onInterrupt, pendingFiles, onAddFiles, onRemoveFile, skillGroups, slashCommands, initialValue = '', onValueChange, currentModel, onModelChange, currentEffort = null, onEffortChange, availableModels = [], sessionProvider, onProviderChange, placeholder, isMobile = false, showWorktreeToggle = false, useWorktree = false, onWorktreeChange, currentPermissionMode, onPermissionModeChange, onMoveToWorktree, worktreePath, variant = 'default', joeName, lockedReason, placeSlot, permissionNote }, ref) {
+export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function InputBar({ onSendInput, isWaiting, disabled, onEscape, onInterrupt, pendingFiles, onAddFiles, onRemoveFile, skillGroups, slashCommands, initialValue = '', onValueChange, currentModel, onModelChange, currentEffort = null, onEffortChange, availableModels = [], sessionProvider, onProviderChange, placeholder, isMobile = false, showWorktreeToggle = false, useWorktree = false, onWorktreeChange, currentPermissionMode, onPermissionModeChange, onMoveToWorktree, worktreePath, variant = 'default', joeName, lockedReason, placeSlot, permissionNote, contextSlot, hasContext = false }, ref) {
   const isDraft = variant === 'draft'
   const enabledModes = resolveEnabledModes(usePref('enabledPermissionModes'))
   const providerModes = permissionModesFor(sessionProvider)
@@ -793,6 +799,9 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
   useImperativeHandle(ref, () => ({
     insertText(text: string) {
       setValue(text)
+      setTimeout(() => textareaRef.current?.focus(), 0)
+    },
+    focus() {
       setTimeout(() => textareaRef.current?.focus(), 0)
     },
   }))
@@ -841,14 +850,14 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
   const blocked = !!lockedReason && !toJoe
 
   const handleSend = useCallback(() => {
-    if (!value.trim() && pendingFiles.length === 0) return
+    if (!value.trim() && pendingFiles.length === 0 && !hasContext) return
     setDangerNote(null)
     if (blocked) return
     setSlashMenuOpen(false)
     onSendInput(value)
     setValue('')
     onValueChange?.('')
-  }, [value, pendingFiles, onSendInput, onValueChange, blocked])
+  }, [value, pendingFiles, hasContext, onSendInput, onValueChange, blocked])
 
   /** Ask Joe: address the current text to Joe (or back to the coding agent). */
   const toggleJoe = useCallback(() => {
@@ -1027,6 +1036,8 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
               onClose={() => setSlashMenuOpen(false)}
             />
           )}
+
+          {contextSlot}
 
           {/* Pending file chips */}
           {pendingFiles.length > 0 && (
@@ -1279,7 +1290,7 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
               <SendButton
                 onClick={handleSend}
                 disabled={disabled || blocked}
-                hasContent={!!(value.trim() || pendingFiles.length > 0)}
+                hasContent={!!(value.trim() || pendingFiles.length > 0 || hasContext)}
                 accent={toJoe}
               />
             </div>
