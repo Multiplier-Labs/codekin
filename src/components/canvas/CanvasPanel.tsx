@@ -101,7 +101,9 @@ export function CanvasPanel({ canvas, replacesChat, isMobile, onBackToChat, last
       )}
 
       <div className="chat-scroll flex min-h-0 flex-1 flex-col overflow-y-auto">
-        {view.state === 'empty' ? <CanvasEmpty onSuggest={onSuggest} /> : <CanvasItemView key={`${view.item.id}@${view.revision}`} view={view} />}
+        {view.state === 'empty'
+          ? <CanvasEmpty onSuggest={onSuggest} />
+          : <CanvasItemView key={`${view.item.id}@${view.revision}`} view={view} onAsk={onSuggest} onOpenFile={canvas.openFile} />}
       </div>
 
       {replacesChat && !isMobile && lastAgentLine && (

@@ -101,6 +101,7 @@
     "jsdom": "^29.0.1",
     "marked": "^18.0.2",
     "marked-highlight": "^2.2.4",
+    "mermaid": "^11.17.2",
     "qrcode": "^1.5.4",
     "react": "^19.2.0",
     "react-diff-view": "^3.3.2",
