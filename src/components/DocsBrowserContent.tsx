@@ -24,6 +24,8 @@ export interface DocsBrowserContentProps {
   onToggleRaw: () => void
   onToggleStar: () => void
   onClose: () => void
+  /** Show this file in the session's Canvas; absent when the file isn't the session's. */
+  onOpenInCanvas?: () => void
   activeSessionId: string | null
   inputBarRef: RefObject<InputBarHandle | null>
   onSendInput: (text: string, files?: File[]) => void
@@ -56,6 +58,7 @@ export function DocsBrowserContent({
   onToggleRaw,
   onToggleStar,
   onClose,
+  onOpenInCanvas,
   activeSessionId,
   inputBarRef,
   onSendInput,
@@ -89,6 +92,7 @@ export function DocsBrowserContent({
         onToggleRaw={onToggleRaw}
         onToggleStar={onToggleStar}
         onClose={onClose}
+        onOpenInCanvas={onOpenInCanvas}
       />
       {/* Input bar in docs mode */}
       {activeSessionId ? (

@@ -11,6 +11,7 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react'
 import { IconX, IconRefresh, IconChevronDown, IconChevronRight, IconSearch, IconTrash } from '@tabler/icons-react'
 import type { DiffFile, DiffView, WsClientMessage, WsServerMessage } from '../types'
+import { canvasKindForPath } from '../lib/canvas'
 import { isDiscardableView, useDiff } from '../hooks/useDiff'
 import { usePrStatus } from '../hooks/usePrStatus'
 import { useReviewComments } from '../hooks/useReviewComments'
@@ -61,13 +62,15 @@ interface DiffPanelProps {
   onInitGit?: () => Promise<void>
   /** Attached git repositories and org folders (phase 3); Changes can switch to one. */
   attachedRoots?: Array<{ path: string; label: string }>
+  /** Show a file in the session's Canvas (`root`: the attached folder it is in). */
+  onOpenInCanvas?: (path: string, root?: string) => void
 }
 
 function matchesFilter(file: DiffFile, query: string): boolean {
   return file.path.toLowerCase().includes(query) || !!file.oldPath?.toLowerCase().includes(query)
 }
 
-export function DiffPanel({ isOpen, onClose, send, onHandleMessage, onHandleToolDone, onHandleTurnDone, sessionId, defaultView, isMobile = false, notRepo: ownNotRepo = false, onInitGit, attachedRoots = [] }: DiffPanelProps) {
+export function DiffPanel({ isOpen, onClose, send, onHandleMessage, onHandleToolDone, onHandleTurnDone, sessionId, defaultView, isMobile = false, notRepo: ownNotRepo = false, onInitGit, attachedRoots = [], onOpenInCanvas }: DiffPanelProps) {
   const [width, setWidth] = useState(() => {
     const stored = getPref('diffPanelWidth')
     return stored ? Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, stored)) : DEFAULT_WIDTH
@@ -378,6 +381,7 @@ export function DiffPanel({ isOpen, onClose, send, onHandleMessage, onHandleTool
       onPrev={() => { step(-1) }}
       onNext={() => { step(1) }}
       onDiscard={canDiscard ? () => { setConfirm({ kind: 'file', path: active.path }) } : undefined}
+      onOpenInCanvas={onOpenInCanvas && active.status !== 'deleted' && canvasKindForPath(active.path) ? () => { onOpenInCanvas(active.path, root) } : undefined}
       commenting={commentingFor(active)}
       narrow={narrow}
       touch={isMobile}

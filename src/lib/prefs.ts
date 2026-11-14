@@ -66,6 +66,10 @@ export interface Prefs {
   recentPlaces: DraftPlace[]
   /** Scratch sessions whose "Keep this work?" callout was dismissed (newest last). */
   keepWorkDismissed: string[]
+  /** Per session: whether Canvas is open and which item it shows (most recent sessions last). */
+  canvasSessions: Record<string, { open?: boolean; itemId?: string }>
+  /** Width of the chat column beside an open Canvas. */
+  canvasChatWidth: number
 }
 
 export type PrefKey = keyof Prefs

@@ -1,6 +1,6 @@
 # Session Canvas
 
-**Status:** Specified. Slice 1 (item model and store) in progress.
+**Status:** Slice 1 (item model and store, #896) and slice 2 (layout shell) implemented; slice 3 next.
 
 ## 1. Summary
 

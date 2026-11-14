@@ -15,7 +15,7 @@ import { TentativeBanner } from './TentativeBanner'
 import { WorktreeRecoveryBanner } from './WorktreeRecoveryBanner'
 import { changesButtonState } from '../lib/changesButton'
 import { InputBar, type InputBarHandle } from './InputBar'
-import { IconEye, IconFolder, IconPencil, IconRobotFace } from '@tabler/icons-react'
+import { IconEye, IconFolder, IconLayoutSidebarRight, IconPencil, IconRobotFace } from '@tabler/icons-react'
 import type { JoeChatContext } from './JoeChatMessage'
 import type { SkillGroup } from './SkillMenu'
 import type { SlashCommand } from '../lib/slashCommands'
@@ -37,6 +37,11 @@ export interface SessionContentProps {
   changeSummary?: { uncommittedFiles: number; branchCommits: number | null } | null
   diffPanelOpen: boolean
   onOpenDiffPanel: () => void
+  /** Canvas items in this session; the Canvas button shows once there are any. */
+  canvasCount?: number
+  /** Canvas is showing (beside or instead of the chat). */
+  canvasOpen?: boolean
+  onOpenCanvas?: () => void
   activePrompt: PromptEntry | null
   promptQueueSize: number
   sendPromptResponse: (value: string | string[], requestId?: string) => void
@@ -117,6 +122,9 @@ export function SessionContent({
   changeSummary,
   diffPanelOpen,
   onOpenDiffPanel,
+  canvasCount = 0,
+  canvasOpen = false,
+  onOpenCanvas,
   activePrompt,
   promptQueueSize,
   sendPromptResponse,
@@ -251,9 +259,22 @@ export function SessionContent({
             an edit just made in this browser. */}
         {/* A folder without git has nothing to review: say where the session
             runs instead, and open Changes, which offers to make it a repo. */}
+        <div className="absolute top-3 right-3 z-10 flex max-w-[70%] items-center gap-2">
+        {/* Canvas: once the session has items, and while Canvas is closed. */}
+        {canvasCount > 0 && !canvasOpen && onOpenCanvas && (
+          <button
+            className="flex shrink-0 items-center gap-1.5 rounded-control border border-edge-strong bg-surface px-2.5 py-1 text-meta font-medium text-ink transition-colors hover:border-focus"
+            onClick={onOpenCanvas}
+            title={'Open Canvas (⌘\\)'}
+          >
+            <IconLayoutSidebarRight size={15} stroke={1.75} />
+            Canvas
+            <span className="rounded-control bg-primary-fill px-1.5 text-micro font-bold tabular-nums text-on-primary-fill">{canvasCount}</span>
+          </button>
+        )}
         {notRepo && !diffPanelOpen && (
           <button
-            className="absolute top-3 right-3 z-10 flex max-w-[60%] items-center gap-1.5 rounded-control border border-edge-strong bg-surface px-2.5 py-1 text-meta text-ink-muted transition-colors hover:text-ink"
+            className="flex min-w-0 items-center gap-1.5 rounded-control border border-edge-strong bg-surface px-2.5 py-1 text-meta text-ink-muted transition-colors hover:text-ink"
             onClick={onOpenDiffPanel}
             title={`${placePath ?? 'This folder'} is not a git repository — open Changes to initialize git`}
           >
@@ -264,7 +285,7 @@ export function SessionContent({
         )}
         {showChangesButton && !notRepo && !diffPanelOpen && (
           <button
-            className="absolute top-3 right-3 z-10 flex items-center gap-1.5 rounded-control bg-primary-8 px-3 py-1.5 text-body font-medium text-on-primary backdrop-blur-sm transition-colors hover:bg-primary-7"
+            className="flex shrink-0 items-center gap-1.5 rounded-control bg-primary-8 px-3 py-1.5 text-body font-medium text-on-primary backdrop-blur-sm transition-colors hover:bg-primary-7"
             onClick={onOpenDiffPanel}
             title={`Review this session's changes${changesDetail ? ` — ${changesDetail}` : ''} (Ctrl+Shift+D)`}
           >
@@ -273,6 +294,7 @@ export function SessionContent({
             {changesCount > 0 && <span className="rounded-control bg-on-primary/20 px-1.5 text-micro tabular-nums">{changesCount}</span>}
           </button>
         )}
+        </div>
       </div>
 
       {/* Smart prompt buttons (conditional) */}

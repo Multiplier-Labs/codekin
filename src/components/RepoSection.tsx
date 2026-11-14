@@ -15,6 +15,7 @@ import { useState, useEffect } from 'react'
 import {
   IconPlus, IconShieldCheck, IconArchive, IconFileText,
   IconRobot, IconSparkles, IconPencil, IconGitBranch, IconRobotFace, IconTrash, IconShare, IconHeartbeat, IconHandStop,
+  IconLayoutSidebarRight,
 } from '@tabler/icons-react'
 import type { Session, PlaceKind } from '../types'
 import { placeTag } from '../lib/places'
@@ -355,6 +356,16 @@ export function RepoSection({
                     <StatusDot status={status} title={statusTitle} />
                     <span className="truncate">{sessionDisplayName(s)}</span>
                   </button>
+                  {s.canvas && (
+                    <span
+                      className={`flex shrink-0 items-center gap-0.5 text-micro tabular-nums ${isActiveSession ? 'text-accent-3' : 'text-ink-faint'}`}
+                      title={`${s.canvas.items} Canvas item${s.canvas.items === 1 ? '' : 's'}${s.canvas.pinnedBehind ? ' · a pinned item has a newer revision' : ''}`}
+                    >
+                      <IconLayoutSidebarRight size={12} stroke={1.75} />
+                      {s.canvas.items}
+                      {s.canvas.pinnedBehind && <span className="ml-0.5 h-1.5 w-1.5 rounded-full bg-accent-5" aria-label="Newer revision waiting" />}
+                    </span>
+                  )}
                   <RowMenu items={menuItems} label={`Actions for ${sessionDisplayName(s)}`} className="row-menu-reveal" />
                 </div>
 

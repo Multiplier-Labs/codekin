@@ -67,6 +67,10 @@ import { useMaintenance } from './hooks/useMaintenance'
 import { maintenancePath } from './hooks/useRouter'
 import { DocsBrowserContent } from './components/DocsBrowserContent'
 import { SessionContent } from './components/SessionContent'
+import { CanvasPanel } from './components/canvas/CanvasPanel'
+import { ChangesStrip } from './components/canvas/ChangesStrip'
+import { useCanvas, type CanvasApi } from './hooks/useCanvas'
+import { CANVAS_CHAT_WIDTH, CANVAS_SIDE_BY_SIDE_MIN, canvasKindForPath, clampChatWidth } from './lib/canvas'
 import { RepoDrawer, type RepoDrawerTab } from './components/RepoDrawer'
 import type { PermissionMode, CodingProvider } from './types'
 import { applyTheme } from './themes/registry'
@@ -163,6 +167,9 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
   const diffHandleToolDoneRef = useRef<(toolName: string, summary?: string) => void>(() => {})
   /** Callback ref for notifying the diff panel that an agent turn finished. */
   const diffHandleTurnDoneRef = useRef<() => void>(() => {})
+  /** Canvas message handling and item-list requests (set once the socket exists). */
+  const canvasRef = useRef<CanvasApi | null>(null)
+  const canvasListRef = useRef<() => void>(() => {})
   /** Tracks whether file-mutating tools have fired in this session (heuristic for "has diffs"). */
   const [hasFileChanges, setHasFileChanges] = useState(false)
   /** What the active session has to review; drives the Changes button even when no edit happened in this browser. */
@@ -328,6 +335,9 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
       }
     },
     onRawMessage: (msg) => {
+      if (canvasRef.current?.handleMessage(msg)) return
+      // Joining (or rejoining after a reconnect) loads the session's Canvas items.
+      if (msg.type === 'session_joined') canvasListRef.current()
       if (msg.type === 'diff_result' || msg.type === 'diff_error' || msg.type === 'pr_status' || msg.type === 'review_comments' || msg.type === 'review_error') {
         diffHandleMessageRef.current(msg)
       } else if (msg.type === 'change_summary') {
@@ -455,6 +465,37 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
     }
     return () => { if (changeSummaryTimerRef.current) clearTimeout(changeSummaryTimerRef.current) }
   }, [wsSend])
+
+  // Canvas for the joined session (docs/CANVAS-SPEC.md).
+  const canvas = useCanvas(activeSessionId, wsSend)
+  useEffect(() => {
+    canvasRef.current = canvas
+    canvasListRef.current = () => { wsSend({ type: 'canvas_list' }) }
+  })
+  const canvasSideBySide = !useIsMobile(CANVAS_SIDE_BY_SIDE_MIN)
+  const chatWidthPref = usePref('canvasChatWidth')
+  const [chatWidthDrag, setChatWidthDrag] = useState<number | null>(null)
+  const chatWidth = chatWidthDrag ?? clampChatWidth(chatWidthPref ?? CANVAS_CHAT_WIDTH.default)
+  const [railOverlayOpen, setRailOverlayOpen] = useState(false)
+  const startChatResize = useCallback((e: React.MouseEvent) => {
+    e.preventDefault()
+    const startX = e.clientX
+    const start = chatWidth
+    let latest = start
+    const onMove = (ev: MouseEvent) => { latest = clampChatWidth(start + ev.clientX - startX); setChatWidthDrag(latest) }
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove)
+      document.removeEventListener('mouseup', onUp)
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+      setPref('canvasChatWidth', latest)
+      setChatWidthDrag(null)
+    }
+    document.body.style.cursor = 'col-resize'
+    document.body.style.userSelect = 'none'
+    document.addEventListener('mousemove', onMove)
+    document.addEventListener('mouseup', onUp)
+  }, [chatWidth])
 
   // Ctrl+C in the composer while the agent works: stop its turn. The next
   // message restarts the agent and resumes the conversation.
@@ -726,7 +767,22 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
   // Cmd+K and Cmd+Shift+D listeners
   const togglePalette = useCallback(() => setPaletteOpen(prev => !prev), [])
   const toggleDiffPanel = useCallback(() => setDiffPanelOpen(prev => !prev), [])
-  useGlobalKeyBindings({ onTogglePalette: togglePalette, onToggleDiffPanel: toggleDiffPanel })
+  // The session view is up (not settings, tasks, automations, the composer or docs): Canvas can show.
+  const showingSession = !!activeSessionId && !showComposer && !docsBrowser.isOpen
+    && view !== 'settings' && view !== 'tasks' && view !== 'orchestrator' && view !== 'automations'
+    && !(view === 'maintenance' && maintenanceRepo)
+  const canvasActive = showingSession && canvas.open
+  const canvasBeside = canvasActive && canvasSideBySide
+  const canvasReplacesChat = canvasActive && !canvasSideBySide
+  // On desktop at any width, open Canvas brings the sidebar rail and the Changes strip.
+  const canvasDesktop = canvasActive && !isMobile
+  useEffect(() => { if (!canvasDesktop) setRailOverlayOpen(false) }, [canvasDesktop]) // eslint-disable-line react-hooks/set-state-in-effect -- the overlay only exists beside Canvas
+  useGlobalKeyBindings({
+    onTogglePalette: togglePalette,
+    onToggleDiffPanel: toggleDiffPanel,
+    onToggleCanvas: showingSession ? canvas.toggle : undefined,
+    onCanvasStep: canvasActive ? canvas.step : undefined,
+  })
 
   // Remember the active session for the next visit
   useEffect(() => {
@@ -997,12 +1053,26 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
     setSessionInputs(prev => ({ ...prev, [sessionId]: value }))
   }, [])
 
+  // The agent's latest line, under a Canvas that replaces the chat.
+  const lastAgentLine = canvasReplacesChat
+    ? [...messages].reverse().find((m): m is Extract<typeof m, { type: 'assistant' }> => m.type === 'assistant')
+      ?.text.split('\n').map(l => l.replace(/^[#>*\-\s]+/, '').trim()).find(Boolean)?.slice(0, 200)
+    : undefined
+  // A file shown in Docs can open in Canvas when it belongs to the session's folder or an attached one.
+  const docsCanvasRoot = (() => {
+    const dir = docsBrowser.repoWorkingDir
+    if (!activeSession || !dir || !docsBrowser.selectedFile || !canvasKindForPath(docsBrowser.selectedFile)) return null
+    if (dir === activeSession.workingDir || dir === activeSession.groupDir) return { root: undefined }
+    return activeSession.attached?.some(a => a.path === dir) ? { root: dir } : null
+  })()
+
   return (
-    <div className="flex h-full bg-edge-strong" data-density={isMobile ? 'touch' : undefined}>
+    <div className="relative flex h-full bg-edge-strong" data-density={isMobile ? 'touch' : undefined}>
       {/* Left sidebar — repo/session tree + nav. Settings is a page of its
           own, so it takes the whole window rather than sitting beside it. */}
       {view !== 'settings' && <LeftSidebar
         sessions={sessions}
+        rail={canvasDesktop ? { overlayOpen: railOverlayOpen, onOverlayChange: setRailOverlayOpen } : undefined}
         activeSessionId={activeSessionId}
         activeWorkingDir={activeWorkingDir}
         waitingSessions={waitingSessions}
@@ -1055,7 +1125,7 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
       {/* Main area */}
       <div className="terminal-area flex flex-1 flex-col overflow-hidden bg-page">
         {/* Mobile top bar */}
-        {isMobile && view !== 'settings' && (
+        {isMobile && view !== 'settings' && !canvasReplacesChat && (
           <MobileTopBar
             repoName={activeRepoName}
             sessionName={activeSessionName}
@@ -1217,6 +1287,11 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
             onToggleRaw={docsBrowser.toggleRawMode}
             onToggleStar={docsBrowser.toggleStarCurrentFile}
             onClose={docsBrowser.close}
+            onOpenInCanvas={docsCanvasRoot ? () => {
+              const file = docsBrowser.selectedFile!
+              docsBrowser.close()
+              canvas.openFile(file, docsCanvasRoot.root)
+            } : undefined}
             activeSessionId={activeSessionId}
             inputBarRef={inputBarRef}
             onSendInput={handleSendWithFiles}
@@ -1238,8 +1313,18 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
             worktreePath={activeSession?.worktreePath}
           />
         ) : activeSessionId ? (
+          <div className="flex min-h-0 min-w-0 flex-1">
+          {/* The chat: full width, a fixed column beside Canvas, or hidden (still
+              mounted, so scroll and the draft survive) while Canvas replaces it. */}
+          <div
+            className={canvasReplacesChat ? 'hidden' : canvasBeside ? 'relative flex min-h-0 shrink-0 flex-col border-r border-edge' : 'flex min-h-0 min-w-0 flex-1 flex-col'}
+            style={canvasBeside ? { width: `clamp(${CANVAS_CHAT_WIDTH.min}px, calc(100vw - 56px - 40px - 640px), ${chatWidth}px)` } : undefined}
+          >
           <SessionContent
             activeSessionId={activeSessionId}
+            canvasCount={canvas.items.length}
+            canvasOpen={canvasActive}
+            onOpenCanvas={() => { canvas.setOpen(true) }}
             messages={[...messages, ...tentativeMessages]}
             fontSize={settings.fontSize + (isMobile ? 1 : 0)}
             isMobile={isMobile}
@@ -1250,7 +1335,8 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
             disabled={!settings.token}
             hasFileChanges={hasFileChanges}
             changeSummary={changeSummary}
-            diffPanelOpen={diffPanelOpen}
+            /* Beside Canvas, the Changes strip on the right edge replaces the button. */
+            diffPanelOpen={diffPanelOpen || canvasBeside}
             onOpenDiffPanel={() => setDiffPanelOpen(true)}
             activePrompt={activePrompt}
             promptQueueSize={promptQueueSize}
@@ -1341,6 +1427,32 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
             supervisedTaskTitle={activeSession?.controller?.taskId ? sessionTasks.tasks[activeSession.controller.taskId]?.title : undefined}
             onTakeBackControl={() => { changeController('takeback', activeSessionId) }}
           />
+          {canvasBeside && (
+            <div
+              className="absolute -right-1 top-0 bottom-0 z-20 w-2 cursor-col-resize hover:bg-primary-6/40"
+              onMouseDown={startChatResize}
+              role="separator"
+              aria-orientation="vertical"
+              aria-label="Resize chat"
+              title="Drag to resize the chat"
+            />
+          )}
+          </div>
+          {canvasActive && (
+            <CanvasPanel
+              canvas={canvas}
+              replacesChat={canvasReplacesChat}
+              isMobile={isMobile}
+              onBackToChat={() => { canvas.setOpen(false) }}
+              lastAgentLine={lastAgentLine}
+              onSuggest={(text) => {
+                if (canvasReplacesChat) canvas.setOpen(false)
+                inputBarRef.current?.insertText(text)
+              }}
+              onPointerDown={diffPanelOpen && canvasDesktop ? () => { setDiffPanelOpen(false) } : undefined}
+            />
+          )}
+          </div>
         ) : null}
       </div>
 
@@ -1363,8 +1475,18 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
         isMobile={isMobile}
       />
 
-      {/* Diff viewer sidebar */}
+      {/* Beside Canvas, Changes is a strip on the right edge and slides over Canvas. */}
+      {canvasDesktop && (
+        <ChangesStrip
+          count={changeSummary?.uncommittedFiles ?? 0}
+          open={diffPanelOpen}
+          onToggle={toggleDiffPanel}
+        />
+      )}
+
+      {/* Diff viewer sidebar (a slide-over beside Canvas; the wrapper keeps it mounted across both) */}
       {activeSessionId && (
+        <div className={canvasDesktop && diffPanelOpen ? 'absolute inset-y-0 right-10 z-30 flex shadow-floating' : 'contents'}>
         <DiffPanel
           isOpen={diffPanelOpen}
           onClose={() => setDiffPanelOpen(false)}
@@ -1381,7 +1503,12 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
             await gitInit(settings.token, activeSessionId)
             await refreshSessions()
           } : undefined}
+          onOpenInCanvas={(path, root) => {
+            setDiffPanelOpen(false)
+            canvas.openFile(path, root)
+          }}
         />
+        </div>
       )}
 
       {/* Modals */}

@@ -12,6 +12,7 @@ import {
   IconBook, IconSettings as IconSettingsGear,
   IconLogout,
   IconChevronRight, IconChevronLeft, IconSparkles, IconX, IconChecklist,
+  IconLayoutSidebar, IconPlus,
 } from '@tabler/icons-react'
 import type { Session, Module, Repo, MobileProps, ConnectionState } from '../types'
 import AppIcon from './AppIcon'
@@ -129,6 +130,13 @@ interface Props {
   onMoveToWorktree?: () => void
   /** Mobile-specific layout props (drawer mode). */
   mobile?: MobileProps
+  /**
+   * Canvas is open beside the chat: show a 56 px rail (expand + new session)
+   * instead of the sidebar. Expanding shows the sidebar as an overlay, which
+   * picking a session or clicking outside closes. The user's own collapsed
+   * state and width are untouched.
+   */
+  rail?: { overlayOpen: boolean; onOverlayChange: (open: boolean) => void }
 }
 
 // --------------------------------------------------------------------------
@@ -181,6 +189,7 @@ export function LeftSidebar({
   onOpenDrawer,
   onMoveToWorktree,
   mobile = {},
+  rail,
 }: Props) {
   const { isMobile = false, mobileOpen = false, onMobileClose } = mobile
   const [collapsed, setCollapsed] = useState(() => getPref('sidebarCollapsed') === true)
@@ -247,13 +256,28 @@ export function LeftSidebar({
   const handleSelectSessionMobile = useCallback((id: string) => {
     onSelectSession(id)
     if (isMobile) onMobileClose?.()
-  }, [onSelectSession, isMobile, onMobileClose])
+    rail?.onOverlayChange(false)
+  }, [onSelectSession, isMobile, onMobileClose, rail])
+
+  // The rail's overlay closes on a click outside it (and outside the rail).
+  const railRef = useRef<HTMLDivElement>(null)
+  const railOverlayOpen = !!rail?.overlayOpen
+  const onRailOverlayChange = rail?.onOverlayChange
+  useEffect(() => {
+    if (!railOverlayOpen || !onRailOverlayChange) return
+    const onDown = (e: MouseEvent) => {
+      if (!railRef.current?.contains(e.target as Node)) onRailOverlayChange(false)
+    }
+    document.addEventListener('mousedown', onDown)
+    return () => { document.removeEventListener('mousedown', onDown) }
+  }, [railOverlayOpen, onRailOverlayChange])
+  const railMode = !!rail && !isMobile
 
   // --------------------------------------------------------------------------
   // Collapsed strip (desktop only — hidden on mobile)
   // --------------------------------------------------------------------------
 
-  if (!isMobile && collapsed) {
+  if (!isMobile && collapsed && !railMode) {
     return (
       <div className="app-left-sidebar flex flex-col items-center w-12 flex-shrink-0 bg-surface py-3 gap-3 border-r border-edge">
         <div className="app-logo-circle flex items-center justify-center rounded-full" style={{ width: 28, height: 28 }}>
@@ -513,6 +537,44 @@ export function LeftSidebar({
       </div>
     </div>
   )
+
+  // --------------------------------------------------------------------------
+  // Beside Canvas: a rail, with the sidebar as an overlay when expanded
+  // --------------------------------------------------------------------------
+
+  if (railMode) {
+    const railBtn = 'inline-flex h-10 w-10 items-center justify-center rounded-control text-ink-muted transition-colors hover:bg-surface-raised hover:text-ink'
+    return (
+      <div ref={railRef} className="relative flex shrink-0">
+        <nav aria-label="Sidebar" className="app-left-sidebar flex w-14 flex-col items-center gap-2 border-r border-edge bg-surface py-2">
+          <button
+            type="button"
+            onClick={() => { rail.onOverlayChange(!rail.overlayOpen) }}
+            className={`${railBtn} ${rail.overlayOpen ? 'bg-surface-raised text-ink' : ''}`}
+            aria-expanded={rail.overlayOpen}
+            title={rail.overlayOpen ? 'Hide sidebar' : 'Show sidebar'}
+            aria-label={rail.overlayOpen ? 'Hide sidebar' : 'Show sidebar'}
+          >
+            <IconLayoutSidebar size={20} stroke={1.75} />
+          </button>
+          <button
+            type="button"
+            onClick={() => { rail.onOverlayChange(false); onNewSession() }}
+            className={railBtn}
+            title="New session"
+            aria-label="New session"
+          >
+            <IconPlus size={20} stroke={1.75} />
+          </button>
+        </nav>
+        {rail.overlayOpen && (
+          <div className="absolute left-full top-0 bottom-0 z-40 flex shadow-floating">
+            {sidebarContent}
+          </div>
+        )}
+      </div>
+    )
+  }
 
   // --------------------------------------------------------------------------
   // Mobile: render as overlay drawer
