@@ -295,3 +295,40 @@ describe('review feedback', () => {
     expect(checkServerFrame(watcher, joined(watcher), frame({ type: 'output', sessionId: 's1' }))).toBe(true)
   })
 })
+
+describe('canvas', () => {
+  const watcher: ChannelPolicy = { role: 'grantee', grants: { s1: ['view'] }, userId: 'u-watch' }
+
+  it('lets anyone who can view the session list and read items', () => {
+    for (const type of ['canvas_list', 'canvas_get']) {
+      expect(checkClientFrame(watcher, joined(watcher), frame({ type, itemId: 'x' })).allowed).toBe(true)
+      expect(checkClientFrame(watcher, newChannelState(), frame({ type, itemId: 'x' })).allowed).toBe(false)
+    }
+  })
+
+  it('needs both view_diff and send_prompt to open a repository file', () => {
+    const open = frame({ type: 'canvas_open_file', path: 'README.md' })
+    expect(checkClientFrame(watcher, joined(watcher), open).allowed).toBe(false)
+    expect(checkClientFrame(viewer, joined(viewer), open).allowed).toBe(false)
+    expect(checkClientFrame(editor, joined(editor), open).allowed).toBe(true)
+  })
+
+  it('keeps pinning and deleting owner-only', () => {
+    for (const msg of [{ type: 'canvas_pin', itemId: 'x', revision: 1 }, { type: 'canvas_delete', itemId: 'x' }]) {
+      expect(checkClientFrame(editor, joined(editor), frame(msg)).allowed).toBe(false)
+      expect(checkClientFrame(owner, joined(owner), frame(msg)).allowed).toBe(true)
+    }
+  })
+
+  it('withholds file-sourced item content from grantees without view_diff', () => {
+    const fromFile = frame({ type: 'canvas_item', sessionId: 's1', item: { source: { type: 'file', path: 'a.md' } }, content: 'code' })
+    const fromAgent = frame({ type: 'canvas_item', sessionId: 's1', item: { source: { type: 'agent' } }, content: 'notes' })
+    expect(checkServerFrame(watcher, joined(watcher), fromFile)).toBe(false)
+    expect(checkServerFrame(viewer, joined(viewer), fromFile)).toBe(true)
+    expect(checkServerFrame(watcher, joined(watcher), fromAgent)).toBe(true)
+    for (const type of ['canvas_items', 'canvas_event']) {
+      expect(checkServerFrame(watcher, joined(watcher), frame({ type, sessionId: 's1' }))).toBe(true)
+      expect(checkServerFrame(watcher, joined(watcher), frame({ type, sessionId: 's2' }))).toBe(false)
+    }
+  })
+})

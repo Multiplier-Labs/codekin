@@ -30,7 +30,9 @@ import { PlanManager } from './plan-manager.js'
 import { SessionArchive } from './session-archive.js'
 import type { DiffFileStatus, DiffScope, DiffView, PrStatus, ReviewComment, Session, SessionInfo, TaskItem, WorktreeRemovalPreflight, WorktreeState, WsServerMessage } from './types.js'
 import { cleanupWorkspace } from './webhook-workspace.js'
-import { PORT } from './config.js'
+import { DATA_DIR, PORT } from './config.js'
+import { CanvasStore } from './canvas-store.js'
+import { CanvasSessions } from './canvas-sessions.js'
 import { ApprovalManager } from './approval-manager.js'
 import { PromptRouter, type PromptResponseOutcome } from './prompt-router.js'
 import { isIsolationBlocked, SessionLifecycle } from './session-lifecycle.js'
@@ -140,6 +142,8 @@ export class SessionManager {
   /** Reverse lookup: WebSocket → session ID for O(1) client-to-session resolution. */
   /** SQLite archive for closed sessions (persists conversation summaries across restarts). */
   readonly archive: SessionArchive
+  /** Canvas items beside each session's chat (docs/CANVAS-SPEC.md). */
+  readonly canvas: CanvasSessions
   /** Exposed so ws-server can pass its port to child Claude processes. */
   _serverPort = PORT
   /** Exposed so ws-server can pass the auth token to child Claude processes. */
@@ -180,6 +184,12 @@ export class SessionManager {
 
   constructor() {
     this.archive = new SessionArchive()
+    this.canvas = new CanvasSessions(new CanvasStore(path.join(DATA_DIR, 'canvas')), {
+      getSession: (id) => this.sessions.get(id),
+      broadcast: (session, msg) => this.broadcast(session, msg),
+      broadcastAndHistory: (session, msg) => this.broadcastAndHistory(session, msg),
+      sessionsChanged: () => this._globalBroadcast?.({ type: 'sessions_updated' }),
+    })
     this._approvalManager = new ApprovalManager()
     this.diffManager = new DiffManager()
     this.promptRouter = new PromptRouter({
@@ -909,6 +919,7 @@ export class SessionManager {
       model: s.model,
       place: describePlace(s.groupDir ?? s.workingDir),
       ...(s.addDirs?.length ? { attached: describeAttached(s.addDirs) } : {}),
+      ...canvasField(this.canvas.summary(s.id)),
     }
   }
 
@@ -1108,6 +1119,7 @@ export class SessionManager {
     session.clients.clear()
 
     this.sessions.delete(sessionId)
+    this.canvas.removeSession(sessionId)
     this.persistToDisk()
     this._globalBroadcast?.({ type: 'sessions_updated' })
     return true
@@ -2394,4 +2406,9 @@ export class SessionManager {
       }, i * 1000)
     })
   }
+}
+
+/** The session list's `canvas` field: omitted when the session has no items. */
+function canvasField(summary: { items: number; pinnedBehind: boolean } | undefined): { canvas?: { items: number; pinnedBehind: boolean } } {
+  return summary ? { canvas: summary } : {}
 }

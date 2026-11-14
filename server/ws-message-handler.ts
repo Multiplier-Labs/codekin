@@ -452,6 +452,34 @@ export function handleWsMessage(msg: WsClientMessage, ctx: WsHandlerContext): vo
       break
     }
 
+    // --- Canvas: items beside the chat (docs/CANVAS-SPEC.md) ---
+
+    case 'canvas_list': {
+      const sessionId = clientSessions.get(ws)
+      if (!sessionId) { send({ type: 'canvas_error', message: 'Not in a session' }); break }
+      send(sessions.canvas.list(sessionId))
+      break
+    }
+
+    case 'canvas_get': {
+      const sessionId = clientSessions.get(ws)
+      if (!sessionId) { send({ type: 'canvas_error', message: 'Not in a session' }); break }
+      void sessions.canvas.get(sessionId, msg.itemId, msg.revision).then(send)
+      break
+    }
+
+    case 'canvas_open_file':
+    case 'canvas_pin':
+    case 'canvas_delete': {
+      const sessionId = clientSessions.get(ws)
+      if (!sessionId) { send({ type: 'canvas_error', message: 'Not in a session' }); break }
+      const done = (error: string | null) => { if (error) send({ type: 'canvas_error', message: error, sessionId }) }
+      if (msg.type === 'canvas_open_file') void sessions.canvas.openFile(sessionId, msg.path, msg.root).then(done)
+      else if (msg.type === 'canvas_pin') void sessions.canvas.pin(sessionId, msg.itemId, msg.revision).then(done)
+      else void sessions.canvas.delete(sessionId, msg.itemId).then(done)
+      break
+    }
+
     case 'set_review_base': {
       const sessionId = clientSessions.get(ws)
       const { requestId, scope: view } = msg

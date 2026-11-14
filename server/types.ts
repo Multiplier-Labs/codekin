@@ -20,6 +20,7 @@ export type {
   JoeMilestone, JoeMessageTask,
   DiffScope, DiffView, DiffFileStatus, DiffFile, DiffHunk, DiffLine, DiffSummary, DiffReview,
   ReviewAnchor, ReviewComment,
+  CanvasItem, CanvasItemKind, CanvasItemMeta, CanvasItemSource, CanvasRevision,
   PrLookupState, PrChecksSummary, PullRequestInfo, PrStatus,
   PromptOption, PromptQuestion,
 } from './protocol.js'
@@ -266,6 +267,14 @@ export interface SessionInfo {
   provider?: CodingProvider
   /** Model pinned to the session, if any — the sidebar row names it in its tooltip. */
   model?: string
+  /** Canvas summary for the sidebar row; absent when the session has no items. */
+  canvas?: CanvasSummary
+}
+
+/** How many Canvas items a session has, and whether a pinned one has a newer revision waiting. */
+export interface CanvasSummary {
+  items: number
+  pinnedBehind: boolean
 }
 
 // ---------------------------------------------------------------------------
