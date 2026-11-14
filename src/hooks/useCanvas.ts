@@ -97,7 +97,7 @@ export interface CanvasApi {
 /** The reply to an app's tool call. */
 export type AppToolOutcome =
   | { ok: true; result: { content: unknown[]; structuredContent?: unknown; _meta?: unknown; isError?: boolean } }
-  | { ok: false; error: string; needsConfirmation?: boolean }
+  | { ok: false; error: string; needsConfirmation?: boolean; refused?: boolean }
 
 /** Longer than the server's own limit (an approval prompt may be waiting), so its answer arrives first. */
 const APP_CALL_TIMEOUT_MS = 11 * 60 * 1000
@@ -311,7 +311,7 @@ export function useCanvas(sessionId: string | null, send: (msg: WsClientMessage)
         const resolve = appCalls.current.get(msg.callId)
         if (resolve) {
           appCalls.current.delete(msg.callId)
-          resolve(msg.result ? { ok: true, result: msg.result } : { ok: false, error: msg.error ?? 'The tool call failed.', ...(msg.needsConfirmation ? { needsConfirmation: true } : {}) })
+          resolve(msg.result ? { ok: true, result: msg.result } : { ok: false, error: msg.error ?? 'The tool call failed.', ...(msg.needsConfirmation ? { needsConfirmation: true } : {}), ...(msg.refused ? { refused: true } : {}) })
         }
         return true
       }

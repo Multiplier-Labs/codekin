@@ -72,7 +72,7 @@ import { ChangesStrip } from './components/canvas/ChangesStrip'
 import { useCanvas, type CanvasApi } from './hooks/useCanvas'
 import { useSandboxOrigin } from './hooks/useSandboxOrigin'
 import { CANVAS_CHAT_WIDTH, CANVAS_SIDE_BY_SIDE_MIN, canvasKindForPath, clampChatWidth } from './lib/canvas'
-import { formatWithContext, type CanvasAttachment } from './lib/canvasContext'
+import { formatWithContext, MAX_ATTACHMENTS, type CanvasAttachment } from './lib/canvasContext'
 import { RepoDrawer, type RepoDrawerTab } from './components/RepoDrawer'
 import type { PermissionMode, CodingProvider } from './types'
 import { applyTheme } from './themes/registry'
@@ -1088,7 +1088,8 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
     if (!activeSessionId) return
     setCanvasAttachments(prev => ({
       ...prev,
-      [activeSessionId]: [...(prev[activeSessionId] ?? []).filter(a => !(a.itemId === att.itemId && a.excerpt === att.excerpt)), att],
+      // The newest MAX_ATTACHMENTS: a page or app can't pile context into one message.
+      [activeSessionId]: [...(prev[activeSessionId] ?? []).filter(a => !(a.itemId === att.itemId && a.excerpt === att.excerpt)), att].slice(-MAX_ATTACHMENTS),
     }))
     if (ask) {
       if (canvasReplacesChat) canvas.setOpen(false)

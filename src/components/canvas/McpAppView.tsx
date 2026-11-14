@@ -19,9 +19,10 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { AppBridge, PostMessageTransport } from '@modelcontextprotocol/ext-apps/app-bridge'
-import { IconAlertTriangle, IconExternalLink, IconLoader2, IconMessage, IconShieldLock, IconTool } from '@tabler/icons-react'
+import { IconAlertTriangle, IconLoader2, IconShieldLock } from '@tabler/icons-react'
 import { relativeTime } from '../../lib/canvas'
 import type { AppToolOutcome } from '../../hooks/useCanvas'
+import { AppConfirmDialog, type AppConfirmRequest } from './AppConfirmDialog'
 
 interface AppRecord {
   server: string
@@ -50,7 +51,9 @@ function scheme(): 'light' | 'dark' {
   return document.documentElement.dataset.scheme === 'dark' ? 'dark' : 'light'
 }
 
-type Confirm = { kind: 'link' | 'message' | 'tool'; text: string; tool?: string; resolve: (ok: boolean) => void }
+/** MCP tool names: what an app may ask to run, and what Codekin shows. */
+const TOOL_NAME = /^[A-Za-z0-9_.-]{1,64}$/
+let confirmSeq = 0
 
 const toolError = (text: string) => ({ isError: true, content: [{ type: 'text' as const, text }] })
 
@@ -61,7 +64,8 @@ export default function McpAppView({ origin, content, onSendMessage, onCallTool 
   const frameRef = useRef<HTMLIFrameElement>(null)
   const [state, setState] = useState<{ status: 'loading' } | { status: 'ready' } | { status: 'error'; message: string }>({ status: 'loading' })
   const [height, setHeight] = useState<number | null>(null)
-  const [confirm, setConfirm] = useState<Confirm | null>(null)
+  /** Requests waiting for the user, oldest first; the first is shown. */
+  const [confirms, setConfirms] = useState<AppConfirmRequest[]>([])
   const sendRef = useRef(onSendMessage)
   const callRef = useRef(onCallTool)
   useEffect(() => { sendRef.current = onSendMessage; callRef.current = onCallTool })
@@ -80,8 +84,19 @@ export default function McpAppView({ origin, content, onSendMessage, onCallTool 
       { openLinks: {}, message: { text: {} }, updateModelContext: { text: {} }, logging: {}, ...(onCallTool ? { serverTools: {} } : {}) },
       { hostContext: { theme: scheme(), displayMode: 'inline', availableDisplayModes: ['inline'], platform: 'web', locale: navigator.language } },
     )
-    const ask = (kind: Confirm['kind'], text: string, tool?: string) => new Promise<boolean>(resolve => {
-      setConfirm({ kind, text, tool, resolve: (ok) => { setConfirm(null); resolve(ok) } })
+    // Each request waits its turn: a new one never replaces the one on screen.
+    const pending = new Set<AppConfirmRequest>()
+    const ask = (kind: AppConfirmRequest['kind'], text: string, tool?: string) => new Promise<boolean>(resolve => {
+      const request: AppConfirmRequest = {
+        id: ++confirmSeq, kind, text, tool,
+        resolve: (ok) => {
+          if (!pending.delete(request)) return
+          setConfirms(q => q.filter(r => r !== request))
+          resolve(ok)
+        },
+      }
+      pending.add(request)
+      setConfirms(q => [...q, request])
     })
 
     bridge.addEventListener('sandboxready', () => {
@@ -109,6 +124,8 @@ export default function McpAppView({ origin, content, onSendMessage, onCallTool 
     }
     bridge.oncalltool = async (params) => {
       const call = callRef.current
+      // Tool names are checked before they are shown or sent anywhere.
+      if (!TOOL_NAME.test(params.name)) return toolError('That is not a tool name.')
       if (!call) return toolError(`Codekin can't run ${params.name} for this app here. Ask the agent instead.`)
       const args = params.arguments ?? {}
       setRunning(r => [...r, params.name])
@@ -118,7 +135,7 @@ export default function McpAppView({ origin, content, onSendMessage, onCallTool 
           if (!await ask('tool', JSON.stringify(args, null, 2), params.name)) return toolError('The user declined this tool call.')
           outcome = await call(params.name, args, true)
         }
-        if (!outcome.ok && outcome.error.startsWith('The tool did not run')) setRefused(params.name)
+        if (!outcome.ok && outcome.refused) setRefused(params.name)
         return outcome.ok ? outcome.result as never : toolError(outcome.error)
       } finally {
         setRunning(r => { const i = r.indexOf(params.name); return i < 0 ? r : [...r.slice(0, i), ...r.slice(i + 1)] })
@@ -139,6 +156,8 @@ export default function McpAppView({ origin, content, onSendMessage, onCallTool 
     observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-scheme'] })
 
     return () => {
+      // Requests still on screen are declined, so the app isn't left waiting.
+      for (const request of [...pending]) request.resolve(false)
       clearTimeout(timer)
       observer.disconnect()
       void bridge.close()
@@ -188,28 +207,7 @@ export default function McpAppView({ origin, content, onSendMessage, onCallTool 
         )}
       </div>
 
-      {confirm && (
-        <div className="absolute inset-0 z-30 flex items-center justify-center bg-page/60 p-6" role="dialog" aria-modal="true" aria-label={confirm.kind === 'link' ? 'Open a link' : confirm.kind === 'tool' ? 'Run a tool' : 'Send a message as you'}>
-          <div className="w-full max-w-[460px] rounded-floating border border-edge-strong bg-surface-raised p-4 shadow-floating">
-            <div className="flex items-center gap-2 text-body font-bold text-ink">
-              {confirm.kind === 'link' ? <IconExternalLink size={18} className="text-warning-5" /> : confirm.kind === 'tool' ? <IconTool size={18} className="text-warning-5" /> : <IconMessage size={18} className="text-warning-5" />}
-              {confirm.kind === 'link' ? `${record.server} wants to open a link` : confirm.kind === 'tool' ? `${record.server} wants to run ${confirm.tool}` : `${record.server} wants to send a message as you`}
-            </div>
-            <div className={`mt-3 max-h-[240px] overflow-y-auto rounded-control border border-edge bg-page px-3 py-2 text-meta text-ink ${confirm.kind === 'link' ? 'break-all font-mono' : confirm.kind === 'tool' ? 'whitespace-pre-wrap font-mono' : 'whitespace-pre-wrap'}`}>{confirm.text}</div>
-            <p className="mt-2 text-meta text-ink-muted">
-              {confirm.kind === 'link' ? 'It opens in a new tab.'
-                : confirm.kind === 'tool' ? `It runs on this computer with these arguments, through the session's connection to ${record.server}. The result goes to the app, not the agent.`
-                : 'It goes to the agent as your message and shows in the chat.'}
-            </p>
-            <div className="mt-3 flex justify-end gap-2">
-              <button type="button" onClick={() => { confirm.resolve(false) }} className="rounded-control px-3 py-1.5 text-meta text-ink-muted hover:text-ink">Cancel</button>
-              <button type="button" autoFocus onClick={() => { confirm.resolve(true) }} className="rounded-control bg-primary-fill px-3 py-1.5 text-meta font-medium text-on-primary-fill hover:opacity-90">
-                {confirm.kind === 'link' ? 'Open link' : confirm.kind === 'tool' ? 'Run tool' : 'Send message'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {confirms[0] && <AppConfirmDialog request={confirms[0]} server={record.server} waiting={confirms.length - 1} />}
     </div>
   )
 }

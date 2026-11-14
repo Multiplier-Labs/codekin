@@ -72,6 +72,9 @@ export function PreviewView({ item, content, preview, onAttach, isMobile }: Prop
   const [connected, setConnected] = useState(false)
   const [loadedUnconnected, setLoadedUnconnected] = useState(false)
   const [picking, setPicking] = useState(false)
+  /** Picking as the message handler sees it (a pick is accepted only while it is on). */
+  const pickingRef = useRef(false)
+  useEffect(() => { pickingRef.current = picking }, [picking])
   const [consoleEntries, setConsoleEntries] = useState<ConsoleEntry[]>([])
   const [drawer, setDrawer] = useState<'console' | 'server' | null>(null)
 
@@ -115,6 +118,11 @@ export function PreviewView({ item, content, preview, onAttach, isMobile }: Prop
           setConsoleEntries(prev => [...prev, { level: msg.level, message: msg.message, path: msg.path, at: Date.now() }].slice(-MAX_CONSOLE))
           break
         case 'codekin-preview:picked': {
+          // The page's own scripts can post this too: take one pick per
+          // press of Pick, and nothing while the picker is off.
+          if (!pickingRef.current) break
+          pickingRef.current = false
+          setPicking(false)
           const { label, excerpt } = pickedContext(msg.picked, target?.port ?? state?.targetPort ?? 0)
           onAttach('element', excerpt, label, true)
           break

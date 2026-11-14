@@ -55,6 +55,10 @@ function selectedRows(spec: Json, value: Json, interval: boolean): Json[] | null
   }))
 }
 
+const refuse = () => Promise.reject(new Error('Charts in Codekin carry their data inline; nothing is loaded.'))
+/** A Vega loader that loads nothing: data URLs, images and href navigation all fail. */
+const NO_LOADER = { load: refuse, sanitize: refuse, http: refuse, file: refuse }
+
 async function renderChart(id: string, content: string, scheme: 'light' | 'dark') {
   let spec: Json
   try {
@@ -63,14 +67,20 @@ async function renderChart(id: string, content: string, scheme: 'light' | 'dark'
     throw new Error('The chart spec is not valid JSON.')
   }
   if (typeof spec !== 'object' || Array.isArray(spec)) throw new Error('The chart spec must be a JSON object.')
+  // A spec may not override the embed options below (usermeta.embedOptions
+  // would switch off the expression interpreter or swap the loader).
+  const safe: Json = { ...spec }
+  delete safe.usermeta
   // Fill the frame unless the spec sizes itself.
-  const sized: Json = { width: 'container', autosize: { type: 'fit', contains: 'padding' }, ...spec }
+  const sized: Json = { width: 'container', autosize: { type: 'fit', contains: 'padding' }, ...safe }
   const host = document.createElement('div')
   host.className = 'chart'
   root.replaceChildren(host)
   current?.finalize()
   current = await embed(host, sized as never, {
     actions: false,
+    // Data is inline: nothing is loaded, and links (href marks) don't navigate.
+    loader: NO_LOADER as never,
     renderer: 'svg',
     ast: true,
     expr: expressionInterpreter,

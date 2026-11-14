@@ -9,6 +9,12 @@ import { useState } from 'react'
 import { IconAlertTriangle, IconChartBar, IconChevronUp, IconClick, IconHierarchy2, IconQuote, IconTable, IconX } from '@tabler/icons-react'
 import type { CanvasAttachment, CanvasSelectionKind, SentContext } from '../../lib/canvasContext'
 
+/** Hover text: where it came from, and what the agent will read (so nothing is sent unseen). */
+function chipTitle(c: { itemTitle: string; revision: number; excerpt: string }, suffix = ''): string {
+  const excerpt = c.excerpt.length > 1200 ? `${c.excerpt.slice(0, 1200)}…` : c.excerpt
+  return `${c.itemTitle}, rev ${c.revision}${suffix}\n\nSent to the agent:\n${excerpt}`
+}
+
 const CHIP = 'flex min-w-0 max-w-full items-center gap-1.5 rounded-control border border-edge bg-page px-2 py-0.5 text-meta text-ink'
 
 function WhatIcon({ what }: { what: CanvasSelectionKind }) {
@@ -29,7 +35,7 @@ export function ComposerContextChips({ attachments, onRemove }: { attachments: C
     return (
       <div className="flex flex-wrap gap-1.5" aria-label="Canvas context">
         {attachments.map(a => (
-          <span key={a.id} className={CHIP} title={`${a.itemTitle}, rev ${a.revision}`}>
+          <span key={a.id} className={CHIP} title={chipTitle(a)}>
             <WhatIcon what={a.what} />
             <span className="truncate">{a.label}</span>
             <span className="shrink-0 text-ink-faint">· {a.itemTitle}</span>
@@ -48,7 +54,7 @@ export function ComposerContextChips({ attachments, onRemove }: { attachments: C
       {open && (
         <ul className="absolute bottom-full left-0 z-20 mb-1 w-[min(420px,85vw)] rounded-floating border border-edge-strong bg-surface-raised p-1 shadow-floating">
           {attachments.map(a => (
-            <li key={a.id} className="density-row flex items-center gap-2 rounded-control px-2 text-meta">
+            <li key={a.id} className="density-row flex items-center gap-2 rounded-control px-2 text-meta" title={chipTitle(a)}>
               <WhatIcon what={a.what} />
               <span className="min-w-0 flex-1 truncate text-ink">{a.label}</span>
               <span className="shrink-0 truncate text-ink-faint">{a.itemTitle} · rev {a.revision}</span>
@@ -79,7 +85,7 @@ export function SentContextChips({ context, onOpen }: { context: SentContext[]; 
           disabled={!onOpen}
           onClick={() => { onOpen?.(c) }}
           className={`${CHIP} enabled:hover:border-edge-strong disabled:cursor-default`}
-          title={`${c.itemTitle}, rev ${c.revision}${onOpen ? ' — open in Canvas' : ''}`}
+          title={chipTitle(c, onOpen ? ' — click to open in Canvas' : '')}
         >
           <WhatIcon what={c.what} />
           <span className="truncate">{c.itemTitle} · {c.label}</span>

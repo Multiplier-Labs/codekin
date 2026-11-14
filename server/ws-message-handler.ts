@@ -488,7 +488,10 @@ export function handleWsMessage(msg: WsClientMessage, ctx: WsHandlerContext): vo
       void sessions.appToolCalls.call(sessionId, itemId, msg.tool, msg.arguments, msg.confirmed === true).then((outcome) => {
         send(outcome.ok
           ? { type: 'mcp_app_result', sessionId, itemId, callId, result: outcome.result }
-          : { type: 'mcp_app_result', sessionId, itemId, callId, error: outcome.error, ...(outcome.needsConfirmation ? { needsConfirmation: true } : {}) })
+          : { type: 'mcp_app_result', sessionId, itemId, callId, error: outcome.error, ...(outcome.needsConfirmation ? { needsConfirmation: true } : {}), ...(outcome.refused ? { refused: true } : {}) })
+      }, (err: unknown) => {
+        console.error('[mcp-app] tool call failed', err)
+        send({ type: 'mcp_app_result', sessionId, itemId, callId, error: 'The tool call failed.' })
       })
       break
     }

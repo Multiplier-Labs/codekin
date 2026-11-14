@@ -622,7 +622,9 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> implements 
       ...(this.appCallsChecked ? { check_permissions: true } : {}),
       ...(this.appCallsRaw ? { result_not_for_model: true } : {}),
     }, APP_TOOL_CALL_TIMEOUT_MS)
-    return r.ok ? { ok: true, result: toCallResult(r.response) } : { ok: false, error: r.error }
+    if (r.ok) return { ok: true, result: toCallResult(r.response) }
+    // Claude Code documents this prefix for calls check_permissions refused.
+    return { ok: false, error: r.error, ...(r.error.startsWith('The tool did not run') ? { refused: true } : {}) }
   }
 
   /**

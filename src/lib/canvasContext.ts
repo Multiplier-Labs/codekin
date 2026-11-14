@@ -31,6 +31,9 @@ export interface CanvasAttachment {
 /** The longest excerpt one attachment carries. */
 export const MAX_EXCERPT = 8000
 
+/** The most attachments one message carries (the newest are kept). */
+export const MAX_ATTACHMENTS = 8
+
 const attr = (v: string | number) => String(v).replace(/[\r\n]+/g, ' ').replace(/"/g, '\'')
 
 /** Short label for a chip from selected text. */
@@ -63,16 +66,36 @@ export interface SentContext {
   revision: number
   what: CanvasSelectionKind
   label: string
+  /** What the agent received, so the user can see it too. */
+  excerpt: string
 }
 
-const BLOCK = /\n*<canvas_context item="([^"]*)" item_id="([^"]*)" revision="(\d+)" what="(text|rows|node|chart|element|console)" label="([^"]*)">\n[\s\S]*?\n<\/canvas_context>/g
+/** The newlines before a block belong to it: drop them (a loop, not a regex, to stay linear). */
+function trimNewlines(s: string): string {
+  let end = s.length
+  while (end > 0 && s[end - 1] === '\n') end--
+  return s.slice(0, end)
+}
+
+const OPEN_SPLIT = /<canvas_context item="([^"]*)" item_id="([^"]*)" revision="(\d+)" what="(text|rows|node|chart|element|console)" label="([^"]*)">\n([\s\S]*?)\n<\/canvas_context>/
 
 /** Split a sent message into the user's text and its Canvas attachments. */
 export function parseWithContext(message: string): { text: string; context: SentContext[] } {
   const context: SentContext[] = []
-  const text = message.replace(BLOCK, (_, itemTitle: string, itemId: string, revision: string, what: CanvasSelectionKind, label: string) => {
-    context.push({ itemTitle, itemId, revision: Number(revision), what, label })
-    return ''
-  }).trimEnd()
+  // Linear in the message length (this runs on every render of a message).
+  const parts = message.split(OPEN_SPLIT)
+  // split() with capture groups: text, then the six captures of each block, then text again.
+  let text = ''
+  for (let i = 0; i < parts.length; i += 7) {
+    const chunk = parts[i]
+    if (i + 7 < parts.length) {
+      text += trimNewlines(chunk)
+      const [itemTitle, itemId, revision, what, label, excerpt] = parts.slice(i + 1, i + 7)
+      context.push({ itemTitle, itemId, revision: Number(revision), what: what as CanvasSelectionKind, label, excerpt })
+    } else {
+      text += chunk
+    }
+  }
+  text = text.trimEnd()
   return { text: context.length && text === 'About the selection below from the Canvas:' ? '' : text, context }
 }

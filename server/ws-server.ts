@@ -337,7 +337,7 @@ app.use((_req, res, next) => {
   // links, see src/lib/remoteImage.ts); GitHub avatars are the only remote
   // images the app shows, matching the hosted CSP in docs/RELAY-HARDENING.md.
   // frame-src: only the Canvas sandbox origin and the preview proxy ports may be framed (default-src 'self' would allow none other).
-  res.header('Content-Security-Policy', `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data: https://avatars.githubusercontent.com; font-src 'self'${canvasFrameSrc ? `; frame-src ${canvasFrameSrc}` : ''}`)
+  res.header('Content-Security-Policy', `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data: https://avatars.githubusercontent.com; font-src 'self'; form-action 'self'; base-uri 'none'${canvasFrameSrc ? `; frame-src ${canvasFrameSrc}` : ''}`)
   if (process.env.NODE_ENV === 'production') {
     res.header('Strict-Transport-Security', 'max-age=31536000; includeSubDomains')
   }
