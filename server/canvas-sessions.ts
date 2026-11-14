@@ -223,13 +223,13 @@ export class CanvasSessions {
 
     if (existing) {
       const updated = await this.store.addRevision(sessionId, existing.id, {
-        content, mediaType, meta, ...(input.title !== undefined ? { title: input.title as string } : {}),
+        content, mediaType, meta, fromFile: fileName !== undefined, ...(input.title !== undefined ? { title: input.title as string } : {}),
       })
       if (updated) this.changed(session, updated, 'updated')
       return updated ?? existing
     }
     const title = input.title ?? fileName
-    const item = await this.store.create(sessionId, { kind, title: title as string, source, content, mediaType, meta })
+    const item = await this.store.create(sessionId, { kind, title: title as string, source, content, mediaType, meta, fromFile: fileName !== undefined })
     this.changed(session, item, 'created')
     return item
   }
@@ -244,6 +244,13 @@ export class CanvasSessions {
     if (!session) return null
     try {
       const title = call.tool.replace(/[_-]+/g, ' ').replace(/^\w/, c => c.toUpperCase())
+      // MCP App items are made per tool call, without the user asking: at the
+      // cap, the oldest unpinned one gives way instead of the new one failing.
+      const items = this.store.list(sessionId)
+      if (items.length >= CANVAS_LIMITS.maxItems) {
+        const oldest = items.filter(i => i.kind === 'mcp_app' && i.pinnedRevision === undefined).sort((a, b) => a.createdAt.localeCompare(b.createdAt))[0]
+        if (oldest) await this.store.delete(sessionId, oldest.id)
+      }
       const item = await this.store.create(sessionId, {
         kind: 'mcp_app',
         title,

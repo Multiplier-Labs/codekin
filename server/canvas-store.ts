@@ -64,6 +64,8 @@ export interface CanvasContentInput {
   content: Buffer | string
   mediaType: string
   meta?: CanvasItemMeta
+  /** The content was read from a file (recorded on the revision). */
+  fromFile?: boolean
 }
 
 export interface CanvasCreateInput extends CanvasContentInput {
@@ -280,7 +282,7 @@ export class CanvasStore {
       const stored: StoredItem = {
         item: {
           id, kind: input.kind, title, source: input.source,
-          revisions: [{ n: 1, createdAt: now, size: content.length, mediaType: input.mediaType }],
+          revisions: [{ n: 1, createdAt: now, size: content.length, mediaType: input.mediaType, ...(input.fromFile ? { fromFile: true as const } : {}) }],
           latest: 1, createdAt: now, updatedAt: now,
         },
         meta: meta ? { 1: meta } : {},
@@ -310,7 +312,7 @@ export class CanvasStore {
       }
       const n = stored.item.latest + 1
       const now = new Date().toISOString()
-      const revisions: CanvasRevision[] = [...stored.item.revisions, { n, createdAt: now, size: content.length, mediaType: input.mediaType }]
+      const revisions: CanvasRevision[] = [...stored.item.revisions, { n, createdAt: now, size: content.length, mediaType: input.mediaType, ...(input.fromFile ? { fromFile: true as const } : {}) }]
       const dropped = pruneRevisions(revisions, stored.item.pinnedRevision)
       const next: StoredItem = {
         item: { ...stored.item, ...(title ? { title } : {}), revisions: revisions.filter(r => !dropped.includes(r.n)), latest: n, updatedAt: now },

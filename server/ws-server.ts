@@ -14,7 +14,7 @@
 // Must stay the first import: takes exclusive ownership of the state
 // directories before any module opens state (desktop plan D7).
 import { createCanvasRouter } from './canvas-routes.js'
-import { sandboxConfig, sandboxFrameSrc, startSandboxServer } from './canvas-sandbox.js'
+import { sandboxConfig, sandboxFrameSrc, sandboxListening, startSandboxServer } from './canvas-sandbox.js'
 import { prepareOpenCodeCanvas, verifyOpenCodeCanvasToken } from './opencode-canvas.js'
 import { previewFrameSrc, previewSettings } from './preview-manager.js'
 import { configureOpenCodeServerEnv } from './opencode-process.js'
@@ -273,7 +273,8 @@ app.post(
 // Where the browser loads the Canvas sandbox page: a configured origin, or this host on the sandbox port.
 app.get('/api/canvas/sandbox', (req, res) => {
   if (!verifyToken(extractToken(req))) return res.status(401).json({ error: 'Unauthorized' })
-  res.json({ origin: canvasSandbox.origin, port: canvasSandbox.dir ? canvasSandbox.port : null })
+  // The port only once Codekin's own sandbox server listens on it: another program may hold it.
+  res.json({ origin: canvasSandbox.origin, port: canvasSandbox.dir && sandboxListening() ? canvasSandbox.port : null })
 })
 
 configureOpenCodeServerEnv(prepareOpenCodeCanvas({ dataDir: DATA_DIR, port, masterToken: authToken }))

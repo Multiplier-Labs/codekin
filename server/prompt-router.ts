@@ -37,6 +37,17 @@ export type PromptResponseOutcome = { delivered: true } | { delivered: false; re
 
 const DELIVERED: PromptResponseOutcome = { delivered: true }
 
+/**
+ * The same tool call seen by both approval paths (the PreToolUse hook and
+ * the CLI's can_use_tool): same tool and same input. Matching on the tool
+ * name alone would let one pending prompt approve a different call.
+ */
+function sameCall(pending: { toolName: string; toolInput: Record<string, unknown> }, toolName: string, toolInput: Record<string, unknown>): boolean {
+  if (pending.toolName !== toolName) return false
+  if (toolName === 'Bash') return unwrapShellCommand(String(pending.toolInput.command ?? '')) === unwrapShellCommand(String(toolInput.command ?? ''))
+  return JSON.stringify(pending.toolInput) === JSON.stringify(toolInput)
+}
+
 export class PromptRouter {
   private deps: PromptRouterDeps
 
@@ -162,7 +173,7 @@ export class PromptRouter {
     // Prevent double-gating: if a PreToolUse hook is already handling approval
     // for this tool, auto-approve the control_request to avoid duplicate entries.
     for (const pending of session.pendingToolApprovals.values()) {
-      if (pending.toolName === toolName) {
+      if (sameCall(pending, toolName, toolInput)) {
         console.log(`[control_request] auto-approving ${toolName} (PreToolUse hook already handling approval)`)
         cp.sendControlResponse(requestId, 'allow')
         return
@@ -344,7 +355,7 @@ export class PromptRouter {
     // entry for this tool, auto-approve the control_request and let the hook
     // take over as the sole approval gate.
     for (const [reqId, pending] of session.pendingControlRequests) {
-      if (pending.toolName === toolName) {
+      if (sameCall(pending, toolName, toolInput)) {
         console.log(`[tool-approval] auto-approving control_request for ${toolName} (PreToolUse hook taking over)`)
         session.claudeProcess?.sendControlResponse(reqId, 'allow')
         session.pendingControlRequests.delete(reqId)

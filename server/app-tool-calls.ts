@@ -46,10 +46,8 @@ export class AppToolCalls {
 
     const server = await this.deps.appServer(sessionId, itemId)
     if (!server) return { ok: false, error: 'That Canvas item is not an MCP App.' }
-    const proc = await this.running(sessionId)
-    if (!proc) return { ok: false, error: 'The session\'s agent couldn\'t be started, so the tool can\'t run. Send a message to start it, then try again.' }
-    if (!proc.callAppTool) return { ok: false, error: 'This session\'s agent can\'t run tool calls for apps.' }
 
+    // The limits apply before anything else happens, starting the agent included.
     const key = `${sessionId}:${itemId}`
     const now = (this.deps.now ?? Date.now)()
     const use = this.usage.get(key) ?? { inFlight: 0, started: [] }
@@ -59,10 +57,15 @@ export class AppToolCalls {
     use.inFlight++
     use.started.push(now)
     this.usage.set(key, use)
+    /** Remove this call's own timestamp (not whichever has the same value). */
+    const uncount = () => { const i = use.started.lastIndexOf(now); if (i >= 0) use.started.splice(i, 1) }
     try {
+      const proc = await this.running(sessionId)
+      if (!proc) return { ok: false, error: 'The session\'s agent couldn\'t be started, so the tool can\'t run. Send a message to start it, then try again.' }
+      if (!proc.callAppTool) return { ok: false, error: 'This session\'s agent can\'t run tool calls for apps.' }
       const outcome = await proc.callAppTool({ server, tool, arguments: argObj, confirmed })
       // A call waiting for the user's confirmation hasn't run: it doesn't count.
-      if (!outcome.ok && outcome.needsConfirmation) use.started.splice(use.started.indexOf(now), 1)
+      if (!outcome.ok && outcome.needsConfirmation) uncount()
       if (outcome.ok && Buffer.byteLength(JSON.stringify(outcome.result)) > MAX_APP_RESULT) {
         return { ok: false, error: `${tool} returned more than ${MAX_APP_RESULT / 1024 / 1024} MiB, which is more than Codekin passes to an app.` }
       }

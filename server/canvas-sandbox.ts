@@ -107,6 +107,13 @@ const TYPES: Record<string, string> = {
   '.map': 'application/json',
 }
 
+let listening = false
+
+/** Whether Codekin's own sandbox server is up (a port someone else holds must not be advertised). */
+export function sandboxListening(): boolean {
+  return listening
+}
+
 /** Serve the built sandbox page (static files only) on its own port. */
 export function startSandboxServer(config: SandboxConfig, host: string): http.Server | null {
   if (!config.port || !config.dir) {
@@ -118,7 +125,12 @@ export function startSandboxServer(config: SandboxConfig, host: string): http.Se
   const server = http.createServer((req, res) => {
     const respond = (status: number, extra: Record<string, string> = {}) => { res.writeHead(status, { ...headers, ...extra }) }
     if (req.method !== 'GET' && req.method !== 'HEAD') { respond(405); res.end(); return }
-    const pathname = decodeURIComponent((req.url ?? '/').split('?')[0])
+    let pathname: string
+    try {
+      pathname = decodeURIComponent((req.url ?? '/').split('?')[0])
+    } catch {
+      respond(400); res.end(); return
+    }
     const rel = pathname === '/' ? 'index.html' : pathname.replace(/^\/+/, '')
     const file = path.resolve(root, rel)
     const type = TYPES[path.extname(file)]
@@ -130,7 +142,13 @@ export function startSandboxServer(config: SandboxConfig, host: string): http.Se
     if (req.method === 'HEAD') { res.end(); return }
     createReadStream(file).pipe(res)
   })
-  server.on('error', (err) => { console.warn(`[canvas] Sandbox server on port ${config.port} failed: ${err.message} — charts and HTML items show their source`) })
-  server.listen(config.port, host, () => { console.log(`[canvas] Sandbox page on port ${config.port}`) })
+  server.on('error', (err) => {
+    listening = false
+    console.warn(`[canvas] Sandbox server on port ${config.port} failed: ${err.message} — charts and HTML items show their source`)
+  })
+  server.listen(config.port, host, () => {
+    listening = true
+    console.log(`[canvas] Sandbox page on port ${config.port}`)
+  })
   return server
 }

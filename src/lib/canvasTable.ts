@@ -39,15 +39,19 @@ function cell(value: unknown): string {
 export function parseTable(content: string, mediaType: string): ParsedTable {
   if (mediaType === 'application/json') {
     const data = JSON.parse(content) as Array<Record<string, unknown>>
-    const columns: string[] = []
-    for (const record of data) for (const key of Object.keys(record)) if (!columns.includes(key)) columns.push(key)
+    // A Set keeps this linear: a record may have very many keys.
+    const seen = new Set<string>()
+    for (const record of data) for (const key of Object.keys(record)) seen.add(key)
+    const columns = [...seen]
     return { columns, rows: data.map(record => columns.map(c => cell(record[c]))) }
   }
   const lines = mediaType === 'text/tab-separated-values'
     ? content.split(/\r?\n/).filter(l => l !== '').map(l => l.split('\t'))
     : parseCsv(content)
   const [header = [], ...rows] = lines
-  const width = Math.max(header.length, ...rows.map(r => r.length))
+  // A loop, not Math.max(...rows): a spread of very many rows overflows the stack.
+  let width = header.length
+  for (const r of rows) if (r.length > width) width = r.length
   const columns = Array.from({ length: width }, (_, i) => header[i] ?? `Column ${i + 1}`)
   return { columns, rows: rows.map(r => Array.from({ length: width }, (_, i) => r[i] ?? '')) }
 }

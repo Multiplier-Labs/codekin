@@ -75,6 +75,8 @@ describe('startSandboxServer', () => {
     expect((await fetch(`${base}/assets/a.js`)).status).toBe(200)
     expect((await fetch(`${base}/secret.txt`)).status).toBe(404)
     expect((await fetch(`${base}/..%2Foutside.js`)).status).toBe(404)
+    // A malformed escape is a bad request, not a thrown handler.
+    expect((await fetch(`${base}/%`)).status).toBe(400)
     expect((await fetch(`${base}/`, { method: 'POST' })).status).toBe(405)
   })
   it('does nothing without a port or a built page', () => {

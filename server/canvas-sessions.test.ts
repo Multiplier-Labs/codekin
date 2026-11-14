@@ -240,3 +240,23 @@ describe('CanvasSessions.publishPreview', () => {
     expect(itemDeleted).toHaveBeenCalledWith('s1', item.id)
   })
 })
+
+describe('CanvasSessions file content and item cap', () => {
+  it('marks a revision an agent showed by path as file content', async () => {
+    const item = await canvas.publish('s1', { kind: 'markdown', title: 'Plan', path: 'docs/plan.md' })
+    expect(item.revisions[0].fromFile).toBe(true)
+    const inline = await canvas.publish('s1', { kind: 'markdown', title: 'Note', content: '# x' })
+    expect(inline.revisions[0].fromFile).toBeUndefined()
+  })
+
+  it('makes room for a new MCP App at the item cap by dropping the oldest unpinned one', async () => {
+    const call = { server: 'latency', tool: 'report', toolInput: {}, result: { content: [] }, resourceUri: 'ui://x', html: '<p>app</p>' }
+    const first = await canvas.publishMcpApp('s1', call)
+    for (let i = 1; i < 100; i++) await canvas.publish('s1', { kind: 'markdown', title: `n${i}`, content: 'x' })
+    const next = await canvas.publishMcpApp('s1', call)
+    expect(next).not.toBeNull()
+    const ids = (canvas.list('s1') as Extract<WsServerMessage, { type: 'canvas_items' }>).items.map(i => i.id)
+    expect(ids).not.toContain(first!.id)
+    expect(ids).toHaveLength(100)
+  })
+})
