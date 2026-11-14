@@ -36,6 +36,8 @@ interface Props {
   onAttach?: (attachment: CanvasAttachment, ask: boolean) => void
   /** Where charts and HTML pages render (null: no sandbox; undefined: still finding out). */
   sandboxOrigin?: string | null
+  /** Send a message to the agent as the user (an MCP App asked, and the user confirmed). */
+  onSendMessage?: (text: string) => void
 }
 
 const SUGGESTIONS = [
@@ -43,7 +45,7 @@ const SUGGESTIONS = [
   { Icon: IconTable, className: 'text-secondary-5', text: 'Put the failing tests in a table' },
 ]
 
-export function CanvasPanel({ canvas, replacesChat, isMobile, onBackToChat, lastAgentLine, onSuggest, onPointerDown, onAttach, sandboxOrigin }: Props) {
+export function CanvasPanel({ canvas, replacesChat, isMobile, onBackToChat, lastAgentLine, onSuggest, onPointerDown, onAttach, sandboxOrigin, onSendMessage }: Props) {
   const { items, selected, view, compare } = canvas
   const mainRef = useRef<HTMLElement>(null)
   const [width, setWidth] = useState(1000)
@@ -228,7 +230,7 @@ export function CanvasPanel({ canvas, replacesChat, isMobile, onBackToChat, last
             ? <CompareView item={selected} from={compare.from} to={compare.to} a={canvas.revisionContent(compare.from)} b={canvas.revisionContent(compare.to)} source={sourceMode} />
             : sourceMode && view.state === 'ready'
               ? <pre className="px-8 py-6 font-mono text-meta text-ink whitespace-pre-wrap break-words">{view.content.content}</pre>
-              : <CanvasItemView key={viewKey} view={view} onAttach={attach} onOpenFile={canvas.openFile} toc={width >= TOC_FROM} sandboxOrigin={sandboxOrigin} />}
+              : <CanvasItemView key={viewKey} view={view} onAttach={attach} onOpenFile={canvas.openFile} toc={width >= TOC_FROM} sandboxOrigin={sandboxOrigin} onSendMessage={onSendMessage} />}
       </div>
 
       {selection && !compare && (isMobile ? (

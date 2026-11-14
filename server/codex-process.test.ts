@@ -337,6 +337,33 @@ describe('CodexProcess', () => {
       proc = await handshake(cxp)
     })
 
+    it('reads an MCP App resource for a finished tool call with a UI and emits it', async () => {
+      const apps: unknown[] = []
+      cxp.on('mcp_app', (call) => apps.push(call))
+      await feed(proc, { method: 'item/completed', params: { item: {
+        type: 'mcpToolCall', id: 'call-7', server: 'latency', tool: 'latency_report', status: 'completed', arguments: { days: 7 },
+        mcpAppUi: null, mcpAppResourceUri: 'ui://latency/report.html',
+        result: { content: [{ type: 'text', text: 'p95' }], structuredContent: { rows: [1] }, _meta: null },
+      } } })
+      const read = writes(proc).find(w => w.method === 'mcpServer/resource/read')!
+      expect(read.params).toEqual({ server: 'latency', uri: 'ui://latency/report.html', threadId: 'thread-1', originCallId: 'call-7' })
+      await feed(proc, { id: read.id, result: { contents: [{ uri: 'ui://latency/report.html', mimeType: 'text/html;profile=mcp-app', text: '<p>app</p>' }], originCallId: 'call-7' } })
+      expect(apps).toEqual([{
+        server: 'latency', tool: 'latency_report', toolInput: { days: 7 },
+        result: { content: [{ type: 'text', text: 'p95' }], structuredContent: { rows: [1] } },
+        resourceUri: 'ui://latency/report.html', html: '<p>app</p>',
+      }])
+    })
+
+    it('ignores MCP tool calls without a UI, failed ones and its own Canvas server', async () => {
+      for (const item of [
+        { type: 'mcpToolCall', id: 'a', server: 'x', tool: 't', status: 'completed', result: { content: [] }, mcpAppUi: null },
+        { type: 'mcpToolCall', id: 'b', server: 'x', tool: 't', status: 'failed', result: { content: [] }, mcpAppUi: { resourceUri: 'ui://x' } },
+        { type: 'mcpToolCall', id: 'c', server: 'codekin_canvas', tool: 'canvas_show', status: 'completed', result: { content: [] }, mcpAppUi: { resourceUri: 'ui://x' } },
+      ]) await feed(proc, { method: 'item/completed', params: { item } })
+      expect(writes(proc).some(w => w.method === 'mcpServer/resource/read')).toBe(false)
+    })
+
     it('maps item/agentMessage/delta to text events', async () => {
       const texts: string[] = []
       cxp.on('text', (t) => texts.push(t))

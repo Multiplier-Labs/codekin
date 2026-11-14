@@ -1,6 +1,6 @@
 # Session Canvas
 
-**Status:** Slices 1–5 implemented: item model and store (#896), layout shell (#897), agent publishing (#898), renderers (#899), revisions (#900), selection → context (#901), the composer (#902), OpenCode tools (#903) and the sandbox origin with charts and HTML items. Slice 6 (MCP Apps) is next.
+**Status:** Slices 1–5 implemented: item model and store (#896), layout shell (#897), agent publishing (#898), renderers (#899), revisions (#900), selection → context (#901), the composer (#902), OpenCode tools (#903) the sandbox origin with charts and HTML items (#904), and MCP Apps display. Slice 7 (live preview) is next.
 
 ## 1. Summary
 
@@ -22,7 +22,7 @@ An item belongs to one session and has an ordered list of revisions.
 |---|---|
 | `id` | Random id, unique within the session |
 | `sessionId` | Owning session |
-| `kind` | `markdown`, `table`, `diagram`, `image`, `chart` (Vega-Lite) or `html` (later `mcp_app`, `preview`) |
+| `kind` | `markdown`, `table`, `diagram`, `image`, `chart` (Vega-Lite), `html`, or `mcp_app` (from a tool call; later `preview`) |
 | `title` | Shown in the switcher and chat card |
 | `source` | Who made it: `{ type: 'agent' }`, `{ type: 'file', path }` (opened by the user) or `{ type: 'mcp', server }` |
 | `revisions` | `{ n, createdAt, size, mediaType }`, numbered from 1 |
@@ -185,6 +185,29 @@ Where the page lives:
 - **Codekin's own CSP** gets `frame-src` set to the sandbox origin only. With a port, that's that port on any host, because the browser may reach Codekin by any name.
 - **`CANVAS_SANDBOX_FRAME_ANCESTORS`** narrows which pages may frame the sandbox. The default is any, because the page holds nothing and does nothing on its own.
 - **Without a sandbox,** chart and HTML items show their source with a note explaining why.
+
+### MCP Apps
+
+A tool whose definition declares a UI resource (`_meta.ui.resourceUri`, the MCP Apps extension) is shown as an interactive view. Codekin never talks to MCP servers itself; the CLIs own those connections.
+
+- **Claude Code**, when its `init` capabilities include `mcp_tool_ui_meta_v1` and `mcp_read_resource_v1`:
+  - the adapter remembers each `mcp__<server>__<tool>` call;
+  - on its result, it takes `structuredContent` and `_meta` from the top-level `tool_use_result`;
+  - it looks the tool up in a cached `mcp_status`, and reads the resource with `mcp_read_resource`.
+- **Codex app-server:** a completed `mcpToolCall` with `mcpAppUi.resourceUri` (or `mcpAppResourceUri`) is read with `mcpServer/resource/read`, bound to the originating call.
+- **What gets shown:**
+  - each call becomes one `mcp_app` item (source: the MCP server) holding the tool input, result and app document;
+  - reopening it restores the view without running the tool again;
+  - calls that failed without data (for example, a denied permission) aren't shown, and neither are Codekin's own servers;
+  - agents can't publish this kind themselves.
+- **Rendering:**
+  - The sandbox page runs in proxy mode (`?mcp-app`). It announces `ui/notifications/sandbox-proxy-ready`, loads the document into an inner `allow-scripts allow-forms` frame with no network, and relays JSON-RPC both ways.
+  - Codekin hosts it with ext-apps' `AppBridge`, loaded lazily, and sends the stored tool input and result.
+- **What the app can ask for:**
+  - **open a link** or **send a message as you:** shown in Codekin's own UI and confirmed first;
+  - **call a tool:** refused for now;
+  - **update model context, display mode:** accepted, inline only.
+- **Network:** apps get none, whatever their resource's `_meta.ui.csp` declares. Apps must be self-contained, the single-file pattern ext-apps recommends.
 - **Codekin controls stay outside the sandbox frame.** Every request a sandboxed app makes on the user's behalf goes through a confirmation in Codekin's chrome. That covers sending a message, opening a link and calling a tool, and tool calls also go through the normal approval rules.
 
 ## 9. Slices
@@ -196,7 +219,7 @@ Where the page lives:
 | 3 | Items and publishing | Markdown, image, table and diagram items; switcher, revisions, pinning, states; `canvas_show` / `canvas_update` for Claude, Codex and Grok; chat cards and auto-open |
 | 4 | Selection → context | Selection toolbar, attachments, composer redesign (section 6) |
 | 5 | Sandbox origin | Separate origin and CSP, then sandboxed charts and HTML artifacts (done) |
-| 6 | MCP Apps (display) | Adapter enrichment for Claude and Codex, `AppBridge` host |
+| 6 | MCP Apps (display) | Adapter enrichment for Claude and Codex, `AppBridge` host (done) |
 | 7 | Live preview | Local first, then self-hosted remote |
 
 Interactive MCP Apps (app-initiated tool calls) and relay-tunnelled previews are out of scope until there is a supported path and evidence they're needed.
