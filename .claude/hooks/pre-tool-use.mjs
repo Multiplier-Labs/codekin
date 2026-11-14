@@ -163,10 +163,10 @@ createHook({
       };
     }
 
-    // Skip all permission checks when dangerouslySkipPermissions is active.
-    // Check both the env flag and the permission mode as a fallback to guard
-    // against desynchronization if the env var mapping changes.
-    if (ctx.env.skipPermissions || ctx.env.permissionMode === 'dangerouslySkipPermissions') {
+    // Skip all permission checks in the bypass modes. Check both the env flag
+    // and the mode Claude Code reports (bypassPermissions is its name for
+    // both), so a mode changed while the process runs is honoured too.
+    if (ctx.env.skipPermissions || ctx.env.permissionMode === 'bypassPermissions' || ctx.env.permissionMode === 'dangerouslySkipPermissions') {
       return {
         hookSpecificOutput: {
           hookEventName: 'PreToolUse',
