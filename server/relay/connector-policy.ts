@@ -286,6 +286,9 @@ export function checkServerFrame(policy: ChannelPolicy, state: ChannelState, fra
   // Untagged output is session content too. An earlier successful join is
   // not continuing authority after its grant expires or is revoked.
   if (!hasPermission(policy, state.sessionId, 'view')) return false
+  // Preview state carries the proxy's key, and server output can carry
+  // anything the dev server prints: the owner's only.
+  if (typeof msg?.type === 'string' && msg.type.startsWith('preview_')) return false
   // Code, review comments and PR details are part of the diff: a grantee
   // without view_diff must not receive them, even as a broadcast.
   if (typeof msg?.type === 'string' && (DIFF_FRAME_TYPES.has(msg.type) || isFileCanvasItem(msg))) {
@@ -392,6 +395,9 @@ export function checkClientFrame(policy: ChannelPolicy, state: ChannelState, fra
       const read = requirePermission(policy, state, 'view_diff', 'Viewing files is not granted')
       return read.allowed ? requirePermission(policy, state, 'send_prompt', 'Adding to this session is not granted') : read
     }
+    // Previews: the proxy is only reachable on the machine (or its network),
+    // never through the relay. Starting, stopping and restarting run commands
+    // and fall through to owner-only; a grantee may not even list them.
 
     case 'input':
       return requirePermission(policy, state, 'send_prompt', 'Sending prompts is not granted')

@@ -12,7 +12,8 @@
  * format is also what survives a reload.
  */
 
-export type CanvasSelectionKind = 'text' | 'rows' | 'node' | 'chart'
+/** element: one picked in a live preview; console: a preview's console errors. */
+export type CanvasSelectionKind = 'text' | 'rows' | 'node' | 'chart' | 'element' | 'console'
 
 export interface CanvasAttachment {
   /** Local id, for removing it from the composer. */
@@ -64,7 +65,7 @@ export interface SentContext {
   label: string
 }
 
-const BLOCK = /\n*<canvas_context item="([^"]*)" item_id="([^"]*)" revision="(\d+)" what="(text|rows|node|chart)" label="([^"]*)">\n[\s\S]*?\n<\/canvas_context>/g
+const BLOCK = /\n*<canvas_context item="([^"]*)" item_id="([^"]*)" revision="(\d+)" what="(text|rows|node|chart|element|console)" label="([^"]*)">\n[\s\S]*?\n<\/canvas_context>/g
 
 /** Split a sent message into the user's text and its Canvas attachments. */
 export function parseWithContext(message: string): { text: string; context: SentContext[] } {

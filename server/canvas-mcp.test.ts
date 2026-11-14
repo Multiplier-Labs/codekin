@@ -27,9 +27,9 @@ describe('Canvas MCP tools', () => {
   })
   afterEach(async () => { await client.close() })
 
-  it('offers show, update and list, with instructions for the agent', async () => {
+  it('offers show, update, preview and list, with instructions for the agent', async () => {
     const { tools } = await client.listTools()
-    expect(tools.map(t => t.name).sort()).toEqual(['canvas_list', 'canvas_show', 'canvas_update'])
+    expect(tools.map(t => t.name).sort()).toEqual(['canvas_list', 'canvas_preview', 'canvas_show', 'canvas_update'])
     expect(client.getInstructions()).toMatch(/Canvas beside this chat/)
   })
 
@@ -48,6 +48,13 @@ describe('Canvas MCP tools', () => {
     const failed = await client.callTool({ name: 'canvas_update', arguments: { itemId: 'i9', content: 'x' } })
     expect(failed.isError).toBe(true)
     expect(JSON.stringify(failed.content)).toMatch(/No Canvas item i9/)
+  })
+
+  it('previews a port the agent started a server on', async () => {
+    api.request.mockResolvedValue({ item: { id: 'p1', title: 'Web', kind: 'preview', revision: 1 }, enabled: true })
+    const result = await client.callTool({ name: 'canvas_preview', arguments: { port: 5173, path: '/settings', title: 'Web' } })
+    expect(api.request).toHaveBeenCalledWith('POST', '/preview', { port: 5173, path: '/settings', title: 'Web' })
+    expect(JSON.stringify(result.content)).toMatch(/Previewing port 5173 in Canvas as \\"Web\\" \(id p1\)/)
   })
 
   it('lists items', async () => {

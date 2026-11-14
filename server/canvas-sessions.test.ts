@@ -185,3 +185,58 @@ describe('CanvasSessions.publishMcpApp', () => {
     await expect(canvas.publish('s1', { title: 'x', kind: 'mcp_app', content: '{}' })).rejects.toThrow(/kind must be one of/)
   })
 })
+
+describe('CanvasSessions.publishPreview', () => {
+  it('stores a port as a preview item, and revises it for the same port', async () => {
+    const item = await canvas.publishPreview('s1', { port: 5173, title: 'Web' })
+    expect(item).toMatchObject({ kind: 'preview', title: 'Web', source: { type: 'agent' } })
+    expect(await canvas.previewTarget('s1', item.id)).toEqual({ port: 5173, path: '/' })
+
+    const again = await canvas.publishPreview('s1', { port: 5173, path: '/settings' })
+    expect(again.id).toBe(item.id)
+    expect(again.latest).toBe(2)
+    expect(await canvas.previewTarget('s1', item.id)).toEqual({ port: 5173, path: '/settings' })
+    // Same target again: no new revision.
+    expect((await canvas.publishPreview('s1', { port: 5173, path: '/settings' })).latest).toBe(2)
+
+    const other = await canvas.publishPreview('s1', { port: 3000 })
+    expect(other.id).not.toBe(item.id)
+    expect(other.title).toBe('localhost:3000')
+  })
+
+  it('keeps one item per launch configuration', async () => {
+    const a = await canvas.publishPreview('s1', { port: 5173 }, { type: 'launch', config: 'web' })
+    const b = await canvas.publishPreview('s1', { port: 5174 }, { type: 'launch', config: 'web' })
+    expect(b.id).toBe(a.id)
+    expect(a.title).toBe('web')
+    expect(await canvas.previewTarget('s1', a.id)).toEqual({ port: 5174, path: '/', config: 'web' })
+  })
+
+  it('finds an agent preview by port after a restart', async () => {
+    const item = await canvas.publishPreview('s1', { port: 5173 })
+    const fresh = new CanvasSessions(new CanvasStore(path.join(tmp, 'store')), {
+      getSession: id => (id === 's1' ? session : undefined),
+      broadcast: () => {}, broadcastAndHistory: () => {}, sessionsChanged: () => {},
+    })
+    expect((await fresh.publishPreview('s1', { port: 5173, path: '/x' })).id).toBe(item.id)
+  })
+
+  it('checks the port and path, and agents cannot make previews through canvas_show', async () => {
+    await expect(canvas.publishPreview('s1', { port: 0 })).rejects.toThrow(/port/)
+    await expect(canvas.publishPreview('s1', { port: '5173' })).rejects.toThrow(/port/)
+    await expect(canvas.publishPreview('s1', { port: 5173, path: 'settings' })).rejects.toThrow(/start with \//)
+    await expect(canvas.publishPreview('s1', { port: 5173, path: '//evil.example.com' })).rejects.toThrow(/start with \//)
+    await expect(canvas.publish('s1', { kind: 'preview', title: 'x', content: '{}' })).rejects.toThrow(/kind must be one of/)
+  })
+
+  it('tells the preview manager when an item is deleted', async () => {
+    const itemDeleted = vi.fn()
+    const c = new CanvasSessions(new CanvasStore(path.join(tmp, 'store2')), {
+      getSession: id => (id === 's1' ? session : undefined),
+      broadcast: () => {}, broadcastAndHistory: () => {}, sessionsChanged: () => {}, itemDeleted,
+    })
+    const item = await c.publishPreview('s1', { port: 5173 })
+    expect(await c.delete('s1', item.id)).toBeNull()
+    expect(itemDeleted).toHaveBeenCalledWith('s1', item.id)
+  })
+})

@@ -6,7 +6,7 @@
  * shared `opencode serve` for every session, so instead Codekin gives it
  * custom tools: a `canvas.ts` file in a Codekin-owned config directory
  * (OPENCODE_CONFIG_DIR), whose named exports become `canvas_show`,
- * `canvas_update` and `canvas_list`. OpenCode passes each call the calling
+ * `canvas_update`, `canvas_preview` and `canvas_list`. OpenCode passes each call the calling
  * session's id; the tools send it to a local route, which maps it to the
  * Codekin session. That route accepts a token derived for this purpose only,
  * set in the OpenCode server's environment.
@@ -36,8 +36,8 @@ export function openCodeCanvasToolSource(zodUrl: string): string {
   return `// Written by Codekin: Canvas tools for OpenCode sessions. Regenerated at startup; edits are lost.
 import { z } from ${JSON.stringify(zodUrl)}
 
-async function call(sessionID: string, method: string, suffix: string, body?: unknown): Promise<any> {
-  const url = \`http://127.0.0.1:\${process.env.CODEKIN_PORT}/api/opencode-canvas/\${encodeURIComponent(sessionID)}/items\${suffix}\`
+async function call(sessionID: string, method: string, suffix: string, body?: unknown, route = 'items'): Promise<any> {
+  const url = \`http://127.0.0.1:\${process.env.CODEKIN_PORT}/api/opencode-canvas/\${encodeURIComponent(sessionID)}/\${route}\${suffix}\`
   const res = await fetch(url, {
     method,
     headers: { Authorization: \`Bearer \${process.env.CODEKIN_OPENCODE_CANVAS_TOKEN ?? ''}\`, ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) },
@@ -86,6 +86,19 @@ export const update = {
     const { itemId, ...rest } = args
     const { item } = await call(context.sessionID, 'POST', '/' + encodeURIComponent(String(itemId)), rest)
     return \`Updated "\${item.title}" in Canvas (now revision \${item.revision}).\`
+  },
+}
+
+export const preview = {
+  description: 'Show a running dev server (on this machine) live in the Canvas, e.g. after starting npm run dev in the background. Codekin never starts it for you: start it first and wait until it is ready. Calling again for the same port updates the preview.',
+  args: {
+    port: z.number().int().min(1).max(65535).describe('The port the dev server listens on, e.g. 5173'),
+    path: z.string().optional().describe('Page to open, starting with / (default /)'),
+    title: z.string().optional().describe('Short title, e.g. "Web app"'),
+  },
+  async execute(args: Record<string, unknown>, context: { sessionID: string }) {
+    const { item } = await call(context.sessionID, 'POST', '', args, 'preview')
+    return \`Previewing port \${args.port} in Canvas as "\${item.title}" (id \${item.id}).\`
   },
 }
 

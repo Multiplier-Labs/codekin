@@ -10,7 +10,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { CanvasItem, CanvasItemMeta, WsClientMessage, WsServerMessage } from '../types'
+import type { CanvasItem, CanvasItemMeta, PreviewLaunchConfig, PreviewState, WsClientMessage, WsServerMessage } from '../types'
 import { getPref, setPref, usePref } from '../lib/prefs'
 import { shownRevision, trimSessionMap } from '../lib/canvas'
 
@@ -27,6 +27,26 @@ export type CanvasView =
   | { state: 'loading'; item: CanvasItem; revision: number }
   | { state: 'error'; item: CanvasItem; revision: number; message: string }
   | { state: 'ready'; item: CanvasItem; revision: number; content: CanvasContent }
+
+/** Live previews of dev servers (docs/CANVAS-SPEC.md §9) in the joined session. */
+export interface PreviewApi {
+  /** A preview item's server and proxy state; undefined until it was opened. */
+  state: (itemId: string) => PreviewState | undefined
+  /** Server output Codekin kept (servers it started). */
+  logs: (itemId: string) => string[]
+  /** The session folder's launch configurations; null until asked for. */
+  configs: { file: string; configs: PreviewLaunchConfig[]; error?: string } | null
+  requestConfigs: () => void
+  /** Get the item's proxy ready and its state (on showing it). */
+  open: (itemId: string) => void
+  /** Start a launch configuration, then show its preview. */
+  launch: (name: string) => void
+  stop: (itemId: string) => void
+  restart: (itemId: string) => void
+  requestLogs: (itemId: string) => void
+}
+
+const MAX_CLIENT_LOG = 1000
 
 export interface CanvasApi {
   /** Items of the joined session, oldest first. */
@@ -69,6 +89,7 @@ export interface CanvasApi {
   setCompare: (compare: { from: number; to: number } | null) => void
   /** Content of one revision of the selected item (fetched while comparing). */
   revisionContent: (revision: number) => CanvasContent | 'loading' | { error: string }
+  preview: PreviewApi
 }
 
 const contentKey = (sessionId: string, itemId: string, revision: number) => `${sessionId}/${itemId}@${revision}`
@@ -116,6 +137,11 @@ export function useCanvas(sessionId: string | null, send: (msg: WsClientMessage)
 
   /** Content requests in flight, so a revision is asked for once. */
   const inflight = useRef(new Set<string>())
+  const [previewStates, setPreviewStates] = useState<Record<string, PreviewState | undefined>>({})
+  const [previewLogs, setPreviewLogs] = useState<Record<string, string[] | undefined>>({})
+  const [launchConfigs, setLaunchConfigs] = useState<Record<string, PreviewApi['configs'] | undefined>>({})
+  /** A launch configuration the user started: its preview is shown when its state arrives. */
+  const pendingLaunch = useRef<{ sessionId: string; name: string } | null>(null)
   /** A file the user asked to open: shown as soon as its item appears. */
   const pendingOpen = useRef<{ sessionId: string; path: string; root?: string } | null>(null)
 
@@ -264,13 +290,33 @@ export function useCanvas(sessionId: string | null, send: (msg: WsClientMessage)
           setErrors(prev => ({ ...prev, [k]: msg.message }))
         } else {
           pendingOpen.current = null
+          pendingLaunch.current = null
           setNotice(msg.message)
         }
         return true
       }
+      case 'preview_state': {
+        setPreviewStates(prev => ({ ...prev, [`${msg.sessionId}/${msg.preview.itemId}`]: msg.preview }))
+        const pending = pendingLaunch.current
+        if (pending?.sessionId === msg.sessionId && msg.preview.config === pending.name) {
+          pendingLaunch.current = null
+          updateSessionState(msg.sessionId, { itemId: msg.preview.itemId, open: true })
+        }
+        return true
+      }
+      case 'preview_log': {
+        const k = `${msg.sessionId}/${msg.itemId}`
+        setPreviewLogs(prev => ({ ...prev, [k]: (msg.reset ? msg.lines : [...(prev[k] ?? []), ...msg.lines]).slice(-MAX_CLIENT_LOG) }))
+        return true
+      }
+      case 'preview_configs': {
+        setLaunchConfigs(prev => ({ ...prev, [msg.sessionId]: { file: msg.file, configs: msg.configs, ...(msg.error ? { error: msg.error } : {}) } }))
+        return true
+      }
       case 'canvas_event': {
         // The event arrives before the updated list, so the list still lacks this item.
-        if (msg.action === 'created' && msg.by !== 'file') {
+        // Files and launch configurations the user opened are shown by their own request.
+        if (msg.action === 'created' && msg.by !== 'file' && msg.by !== 'launch') {
           const before = itemsRef.current[msg.sessionId] ?? []
           const first = !before.some(i => i.source.type !== 'file')
           if (optionsRef.current.shouldAutoOpen?.(first)) updateSessionState(msg.sessionId, { open: true, itemId: msg.itemId })
@@ -282,6 +328,27 @@ export function useCanvas(sessionId: string | null, send: (msg: WsClientMessage)
     }
   }, [showFile])
 
+  // Actions are stable (they depend on the session only), so effects can call them without looping on state.
+  const previewActions = useMemo(() => ({
+    requestConfigs: () => { if (sessionId) send({ type: 'preview_configs' }) },
+    open: (itemId: string) => { if (sessionId) send({ type: 'preview_open', itemId }) },
+    launch: (name: string) => {
+      if (!sessionId) return
+      setNotice(null)
+      pendingLaunch.current = { sessionId, name }
+      send({ type: 'preview_launch', name })
+    },
+    stop: (itemId: string) => { send({ type: 'preview_stop', itemId }) },
+    restart: (itemId: string) => { send({ type: 'preview_restart', itemId }) },
+    requestLogs: (itemId: string) => { send({ type: 'preview_logs', itemId }) },
+  }), [sessionId, send])
+  const preview = useMemo<PreviewApi>(() => ({
+    ...previewActions,
+    state: (itemId) => (sessionId ? previewStates[`${sessionId}/${itemId}`] : undefined),
+    logs: (itemId) => (sessionId ? previewLogs[`${sessionId}/${itemId}`] ?? [] : []),
+    configs: sessionId ? launchConfigs[sessionId] ?? null : null,
+  }), [previewActions, sessionId, previewStates, previewLogs, launchConfigs])
+
   // A new session starts without a stale notice.
   useEffect(() => { setNotice(null) }, [sessionId]) // eslint-disable-line react-hooks/set-state-in-effect -- reset per session
 
@@ -289,6 +356,6 @@ export function useCanvas(sessionId: string | null, send: (msg: WsClientMessage)
     items, loaded: !!sessionId && sessionId in itemsBySession, selected, view, open, notice,
     dismissNotice: () => { setNotice(null) },
     setOpen, toggle, select, step, openFile, handleMessage, refresh,
-    openAt, showRevision, pin, remove, setReading, compare, setCompare, revisionContent,
+    openAt, showRevision, pin, remove, setReading, compare, setCompare, revisionContent, preview,
   }
 }

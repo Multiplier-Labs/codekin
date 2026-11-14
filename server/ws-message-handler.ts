@@ -480,6 +480,28 @@ export function handleWsMessage(msg: WsClientMessage, ctx: WsHandlerContext): vo
       break
     }
 
+    // --- Live preview: dev servers in Canvas (docs/CANVAS-SPEC.md §9) ---
+
+    case 'preview_configs':
+    case 'preview_open':
+    case 'preview_launch':
+    case 'preview_stop':
+    case 'preview_restart':
+    case 'preview_logs': {
+      const sessionId = clientSessions.get(ws)
+      if (!sessionId) { send({ type: 'canvas_error', message: 'Not in a session' }); break }
+      const done = (error: string | null) => { if (error) send({ type: 'canvas_error', message: error, sessionId }) }
+      const previews = sessions.previews
+      if (msg.type === 'preview_configs') void previews.configs(sessionId).then(send)
+      else if (msg.type === 'preview_logs') send(previews.logs(sessionId, msg.itemId))
+      else if (typeof (msg.type === 'preview_launch' ? msg.name : msg.itemId) !== 'string') done('Missing preview.')
+      else if (msg.type === 'preview_open') void previews.open(sessionId, msg.itemId).then(done)
+      else if (msg.type === 'preview_launch') void previews.launch(sessionId, msg.name).then(done)
+      else if (msg.type === 'preview_stop') done(previews.stop(sessionId, msg.itemId))
+      else void previews.restart(sessionId, msg.itemId).then(done)
+      break
+    }
+
     case 'set_review_base': {
       const sessionId = clientSessions.get(ws)
       const { requestId, scope: view } = msg

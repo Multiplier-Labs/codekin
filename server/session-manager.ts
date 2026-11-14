@@ -33,6 +33,7 @@ import { cleanupWorkspace } from './webhook-workspace.js'
 import { DATA_DIR, PORT } from './config.js'
 import { CanvasStore } from './canvas-store.js'
 import { CanvasSessions } from './canvas-sessions.js'
+import { PreviewManager } from './preview-manager.js'
 import { ApprovalManager } from './approval-manager.js'
 import { PromptRouter, type PromptResponseOutcome } from './prompt-router.js'
 import { isIsolationBlocked, SessionLifecycle } from './session-lifecycle.js'
@@ -144,6 +145,8 @@ export class SessionManager {
   readonly archive: SessionArchive
   /** Canvas items beside each session's chat (docs/CANVAS-SPEC.md). */
   readonly canvas: CanvasSessions
+  /** Live previews of dev servers in Canvas (docs/CANVAS-SPEC.md §9); off until ws-server configures ports. */
+  readonly previews: PreviewManager
   /** Exposed so ws-server can pass its port to child Claude processes. */
   _serverPort = PORT
   /** Exposed so ws-server can pass the auth token to child Claude processes. */
@@ -189,6 +192,13 @@ export class SessionManager {
       broadcast: (session, msg) => this.broadcast(session, msg),
       broadcastAndHistory: (session, msg) => this.broadcastAndHistory(session, msg),
       sessionsChanged: () => this._globalBroadcast?.({ type: 'sessions_updated' }),
+      itemDeleted: (sessionId, itemId) => { this.previews.forget(sessionId, itemId) },
+    })
+    this.previews = new PreviewManager({
+      getSession: (id) => this.sessions.get(id),
+      broadcast: (session, msg) => this.broadcast(session, msg),
+      target: (sessionId, itemId) => this.canvas.previewTarget(sessionId, itemId),
+      publish: (sessionId, input, source) => this.canvas.publishPreview(sessionId, input, source),
     })
     this._approvalManager = new ApprovalManager()
     this.diffManager = new DiffManager()
@@ -1130,6 +1140,7 @@ export class SessionManager {
 
     this.sessions.delete(sessionId)
     this.canvas.removeSession(sessionId)
+    this.previews.removeSession(sessionId)
     this.persistToDisk()
     this._globalBroadcast?.({ type: 'sessions_updated' })
     return true
@@ -2339,8 +2350,8 @@ export class SessionManager {
     }
 
     this.archive.shutdown()
-
-    if (exitPromises.length === 0) return Promise.resolve()
+    // Dev servers Codekin started for previews stop with it.
+    exitPromises.push(this.previews.shutdown())
 
     // Wait for all processes to exit, but cap at 6s (stop() SIGKILL is at 5s)
     return Promise.race([

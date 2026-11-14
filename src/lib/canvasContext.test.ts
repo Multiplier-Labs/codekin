@@ -20,6 +20,14 @@ describe('canvas context messages', () => {
     })
   })
 
+  it('round-trips preview context: a picked element and console errors', () => {
+    const message = formatWithContext('Make this blue', [
+      att({ what: 'element', itemTitle: 'web', label: 'button.primary “Save”', excerpt: 'selector: #save' }),
+      att({ what: 'console', itemTitle: 'web', label: '1 console error', excerpt: '[error on /] boom' }),
+    ])
+    expect(parseWithContext(message).context.map(c => [c.what, c.label])).toEqual([['element', 'button.primary “Save”'], ['console', '1 console error']])
+  })
+
   it('leaves plain messages alone, and gives context-only messages a lead line the transcript hides', () => {
     expect(formatWithContext('hi', [])).toBe('hi')
     expect(parseWithContext('hi')).toEqual({ text: 'hi', context: [] })

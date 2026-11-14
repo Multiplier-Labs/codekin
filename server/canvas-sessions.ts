@@ -10,7 +10,7 @@ import path from 'path'
 import { CANVAS_KINDS, CANVAS_LIMITS, CanvasError, CanvasStore, canvasTypeForFile, type CanvasCreateInput } from './canvas-store.js'
 import { SCREENSHOTS_DIR } from './config.js'
 import type { McpAppCall } from './mcp-app.js'
-import type { CanvasItem, CanvasItemKind, CanvasItemSource, Session, WsServerMessage } from './types.js'
+import type { CanvasItem, CanvasItemKind, CanvasItemSource, PreviewTarget, Session, WsServerMessage } from './types.js'
 
 /** What an agent sends to show or revise an item (canvas_show / canvas_update). */
 export interface CanvasPublishInput {
@@ -28,11 +28,21 @@ export interface CanvasPublishInput {
   nodes?: unknown
 }
 
-type AgentKind = Exclude<CanvasItemKind, 'mcp_app'>
-const AGENT_KINDS = CANVAS_KINDS.filter((k): k is AgentKind => k !== 'mcp_app')
+/** Kinds an agent writes as content; MCP Apps come from tool calls, previews from canvas_preview. */
+type AgentKind = Exclude<CanvasItemKind, 'mcp_app' | 'preview'>
+const AGENT_KINDS = CANVAS_KINDS.filter((k): k is AgentKind => k !== 'mcp_app' && k !== 'preview')
+
+export const PREVIEW_MEDIA_TYPE = 'application/vnd.codekin.preview+json'
+
+/** What canvas_preview (or starting a launch configuration) sends. */
+export interface PreviewPublishInput {
+  port: unknown
+  path?: unknown
+  title?: unknown
+}
 
 const TABLE_MEDIA: Record<string, string> = { csv: 'text/csv', tsv: 'text/tab-separated-values', json: 'application/json' }
-const TEXT_MEDIA: Record<Exclude<CanvasItemKind, 'image' | 'table' | 'mcp_app'>, string> = { markdown: 'text/markdown', diagram: 'text/vnd.mermaid', chart: 'application/vnd.vegalite+json', html: 'text/html' }
+const TEXT_MEDIA: Record<Exclude<CanvasItemKind, 'image' | 'table' | 'mcp_app' | 'preview'>, string> = { markdown: 'text/markdown', diagram: 'text/vnd.mermaid', chart: 'application/vnd.vegalite+json', html: 'text/html' }
 
 export interface CanvasSessionsDeps {
   getSession: (id: string) => Session | undefined
@@ -40,6 +50,8 @@ export interface CanvasSessionsDeps {
   broadcastAndHistory: (session: Session, msg: WsServerMessage) => void
   /** Tell every client the session list changed (Canvas counts are on it). */
   sessionsChanged: () => void
+  /** An item was deleted (a preview's server and proxy stop with it). */
+  itemDeleted?: (sessionId: string, itemId: string) => void
 }
 
 /** Reply to a failed request: the store's message, or a generic one (logged). */
@@ -247,6 +259,68 @@ export class CanvasSessions {
     }
   }
 
+  /**
+   * Show a dev server on this machine as a preview item. An agent names a
+   * port (canvas_preview); the user starts a launch configuration
+   * (source `launch`). Calling again for the same port, or the same
+   * configuration, revises that item instead of adding another.
+   */
+  async publishPreview(sessionId: string, input: PreviewPublishInput, source: CanvasItemSource = { type: 'agent' }): Promise<CanvasItem> {
+    const session = this.deps.getSession(sessionId)
+    if (!session) throw new CanvasError('Session not found')
+    const port = input.port
+    if (typeof port !== 'number' || !Number.isInteger(port) || port < 1 || port > 65535) throw new CanvasError('port must be the dev server\'s port, a number from 1 to 65535.')
+    const rawPath = input.path ?? '/'
+    if (typeof rawPath !== 'string' || !rawPath.startsWith('/') || rawPath.startsWith('//') || rawPath.length > 2000) throw new CanvasError('path must start with / (e.g. /settings).')
+    if (input.title !== undefined && typeof input.title !== 'string') throw new CanvasError('title must be text.')
+    const target: PreviewTarget = { port, path: rawPath, ...(source.type === 'launch' ? { config: source.config } : {}) }
+    const content = JSON.stringify(target)
+    const title = input.title?.trim() || (source.type === 'launch' ? source.config : `localhost:${port}`)
+
+    if (source.type !== 'launch') await this.loadPreviewPorts(sessionId)
+    const existing = this.store.find(sessionId, i => i.kind === 'preview' && (source.type === 'launch'
+      ? i.source.type === 'launch' && i.source.config === source.config
+      : i.source.type === 'agent' && this.previewPortOf(sessionId, i.id) === port))
+    if (existing) {
+      const updated = await this.store.addRevision(sessionId, existing.id, { content, mediaType: PREVIEW_MEDIA_TYPE, ...(input.title !== undefined ? { title } : {}) })
+      if (updated) this.changed(session, updated, 'updated')
+      this.previewPorts.set(`${sessionId}:${existing.id}`, port)
+      return updated ?? existing
+    }
+    const item = await this.store.create(sessionId, { kind: 'preview', title, source, content, mediaType: PREVIEW_MEDIA_TYPE })
+    this.previewPorts.set(`${sessionId}:${item.id}`, port)
+    this.changed(session, item, 'created')
+    return item
+  }
+
+  /** A preview item's target (its latest revision); null when it isn't a preview. */
+  async previewTarget(sessionId: string, itemId: string): Promise<PreviewTarget | null> {
+    const item = this.store.list(sessionId).find(i => i.id === itemId)
+    if (!item || item.kind !== 'preview') return null
+    const r = await this.store.get(sessionId, itemId)
+    try {
+      const t = JSON.parse(r.content.toString('utf-8')) as PreviewTarget
+      this.previewPorts.set(`${sessionId}:${itemId}`, t.port)
+      return t
+    } catch {
+      return null
+    }
+  }
+
+  /** Ports of preview items, cached as they are read or written (to find an agent's item by port). */
+  private previewPorts = new Map<string, number>()
+
+  private previewPortOf(sessionId: string, itemId: string): number | undefined {
+    return this.previewPorts.get(`${sessionId}:${itemId}`)
+  }
+
+  /** Read every preview item's port once, so publishPreview can match by port after a restart. */
+  async loadPreviewPorts(sessionId: string): Promise<void> {
+    for (const item of this.store.list(sessionId)) {
+      if (item.kind === 'preview' && !this.previewPorts.has(`${sessionId}:${item.id}`)) await this.previewTarget(sessionId, item.id).catch(() => null)
+    }
+  }
+
   async pin(sessionId: string, itemId: string, revision: unknown): Promise<string | null> {
     const session = this.deps.getSession(sessionId)
     if (!session) return 'Session not found'
@@ -265,6 +339,8 @@ export class CanvasSessions {
     if (!session) return 'Session not found'
     try {
       await this.store.delete(sessionId, itemId)
+      this.previewPorts.delete(`${sessionId}:${itemId}`)
+      this.deps.itemDeleted?.(sessionId, itemId)
       this.broadcastList(session)
       return null
     } catch (err) {

@@ -1,6 +1,6 @@
 /** Icon and colour for each Canvas item kind (design handoff §3). */
 
-import { IconBrowser, IconChartBar, IconFileText, IconHierarchy2, IconPhoto, IconPlug, IconTable } from '@tabler/icons-react'
+import { IconBrowser, IconChartBar, IconWorld, IconFileText, IconHierarchy2, IconPhoto, IconPlug, IconTable } from '@tabler/icons-react'
 import type { CanvasItemKind } from '../../types'
 
 const ICONS = {
@@ -11,6 +11,7 @@ const ICONS = {
   chart: { Icon: IconChartBar, className: 'text-secondary-5' },
   html: { Icon: IconBrowser, className: 'text-primary-5' },
   mcp_app: { Icon: IconPlug, className: 'text-secondary-5' },
+  preview: { Icon: IconWorld, className: 'text-success-5' },
 } satisfies Record<CanvasItemKind, unknown>
 
 export function KindIcon({ kind, size = 16 }: { kind: CanvasItemKind; size?: number }) {

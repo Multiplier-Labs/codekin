@@ -228,7 +228,7 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> implements 
         'Bash commands may require user approval — the system handles this automatically via a UI prompt.',
         'Do not tell the user to click approve or grant permission. Just proceed with your work.',
         'If a tool call fails, read the error message carefully. Common causes: wrong file path, missing dependency, syntax error, or network issue.',
-        ...(this.mcpConfig ? ['A Canvas beside the chat shows substantial output: use the canvas_show tool for reports, tables, Mermaid diagrams and images instead of pasting them into your reply, and canvas_update to revise them.'] : []),
+        ...(this.mcpConfig ? ['A Canvas beside the chat shows substantial output: use the canvas_show tool for reports, tables, Mermaid diagrams and images instead of pasting them into your reply, and canvas_update to revise them. To show a web app you are building, start its dev server in the background and call canvas_preview with its port.'] : []),
       ].join(' '),
     ]
     // Kill any orphaned Claude process still holding this session ID's lock.

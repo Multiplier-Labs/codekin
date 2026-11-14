@@ -16,6 +16,7 @@
 import { createCanvasRouter } from './canvas-routes.js'
 import { sandboxConfig, sandboxFrameSrc, startSandboxServer } from './canvas-sandbox.js'
 import { prepareOpenCodeCanvas, verifyOpenCodeCanvasToken } from './opencode-canvas.js'
+import { previewFrameSrc, previewSettings } from './preview-manager.js'
 import { configureOpenCodeServerEnv } from './opencode-process.js'
 import './data-ownership-boot.js'
 import express from 'express'
@@ -110,7 +111,9 @@ for (let i = 0; i < args.length; i++) {
 
 // Canvas sandbox origin for charts and HTML items (docs/CANVAS-SPEC.md §8).
 const canvasSandbox = sandboxConfig(port)
-const canvasSandboxFrameSrc = sandboxFrameSrc(canvasSandbox)
+// Live previews of dev servers (docs/CANVAS-SPEC.md §9): one proxy port per open preview.
+const canvasPreviews = previewSettings(port, canvasSandbox.port, BIND_HOST)
+const canvasFrameSrc = [sandboxFrameSrc(canvasSandbox), previewFrameSrc(canvasPreviews)].filter(Boolean).join(' ')
 
 if (authToken) {
   console.log('Auth token configured')
@@ -188,6 +191,7 @@ const openCodeAvailable = harnessProbes.get('opencode')?.available ?? false
 const sessions = new SessionManager()
 sessions._serverPort = port
 sessions._authToken = authToken
+sessions.previews.configure(canvasPreviews)
 
 // Wire up dynamic agent name resolution from the DB (falls back to env var / default)
 setAgentDisplayNameResolver(() =>
@@ -276,7 +280,7 @@ configureOpenCodeServerEnv(prepareOpenCodeCanvas({ dataDir: DATA_DIR, port, mast
 app.use(createCanvasRouter(extractToken, verifyTokenOrSessionToken, () => sessions.canvas, {
   verify: (token) => verifyOpenCodeCanvasToken(authToken, token),
   resolve: (oc) => sessions.findOpenCodeSession(oc),
-}))
+}, () => sessions.previews))
 
 // JSON body parser for all other routes
 app.use(express.json())
@@ -332,8 +336,8 @@ app.use((_req, res, next) => {
   // img-src: transcript images are same-origin or data: (remote ones render as
   // links, see src/lib/remoteImage.ts); GitHub avatars are the only remote
   // images the app shows, matching the hosted CSP in docs/RELAY-HARDENING.md.
-  // frame-src: only the Canvas sandbox origin may be framed (default-src 'self' would allow none other).
-  res.header('Content-Security-Policy', `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data: https://avatars.githubusercontent.com; font-src 'self'${canvasSandboxFrameSrc ? `; frame-src ${canvasSandboxFrameSrc}` : ''}`)
+  // frame-src: only the Canvas sandbox origin and the preview proxy ports may be framed (default-src 'self' would allow none other).
+  res.header('Content-Security-Policy', `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data: https://avatars.githubusercontent.com; font-src 'self'${canvasFrameSrc ? `; frame-src ${canvasFrameSrc}` : ''}`)
   if (process.env.NODE_ENV === 'production') {
     res.header('Strict-Transport-Security', 'max-age=31536000; includeSubDomains')
   }

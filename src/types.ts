@@ -17,6 +17,7 @@ export type {
   DiffScope, DiffView, DiffFileStatus, DiffFile, DiffHunk, DiffLine, DiffSummary, DiffReview,
   ReviewAnchor, ReviewComment,
   CanvasItem, CanvasItemKind, CanvasItemMeta, CanvasItemSource, CanvasRevision,
+  PreviewLaunchConfig, PreviewState, PreviewStatus, PreviewTarget,
   PrLookupState, PrChecksSummary, PullRequestInfo, PrStatus,
   PromptOption, PromptQuestion,
 } from '../server/protocol'
