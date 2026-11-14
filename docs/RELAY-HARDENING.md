@@ -38,7 +38,7 @@
 **Built.** The hosted frontend is static and served by the reverse proxy. The example configs include a snippet, `nginx/snippets/codekin-security-headers.conf.example`. Include it **in every `location` block**: nginx drops server-level `add_header` in any location that sets its own. The policy, with the optional report endpoint added:
 
 ```nginx
-add_header Content-Security-Policy "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: https://avatars.githubusercontent.com; font-src 'self'; connect-src 'self' wss://relay.example.com; manifest-src 'self'; frame-src 'none'; frame-ancestors 'none'; object-src 'none'; base-uri 'none'; form-action 'self'; upgrade-insecure-requests; report-uri /api/csp-report" always;
+add_header Content-Security-Policy "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: https://avatars.githubusercontent.com; font-src 'self'; connect-src 'self' wss://relay.example.com; manifest-src 'self'; frame-src https://sandbox.example.net; frame-ancestors 'none'; object-src 'none'; base-uri 'none'; form-action 'self'; upgrade-insecure-requests; report-uri /api/csp-report" always;
 add_header Strict-Transport-Security "max-age=63072000; includeSubDomains" always;
 add_header Cross-Origin-Opener-Policy "same-origin" always;
 add_header Cross-Origin-Resource-Policy "same-origin" always;
@@ -54,6 +54,7 @@ Supporting changes (**built**):
 - **API responses** also carry `Content-Security-Policy: default-src 'none'; frame-ancestors 'none'`.
 - **CI check:** `npm run check:csp` checks both builds: `index.html` has no inline `<script>`, and neither it nor the stylesheets name a third-party origin.
 - **Self-hosters** replace `YOUR_DOMAIN` in the snippet with their own host.
+- **Canvas sandbox:** `frame-src` names only the Canvas sandbox origin, a separate host that serves `dist/sandbox` (`nginx/sandbox.example`; see `docs/CANVAS-SPEC.md` §8). Build the hosted web app with `VITE_CANVAS_SANDBOX_ORIGIN` set to that origin. Without a sandbox, use `frame-src 'none'`; charts and HTML items then show their source.
 
 ## 4. Connector version floors per capability
 

@@ -13,6 +13,8 @@ describe('canvasKindForPath', () => {
     expect(canvasKindForPath('arch.mermaid')).toBe('diagram')
     expect(canvasKindForPath('shot.webp')).toBe('image')
     expect(canvasKindForPath('data.json')).toBeNull()
+    expect(canvasKindForPath('bench.vl.json')).toBe('chart')
+    expect(canvasKindForPath('page.html')).toBe('html')
     expect(canvasKindForPath('Makefile')).toBeNull()
     expect(canvasKindForPath('dir.md/file')).toBeNull()
   })

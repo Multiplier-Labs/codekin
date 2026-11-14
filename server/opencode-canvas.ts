@@ -57,10 +57,10 @@ const nodes = z.record(z.string(), z.object({
 })).optional().describe('Diagram only: Mermaid node id -> what it refers to')
 
 export const show = {
-  description: 'Show output in the Canvas beside the chat instead of pasting it into your reply: a Markdown report (markdown), table rows (table: CSV, TSV or JSON), a Mermaid diagram (diagram), or an image file (image, via path). Returns the item id for canvas_update.',
+  description: 'Show output in the Canvas beside the chat instead of pasting it into your reply: a Markdown report (markdown), table rows (table: CSV, TSV or JSON), a Mermaid diagram (diagram), an image file (image, via path), a Vega-Lite chart with inline data (chart), or a self-contained HTML page with no network (html). Returns the item id for canvas_update.',
   args: {
     title: z.string().describe('Short title, e.g. "Benchmark results"'),
-    kind: z.enum(['markdown', 'table', 'diagram', 'image']),
+    kind: z.enum(['markdown', 'table', 'diagram', 'image', 'chart', 'html']),
     content: z.string().optional().describe('Inline text: Markdown, table rows (see format), or Mermaid source. Omit when passing path.'),
     path: z.string().optional().describe('A file in the working directory instead of content. Required for images.'),
     format: z.enum(['csv', 'tsv', 'json']).optional().describe('Table only: how inline content is encoded (default csv)'),

@@ -14,12 +14,15 @@ export const CANVAS_CHAT_WIDTH = { min: 360, max: 560, default: 440 } as const
 
 /** Mirrors server/canvas-store.ts canvasTypeForFile: which files Canvas can show. */
 export function canvasKindForPath(path: string): CanvasItemKind | null {
+  const lower = path.toLowerCase()
+  if (lower.endsWith('.vl.json') || lower.endsWith('.vegalite.json')) return 'chart'
   const ext = /\.[^./\\]+$/.exec(path)?.[0].toLowerCase()
   switch (ext) {
     case '.md': case '.markdown': case '.mdx': return 'markdown'
     case '.csv': case '.tsv': return 'table'
     case '.mmd': case '.mermaid': return 'diagram'
     case '.png': case '.jpg': case '.jpeg': case '.gif': case '.webp': case '.svg': return 'image'
+    case '.html': case '.htm': return 'html'
     default: return null
   }
 }

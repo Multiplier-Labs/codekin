@@ -1,0 +1,40 @@
+  # Canvas sandbox page — nginx example (docs/CANVAS-SPEC.md §8)
+  #
+  # Charts and HTML items in Canvas run code an agent wrote, so they render in
+  # a page on a separate web address, never Codekin's own. This serves that
+  # page: static files only, no login, no API, no cookies.
+  #
+  # Replace SANDBOX_DOMAIN with the sandbox hostname. Prefer a different
+  # registrable domain from Codekin's (sandbox.example.net for
+  # codekin.example.com), so browsers don't treat it as the same site.
+  # Replace YOUR_DOMAIN with Codekin's hostname (allowed to frame the page).
+  # Replace /var/www/codekin-sandbox with a copy of Codekin's dist/sandbox.
+  #
+  # Then:
+  # - local server:     CANVAS_SANDBOX_ORIGIN=https://SANDBOX_DOMAIN
+  # - hosted web build: VITE_CANVAS_SANDBOX_ORIGIN=https://SANDBOX_DOMAIN npm run build:hosted
+  # - Codekin's own CSP: frame-src https://SANDBOX_DOMAIN
+  #   (snippets/codekin-security-headers.conf.example)
+
+  server {
+      server_name SANDBOX_DOMAIN;
+      root /var/www/codekin-sandbox;
+      index index.html;
+
+      # Only the page and its built assets; nothing else exists here.
+      location = / { try_files /index.html =404; }
+      location = /index.html { add_header Cache-Control "no-cache" always; include snippets/codekin-sandbox-headers.conf; }
+      location /assets/ { add_header Cache-Control "public, max-age=31536000, immutable" always; include snippets/codekin-sandbox-headers.conf; }
+      location / { return 404; }
+
+      include snippets/codekin-sandbox-headers.conf;
+
+      listen 443 ssl;
+      # ssl_certificate / ssl_certificate_key for SANDBOX_DOMAIN
+  }
+
+  server {
+      listen 80;
+      server_name SANDBOX_DOMAIN;
+      return 301 https://$host$request_uri;
+  }

@@ -14,6 +14,7 @@
 // Must stay the first import: takes exclusive ownership of the state
 // directories before any module opens state (desktop plan D7).
 import { createCanvasRouter } from './canvas-routes.js'
+import { sandboxConfig, sandboxFrameSrc, startSandboxServer } from './canvas-sandbox.js'
 import { prepareOpenCodeCanvas, verifyOpenCodeCanvasToken } from './opencode-canvas.js'
 import { configureOpenCodeServerEnv } from './opencode-process.js'
 import './data-ownership-boot.js'
@@ -106,6 +107,10 @@ for (let i = 0; i < args.length; i++) {
     }
   }
 }
+
+// Canvas sandbox origin for charts and HTML items (docs/CANVAS-SPEC.md §8).
+const canvasSandbox = sandboxConfig(port)
+const canvasSandboxFrameSrc = sandboxFrameSrc(canvasSandbox)
 
 if (authToken) {
   console.log('Auth token configured')
@@ -261,6 +266,12 @@ app.post(
 
 // Canvas items agents publish can be up to 1 MiB, past the default 100 kB
 // limit, so these routes parse their own bodies — register BEFORE express.json().
+// Where the browser loads the Canvas sandbox page: a configured origin, or this host on the sandbox port.
+app.get('/api/canvas/sandbox', (req, res) => {
+  if (!verifyToken(extractToken(req))) return res.status(401).json({ error: 'Unauthorized' })
+  res.json({ origin: canvasSandbox.origin, port: canvasSandbox.dir ? canvasSandbox.port : null })
+})
+
 configureOpenCodeServerEnv(prepareOpenCodeCanvas({ dataDir: DATA_DIR, port, masterToken: authToken }))
 app.use(createCanvasRouter(extractToken, verifyTokenOrSessionToken, () => sessions.canvas, {
   verify: (token) => verifyOpenCodeCanvasToken(authToken, token),
@@ -321,7 +332,8 @@ app.use((_req, res, next) => {
   // img-src: transcript images are same-origin or data: (remote ones render as
   // links, see src/lib/remoteImage.ts); GitHub avatars are the only remote
   // images the app shows, matching the hosted CSP in docs/RELAY-HARDENING.md.
-  res.header('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data: https://avatars.githubusercontent.com; font-src 'self'")
+  // frame-src: only the Canvas sandbox origin may be framed (default-src 'self' would allow none other).
+  res.header('Content-Security-Policy', `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data: https://avatars.githubusercontent.com; font-src 'self'${canvasSandboxFrameSrc ? `; frame-src ${canvasSandboxFrameSrc}` : ''}`)
   if (process.env.NODE_ENV === 'production') {
     res.header('Strict-Transport-Security', 'max-age=31536000; includeSubDomains')
   }
@@ -688,6 +700,7 @@ wss.on('close', () => clearInterval(heartbeat))
 
 server.listen(port, BIND_HOST, () => {
   console.log(`Codekin WebSocket server listening on ${BIND_HOST}:${port}`)
+  startSandboxServer(canvasSandbox, BIND_HOST)
   serverLifecycle.emit('listening', { host: BIND_HOST, port })
 
   // Start after listening, so the connector's first proxied call lands.
