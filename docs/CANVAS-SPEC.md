@@ -1,6 +1,6 @@
 # Session Canvas
 
-**Status:** Slices 1–4 implemented: item model and store (#896), layout shell (#897), agent publishing (#898), renderers (#899), revisions (#900), selection → context (#901) and the composer. Slice 5 (sandbox origin) is next.
+**Status:** Slices 1–5 implemented: item model and store (#896), layout shell (#897), agent publishing (#898), renderers (#899), revisions (#900), selection → context (#901), the composer (#902), OpenCode tools (#903) and the sandbox origin with charts and HTML items. Slice 6 (MCP Apps) is next.
 
 ## 1. Summary
 
@@ -22,7 +22,7 @@ An item belongs to one session and has an ordered list of revisions.
 |---|---|
 | `id` | Random id, unique within the session |
 | `sessionId` | Owning session |
-| `kind` | `markdown`, `table`, `diagram` or `image` (later `chart`, `html`, `mcp_app`, `preview`) |
+| `kind` | `markdown`, `table`, `diagram`, `image`, `chart` (Vega-Lite) or `html` (later `mcp_app`, `preview`) |
 | `title` | Shown in the switcher and chat card |
 | `source` | Who made it: `{ type: 'agent' }`, `{ type: 'file', path }` (opened by the user) or `{ type: 'mcp', server }` |
 | `revisions` | `{ n, createdAt, size, mediaType }`, numbered from 1 |
@@ -161,7 +161,30 @@ The start view keeps its own agent menu, and gains only the `+` menu and the att
 ## 8. Security
 
 - **Native items** render in Codekin's own document through existing sanitizers. Markdown goes through DOMPurify. Mermaid uses strict mode. Images render only through `<img>`, and remote images in Markdown become links as they do in chat.
-- **Anything that runs code** (charts, HTML artifacts, MCP Apps, previews) renders only in a sandbox on a **separate origin**, never Codekin's own. Codekin's origin holds the session credentials, so script running there could drive the session API. The sandbox origin, its CSP and its deployment options for local, desktop and self-hosted setups are specified with slice 4.
+- **Anything that runs code** (charts, HTML artifacts, MCP Apps, previews) renders only in a sandbox on a **separate origin**, never Codekin's own. Codekin's origin holds the session credentials, so script running there could drive the session API.
+
+### The sandbox origin
+
+The sandbox is a static page (`src/sandbox`, built into `dist/sandbox`). It holds nothing and does nothing until Codekin posts content to it. Codekin frames it, and the two talk by `postMessage` (`src/lib/sandboxProtocol.ts`). Each side accepts messages only from the other's window and origin, and treats them as untrusted data.
+
+- **`chart`** items are Vega-Lite specs. They render with Vega's expression interpreter (no `eval`), with no actions menu, and with their data inline, because the page has no network. Selection parameters (brush or point) are sent back as a label plus the selected data rows, and can be attached to a message like any other selection.
+- **`html`** items are self-contained pages. They render in a nested `sandbox="allow-scripts"` frame, which gives them an opaque origin, under a CSP that allows inline scripts and styles but no network.
+- **The page's headers** (`sandboxHeaders()` in `server/canvas-sandbox.ts`, and `nginx/snippets/codekin-sandbox-headers.conf.example`):
+  - `connect-src 'none'`;
+  - inline scripts allowed, because an HTML item's frame inherits the policy;
+  - `frame-ancestors` set to Codekin's origin or origins.
+
+Where the page lives:
+
+| Setup | Sandbox origin | Configuration |
+|---|---|---|
+| Local, desktop, or a server reached directly | Codekin serves the page on a second port (default: Codekin's port + 1) | `CANVAS_SANDBOX_PORT` (a number, or `off`) |
+| Behind a reverse proxy on your own domain | A second hostname that serves `dist/sandbox`, ideally on a different registrable domain from Codekin's | `CANVAS_SANDBOX_ORIGIN=https://sandbox.example.net`, plus `nginx/sandbox.example` |
+| Hosted web app built with `build:hosted` | The same, baked into the build | `VITE_CANVAS_SANDBOX_ORIGIN=https://sandbox.example.net` |
+
+- **Codekin's own CSP** gets `frame-src` set to the sandbox origin only. With a port, that's that port on any host, because the browser may reach Codekin by any name.
+- **`CANVAS_SANDBOX_FRAME_ANCESTORS`** narrows which pages may frame the sandbox. The default is any, because the page holds nothing and does nothing on its own.
+- **Without a sandbox,** chart and HTML items show their source with a note explaining why.
 - **Codekin controls stay outside the sandbox frame.** Every request a sandboxed app makes on the user's behalf goes through a confirmation in Codekin's chrome. That covers sending a message, opening a link and calling a tool, and tool calls also go through the normal approval rules.
 
 ## 9. Slices
@@ -172,7 +195,7 @@ The start view keeps its own agent menu, and gains only the `+` menu and the att
 | 2 | Layout shell | Rail, chat column, Canvas panel, Changes strip and slide-over, breakpoints, phone, "Open in Canvas" |
 | 3 | Items and publishing | Markdown, image, table and diagram items; switcher, revisions, pinning, states; `canvas_show` / `canvas_update` for Claude, Codex and Grok; chat cards and auto-open |
 | 4 | Selection → context | Selection toolbar, attachments, composer redesign (section 6) |
-| 5 | Sandbox origin | Separate origin and CSP, then sandboxed charts and HTML artifacts |
+| 5 | Sandbox origin | Separate origin and CSP, then sandboxed charts and HTML artifacts (done) |
 | 6 | MCP Apps (display) | Adapter enrichment for Claude and Codex, `AppBridge` host |
 | 7 | Live preview | Local first, then self-hosted remote |
 

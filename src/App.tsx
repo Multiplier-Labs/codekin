@@ -70,6 +70,7 @@ import { SessionContent } from './components/SessionContent'
 import { CanvasPanel } from './components/canvas/CanvasPanel'
 import { ChangesStrip } from './components/canvas/ChangesStrip'
 import { useCanvas, type CanvasApi } from './hooks/useCanvas'
+import { useSandboxOrigin } from './hooks/useSandboxOrigin'
 import { CANVAS_CHAT_WIDTH, CANVAS_SIDE_BY_SIDE_MIN, canvasKindForPath, clampChatWidth } from './lib/canvas'
 import { formatWithContext, type CanvasAttachment } from './lib/canvasContext'
 import { RepoDrawer, type RepoDrawerTab } from './components/RepoDrawer'
@@ -485,6 +486,7 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
     canvasListRef.current = () => { wsSend({ type: 'canvas_list' }) }
   })
   const canvasSideBySide = !useIsMobile(CANVAS_SIDE_BY_SIDE_MIN)
+  const sandboxOrigin = useSandboxOrigin(settings.token)
   const chatWidthPref = usePref('canvasChatWidth')
   const [chatWidthDrag, setChatWidthDrag] = useState<number | null>(null)
   const chatWidth = chatWidthDrag ?? clampChatWidth(chatWidthPref ?? CANVAS_CHAT_WIDTH.default)
@@ -1499,6 +1501,7 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
                 inputBarRef.current?.insertText(text)
               }}
               onAttach={attachCanvasContext}
+              sandboxOrigin={sandboxOrigin}
               onPointerDown={diffPanelOpen && canvasDesktop ? () => { setDiffPanelOpen(false) } : undefined}
             />
           )}

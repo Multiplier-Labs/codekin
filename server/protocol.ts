@@ -237,7 +237,7 @@ export interface ReviewComment {
 }
 
 /** What a Canvas item shows (docs/CANVAS-SPEC.md §2). */
-export type CanvasItemKind = 'markdown' | 'table' | 'diagram' | 'image'
+export type CanvasItemKind = 'markdown' | 'table' | 'diagram' | 'image' | 'chart' | 'html'
 
 /** Who made a Canvas item. */
 export type CanvasItemSource =

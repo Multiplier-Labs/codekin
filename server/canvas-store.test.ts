@@ -37,7 +37,7 @@ describe('CanvasStore', () => {
     await expect(store.create('s1', md('x', 'a'.repeat(CANVAS_LIMITS.maxTitleLength + 1)))).rejects.toThrow(/at most/)
     await expect(store.create('s1', { ...md('x'), mediaType: 'text/html' })).rejects.toThrow(/can't hold text\/html/)
     await expect(store.create('s1', { ...md('x'), content: Buffer.from([0xff, 0xfe, 0xfd]) })).rejects.toThrow(/UTF-8/)
-    await expect(store.create('s1', { ...md('x'), kind: 'chart' as never })).rejects.toThrow(/Unknown item kind/)
+    await expect(store.create('s1', { ...md('x'), kind: 'video' as never })).rejects.toThrow(/Unknown item kind/)
     await expect(store.create('s1', md('x'.repeat(CANVAS_LIMITS.maxTextBytes + 1)))).rejects.toThrow(/at most 1 MiB/)
   })
 
@@ -152,13 +152,24 @@ describe('CanvasStore', () => {
   })
 })
 
+describe('chart and html items', () => {
+  it('accept a Vega-Lite object and a page, and refuse a broken spec', async () => {
+    const chart = { kind: 'chart' as const, title: 'C', source: { type: 'agent' as const }, mediaType: 'application/vnd.vegalite+json' }
+    await expect(store.create('s1', { ...chart, content: '{"mark":"bar"}' })).resolves.toMatchObject({ kind: 'chart' })
+    await expect(store.create('s1', { ...chart, content: '[1]' })).rejects.toThrow(/JSON object/)
+    await expect(store.create('s1', { ...chart, content: '{' })).rejects.toThrow(/does not parse/)
+    await expect(store.create('s1', { kind: 'html', title: 'P', source: { type: 'agent' }, mediaType: 'text/html', content: '<p>hi</p>' })).resolves.toMatchObject({ kind: 'html' })
+  })
+})
+
 describe('canvasTypeForFile', () => {
   it('maps supported extensions and refuses the rest', () => {
     expect(canvasTypeForFile('docs/A.MD')).toEqual({ kind: 'markdown', mediaType: 'text/markdown' })
     expect(canvasTypeForFile('x.tsv')).toEqual({ kind: 'table', mediaType: 'text/tab-separated-values' })
     expect(canvasTypeForFile('x.mmd')).toEqual({ kind: 'diagram', mediaType: 'text/vnd.mermaid' })
     expect(canvasTypeForFile('x.svg')).toEqual({ kind: 'image', mediaType: 'image/svg+xml' })
-    expect(canvasTypeForFile('x.html')).toBeNull()
+    expect(canvasTypeForFile('x.html')).toEqual({ kind: 'html', mediaType: 'text/html' })
+    expect(canvasTypeForFile('bench.VL.json')).toEqual({ kind: 'chart', mediaType: 'application/vnd.vegalite+json' })
     expect(canvasTypeForFile('x.json')).toBeNull()
   })
 })

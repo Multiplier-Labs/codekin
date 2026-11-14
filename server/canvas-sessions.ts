@@ -28,7 +28,7 @@ export interface CanvasPublishInput {
 }
 
 const TABLE_MEDIA: Record<string, string> = { csv: 'text/csv', tsv: 'text/tab-separated-values', json: 'application/json' }
-const TEXT_MEDIA: Record<Exclude<CanvasItemKind, 'image' | 'table'>, string> = { markdown: 'text/markdown', diagram: 'text/vnd.mermaid' }
+const TEXT_MEDIA: Record<Exclude<CanvasItemKind, 'image' | 'table'>, string> = { markdown: 'text/markdown', diagram: 'text/vnd.mermaid', chart: 'application/vnd.vegalite+json', html: 'text/html' }
 
 export interface CanvasSessionsDeps {
   getSession: (id: string) => Session | undefined
@@ -129,7 +129,7 @@ export class CanvasSessions {
       const file = resolveInside(base, rel)
       const relPath = path.relative(realpathSync(base), file).split(path.sep).join('/')
       const type = canvasTypeForFile(file)
-      if (!type) throw new CanvasError(`Canvas can't show ${path.basename(file)} yet. It shows Markdown, CSV/TSV tables, Mermaid diagrams and images.`)
+      if (!type) throw new CanvasError(`Canvas can't show ${path.basename(file)} yet. It shows Markdown, CSV/TSV tables, Mermaid diagrams, images, Vega-Lite charts (.vl.json) and HTML pages.`)
       const stat = await fs.stat(file)
       if (!stat.isFile()) throw new CanvasError(`${relPath} is not a file.`)
       const limit = type.kind === 'image' ? CANVAS_LIMITS.maxImageBytes : CANVAS_LIMITS.maxTextBytes
@@ -188,7 +188,7 @@ export class CanvasSessions {
       fileName = path.basename(file)
       if (kind === 'table' && /\.json$/i.test(file)) mediaType = 'application/json'
       else if (type && type.kind === kind) mediaType = type.mediaType
-      else if (kind === 'markdown' || kind === 'diagram') mediaType = TEXT_MEDIA[kind]
+      else if (kind === 'markdown' || kind === 'diagram' || kind === 'chart' || kind === 'html') mediaType = TEXT_MEDIA[kind]
       else throw new CanvasError(`${fileName} can't be shown as a ${kind}.`)
     } else {
       if (typeof input.content !== 'string') throw new CanvasError('Pass content (text) or path (a file).')

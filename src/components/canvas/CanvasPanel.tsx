@@ -34,6 +34,8 @@ interface Props {
   onPointerDown?: () => void
   /** Attach a selection to the next message; `ask` also brings the composer up. */
   onAttach?: (attachment: CanvasAttachment, ask: boolean) => void
+  /** Where charts and HTML pages render (null: no sandbox; undefined: still finding out). */
+  sandboxOrigin?: string | null
 }
 
 const SUGGESTIONS = [
@@ -41,7 +43,7 @@ const SUGGESTIONS = [
   { Icon: IconTable, className: 'text-secondary-5', text: 'Put the failing tests in a table' },
 ]
 
-export function CanvasPanel({ canvas, replacesChat, isMobile, onBackToChat, lastAgentLine, onSuggest, onPointerDown, onAttach }: Props) {
+export function CanvasPanel({ canvas, replacesChat, isMobile, onBackToChat, lastAgentLine, onSuggest, onPointerDown, onAttach, sandboxOrigin }: Props) {
   const { items, selected, view, compare } = canvas
   const mainRef = useRef<HTMLElement>(null)
   const [width, setWidth] = useState(1000)
@@ -226,7 +228,7 @@ export function CanvasPanel({ canvas, replacesChat, isMobile, onBackToChat, last
             ? <CompareView item={selected} from={compare.from} to={compare.to} a={canvas.revisionContent(compare.from)} b={canvas.revisionContent(compare.to)} source={sourceMode} />
             : sourceMode && view.state === 'ready'
               ? <pre className="px-8 py-6 font-mono text-meta text-ink whitespace-pre-wrap break-words">{view.content.content}</pre>
-              : <CanvasItemView key={viewKey} view={view} onAttach={attach} onOpenFile={canvas.openFile} toc={width >= TOC_FROM} />}
+              : <CanvasItemView key={viewKey} view={view} onAttach={attach} onOpenFile={canvas.openFile} toc={width >= TOC_FROM} sandboxOrigin={sandboxOrigin} />}
       </div>
 
       {selection && !compare && (isMobile ? (

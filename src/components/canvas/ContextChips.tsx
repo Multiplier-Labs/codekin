@@ -6,18 +6,18 @@
  */
 
 import { useState } from 'react'
-import { IconChevronUp, IconHierarchy2, IconQuote, IconTable, IconX } from '@tabler/icons-react'
+import { IconChartBar, IconChevronUp, IconHierarchy2, IconQuote, IconTable, IconX } from '@tabler/icons-react'
 import type { CanvasAttachment, CanvasSelectionKind, SentContext } from '../../lib/canvasContext'
 
 const CHIP = 'flex min-w-0 max-w-full items-center gap-1.5 rounded-control border border-edge bg-page px-2 py-0.5 text-meta text-ink'
 
 function WhatIcon({ what }: { what: CanvasSelectionKind }) {
-  const Icon = what === 'rows' ? IconTable : what === 'node' ? IconHierarchy2 : IconQuote
-  const tone = what === 'rows' ? 'text-secondary-5' : what === 'node' ? 'text-warning-5' : 'text-primary-5'
+  const Icon = what === 'rows' ? IconTable : what === 'node' ? IconHierarchy2 : what === 'chart' ? IconChartBar : IconQuote
+  const tone = what === 'rows' || what === 'chart' ? 'text-secondary-5' : what === 'node' ? 'text-warning-5' : 'text-primary-5'
   return <Icon size={14} stroke={1.75} className={`shrink-0 ${tone}`} aria-hidden />
 }
 
-const WHAT_NAME: Record<CanvasSelectionKind, string> = { text: 'quote', rows: 'rows', node: 'node' }
+const WHAT_NAME: Record<CanvasSelectionKind, string> = { text: 'quote', rows: 'rows', node: 'node', chart: 'chart range' }
 
 export function ComposerContextChips({ attachments, onRemove }: { attachments: CanvasAttachment[]; onRemove: (id: string) => void }) {
   const [open, setOpen] = useState(false)

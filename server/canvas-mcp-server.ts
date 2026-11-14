@@ -62,7 +62,7 @@ async function run(call: () => Promise<string>): Promise<ToolResult> {
 
 interface ItemReply { item: { id: string; title: string; kind: string; revision: number } }
 
-const KINDS = ['markdown', 'table', 'diagram', 'image'] as const
+const KINDS = ['markdown', 'table', 'diagram', 'image', 'chart', 'html'] as const
 
 const nodesSchema = z.record(z.string(), z.object({
   file: z.string().optional().describe('Repository-relative file the node stands for'),
@@ -76,7 +76,8 @@ export function buildCanvasMcpServer(api: CanvasApi): McpServer {
     {
       instructions: [
         'Codekin shows a Canvas beside this chat. Put substantial output the user should read or keep there instead of pasting it into the reply:',
-        'reports and explanations (markdown), tabular results (table: CSV, TSV or JSON rows), architecture or flow diagrams (diagram: Mermaid), and images such as screenshots (image: a file path).',
+        'reports and explanations (markdown), tabular results (table: CSV, TSV or JSON rows), architecture or flow diagrams (diagram: Mermaid), images such as screenshots (image: a file path),',
+        'interactive charts (chart: a Vega-Lite JSON spec with its data inline as data.values; add a selection param so the user can select points or ranges), and small interactive pages (html: one self-contained file with inline scripts and styles; it has no network access).',
         'Give each item a short title, mention it in one line of your reply, and revise it with canvas_update rather than creating a near-duplicate.',
       ].join(' '),
     },
@@ -85,11 +86,11 @@ export function buildCanvasMcpServer(api: CanvasApi): McpServer {
   server.registerTool(
     'canvas_show',
     {
-      description: 'Show new output in the Canvas beside the chat: a Markdown document, a table, a Mermaid diagram, or an image file. Returns the item id for canvas_update.',
+      description: 'Show new output in the Canvas beside the chat: a Markdown document, a table, a Mermaid diagram, an image file, a Vega-Lite chart (data inline), or a self-contained HTML page (no network). Returns the item id for canvas_update.',
       inputSchema: {
         title: z.string().describe('Short title, e.g. "Benchmark results"'),
         kind: z.enum(KINDS),
-        content: z.string().optional().describe('Inline text: Markdown, table rows (see format), or Mermaid source. Omit when passing path.'),
+        content: z.string().optional().describe('Inline text: Markdown, table rows (see format), Mermaid source, a Vega-Lite JSON spec, or an HTML page. Omit when passing path.'),
         path: z.string().optional().describe('A file in the working directory instead of content. Required for images (png, jpg, gif, webp, svg).'),
         format: z.enum(['csv', 'tsv', 'json']).optional().describe('Table only: how inline content is encoded (default csv; json is an array of objects)'),
         nodes: nodesSchema,

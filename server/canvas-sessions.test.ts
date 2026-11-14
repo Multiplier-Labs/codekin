@@ -25,6 +25,7 @@ beforeEach(() => {
   writeFileSync(path.join(repo, 'docs', 'plan.md'), '# Plan')
   writeFileSync(path.join(repo, 'data.csv'), 'a,b\n1,2')
   writeFileSync(path.join(repo, 'page.html'), '<p>')
+  writeFileSync(path.join(repo, 'notes.txt'), 'plain')
   writeFileSync(path.join(attached, 'notes.md'), '# Notes')
   writeFileSync(path.join(tmp, 'secret.md'), 'outside')
   symlinkSync(path.join(tmp, 'secret.md'), path.join(repo, 'link.md'))
@@ -79,7 +80,8 @@ describe('CanvasSessions.openFile', () => {
   })
 
   it('names the supported types for files it cannot show', async () => {
-    expect(await canvas.openFile('s1', 'page.html')).toMatch(/Markdown, CSV\/TSV tables, Mermaid diagrams and images/)
+    expect(await canvas.openFile('s1', 'notes.txt')).toMatch(/Markdown, CSV\/TSV tables, Mermaid diagrams, images, Vega-Lite charts/)
+    expect(await canvas.openFile('s1', 'page.html')).toBeNull()
   })
 
   it('reports an unknown session', async () => {
@@ -155,7 +157,8 @@ describe('CanvasSessions.publish (agent tools)', () => {
   it('refuses what the agent should fix', async () => {
     await expect(canvas.publish('s1', { kind: 'markdown', path: path.join(tmp, 'secret.md') })).rejects.toThrow(/outside the session's folder/)
     await expect(canvas.publish('s1', { kind: 'markdown', path: 'link.md' })).rejects.toThrow(/outside the session's folder/)
-    await expect(canvas.publish('s1', { kind: 'chart', content: 'x' })).rejects.toThrow(/kind must be one of/)
+    await expect(canvas.publish('s1', { kind: 'video', content: 'x' })).rejects.toThrow(/kind must be one of/)
+    await expect(canvas.publish('s1', { title: 'C', kind: 'chart', content: 'x' })).rejects.toThrow(/does not parse/)
     await expect(canvas.publish('s1', { kind: 'image', content: 'x' })).rejects.toThrow(/Images need a path/)
     await expect(canvas.publish('s1', { kind: 'markdown', content: 'x', path: 'data.csv' })).rejects.toThrow(/either content or path/)
     await expect(canvas.publish('s1', { kind: 'markdown' })).rejects.toThrow(/Pass content/)

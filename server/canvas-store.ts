@@ -29,7 +29,7 @@ export const CANVAS_LIMITS = {
   maxNodeFieldLength: 1000,
 } as const
 
-export const CANVAS_KINDS: readonly CanvasItemKind[] = ['markdown', 'table', 'diagram', 'image']
+export const CANVAS_KINDS: readonly CanvasItemKind[] = ['markdown', 'table', 'diagram', 'image', 'chart', 'html']
 
 /** Media types each kind accepts. */
 const MEDIA_TYPES: Record<CanvasItemKind, readonly string[]> = {
@@ -37,6 +37,10 @@ const MEDIA_TYPES: Record<CanvasItemKind, readonly string[]> = {
   table: ['text/csv', 'text/tab-separated-values', 'application/json'],
   diagram: ['text/vnd.mermaid'],
   image: ['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/svg+xml'],
+  /** A Vega-Lite spec (JSON), rendered in the sandbox origin. */
+  chart: ['application/vnd.vegalite+json'],
+  /** A self-contained page, rendered in the sandbox origin with no network. */
+  html: ['text/html'],
 }
 
 const ITEM_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
@@ -73,6 +77,8 @@ export interface CanvasRevisionContent {
 
 /** Kind and media type for a file opened in Canvas, by extension; null when unsupported. */
 export function canvasTypeForFile(file: string): { kind: CanvasItemKind; mediaType: string } | null {
+  const lower = file.toLowerCase()
+  if (lower.endsWith('.vl.json') || lower.endsWith('.vegalite.json')) return { kind: 'chart', mediaType: 'application/vnd.vegalite+json' }
   const ext = path.extname(file).toLowerCase()
   switch (ext) {
     case '.md': case '.markdown': case '.mdx': return { kind: 'markdown', mediaType: 'text/markdown' }
@@ -84,6 +90,7 @@ export function canvasTypeForFile(file: string): { kind: CanvasItemKind; mediaTy
     case '.gif': return { kind: 'image', mediaType: 'image/gif' }
     case '.webp': return { kind: 'image', mediaType: 'image/webp' }
     case '.svg': return { kind: 'image', mediaType: 'image/svg+xml' }
+    case '.html': case '.htm': return { kind: 'html', mediaType: 'text/html' }
     default: return null
   }
 }
@@ -162,6 +169,11 @@ function checkContent(kind: CanvasItemKind, input: CanvasContentInput): Buffer {
   if (buf.length > CANVAS_LIMITS.maxTextBytes) throw new CanvasError(`Text items can be at most ${CANVAS_LIMITS.maxTextBytes / 1024 / 1024} MiB.`)
   const text = decodeUtf8(buf)
   if (text === null) throw new CanvasError('Text items must be UTF-8.')
+  if (input.mediaType === 'application/vnd.vegalite+json') {
+    let parsed: unknown
+    try { parsed = JSON.parse(text) } catch { throw new CanvasError('The chart spec does not parse as JSON.') }
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) throw new CanvasError('A chart must be a Vega-Lite spec: a JSON object.')
+  }
   if (input.mediaType === 'application/json') {
     let parsed: unknown
     try { parsed = JSON.parse(text) } catch { throw new CanvasError('The table JSON does not parse.') }

@@ -282,6 +282,13 @@ export async function getPrefs(token: string): Promise<Record<string, unknown> |
   return (await readJson<{ prefs: Record<string, unknown> }>(res)).prefs
 }
 
+/** Where this machine serves the Canvas sandbox page: a configured origin, or a port on this host. */
+export async function getCanvasSandbox(token: string): Promise<{ origin: string | null; port: number | null } | null> {
+  const res = await apiSend(`/api/canvas/sandbox`, { token })
+  if (!res.ok) return null
+  return readJson<{ origin: string | null; port: number | null }>(res)
+}
+
 /** Merge a partial update into the UI preferences; null values remove keys. */
 export async function putPrefs(token: string, patch: Record<string, unknown>): Promise<void> {
   await api(`/api/settings/prefs`, { method: 'PUT', token, body: { patch }, parse: 'none', error: 'Failed to save preferences' })

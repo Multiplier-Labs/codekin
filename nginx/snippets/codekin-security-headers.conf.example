@@ -18,10 +18,12 @@
 #   third-party hosts.
 # - connect-src names the wss:// origin explicitly because older Safari
 #   doesn't count same-host WebSockets as 'self'.
+# - frame-src allows only the Canvas sandbox page (nginx/sandbox.example);
+#   use 'none' if you don't serve one (charts and HTML items then show source).
 # - Relay deployments can collect violation reports in the relay log: append
 #   `; report-uri /api/csp-report` to the policy. The local server has no
 #   such endpoint, so leave it out there.
-add_header Content-Security-Policy "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: https://avatars.githubusercontent.com; font-src 'self'; connect-src 'self' wss://YOUR_DOMAIN; manifest-src 'self'; frame-src 'none'; frame-ancestors 'none'; object-src 'none'; base-uri 'none'; form-action 'self'; upgrade-insecure-requests" always;
+add_header Content-Security-Policy "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: https://avatars.githubusercontent.com; font-src 'self'; connect-src 'self' wss://YOUR_DOMAIN; manifest-src 'self'; frame-src https://SANDBOX_DOMAIN; frame-ancestors 'none'; object-src 'none'; base-uri 'none'; form-action 'self'; upgrade-insecure-requests" always;
 add_header Strict-Transport-Security "max-age=63072000; includeSubDomains" always;
 add_header Cross-Origin-Opener-Policy "same-origin" always;
 add_header Cross-Origin-Resource-Policy "same-origin" always;

@@ -5,13 +5,14 @@
  */
 
 import { useMemo, useRef } from 'react'
-import { IconAlertTriangle, IconLoader2 } from '@tabler/icons-react'
+import { IconAlertTriangle, IconLoader2, IconShieldLock } from '@tabler/icons-react'
 import type { CanvasView } from '../../hooks/useCanvas'
 import { MarkdownRenderer } from '../MarkdownRenderer'
 import { markdownHeadings } from '../../lib/canvasItems'
 import type { CanvasSelectionKind } from '../../lib/canvasContext'
 import { DiagramView } from './DiagramView'
 import { TableView } from './TableView'
+import { SandboxFrame } from './SandboxFrame'
 
 interface Props {
   view: Exclude<CanvasView, { state: 'empty' }>
@@ -21,9 +22,11 @@ interface Props {
   onOpenFile: (path: string) => void
   /** Wide Canvas: Markdown items show a table of contents. */
   toc?: boolean
+  /** Sandbox origin for charts and HTML pages; null when there is none, undefined while finding out. */
+  sandboxOrigin?: string | null
 }
 
-export function CanvasItemView({ view, onAttach, onOpenFile, toc }: Props) {
+export function CanvasItemView({ view, onAttach, onOpenFile, toc, sandboxOrigin }: Props) {
   if (view.state === 'loading') {
     return (
       <div className="flex flex-1 items-center justify-center gap-2 text-meta text-ink-muted" role="status">
@@ -54,6 +57,30 @@ export function CanvasItemView({ view, onAttach, onOpenFile, toc }: Props) {
           alt={item.title}
           className="max-h-full max-w-full rounded-control border border-edge bg-surface object-contain"
         />
+      </div>
+    )
+  }
+  if (item.kind === 'chart' || item.kind === 'html') {
+    if (sandboxOrigin) {
+      return (
+        <SandboxFrame
+          origin={sandboxOrigin}
+          kind={item.kind}
+          content={content.content}
+          author={item.source.type === 'agent' ? 'the agent' : item.source.type === 'file' ? 'you' : item.source.server}
+          onSelection={(label, excerpt, ask) => { onAttach('chart', excerpt, label, ask) }}
+        />
+      )
+    }
+    return (
+      <div className="px-8 py-6">
+        {sandboxOrigin === null && (
+          <p className="mb-4 flex items-start gap-2 rounded-control border border-edge bg-surface px-3 py-2 text-meta text-ink-muted" role="note">
+            <IconShieldLock size={16} className="mt-0.5 shrink-0" aria-hidden />
+            {item.kind === 'chart' ? 'Interactive charts' : 'Interactive pages'} run in a sandbox on a separate web address, and this Codekin has none set up, so its source is shown instead. See CANVAS_SANDBOX_ORIGIN in the Canvas docs.
+          </p>
+        )}
+        <pre className="font-mono text-meta text-ink whitespace-pre-wrap break-words">{content.content}</pre>
       </div>
     )
   }
