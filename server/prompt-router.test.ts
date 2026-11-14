@@ -108,6 +108,19 @@ describe('PromptRouter', () => {
       expect(result).toBe('permissionMode')
     })
 
+    it('accepts every tool in the bypass modes, except questions to the user', () => {
+      for (const mode of ['bypassPermissions', 'dangerouslySkipPermissions'] as const) {
+        session.permissionMode = mode
+        expect(router.resolveAutoApproval(session, 'Bash', { command: 'rm -rf build && node -e "1"' })).toBe('permissionMode')
+        expect(router.resolveAutoApproval(session, 'mcp__counter__echo', { text: 'x' })).toBe('permissionMode')
+        expect(router.resolveAutoApproval(session, 'WebFetch', { url: 'https://example.com' })).toBe('permissionMode')
+        expect(router.resolveAutoApproval(session, 'AskUserQuestion', {})).toBe('prompt')
+        expect(router.resolveAutoApproval(session, 'ExitPlanMode', {})).toBe('prompt')
+      }
+      session.permissionMode = 'acceptEdits'
+      expect(router.resolveAutoApproval(session, 'Bash', { command: 'node -e "1"' })).toBe('prompt')
+    })
+
     it('returns "readOnly" for in-project read-only tools regardless of mode', () => {
       session.permissionMode = 'acceptEdits'
       expect(router.resolveAutoApproval(session, 'Read', {})).toBe('readOnly')

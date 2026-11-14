@@ -680,6 +680,12 @@ export class PromptRouter {
   /** Permission modes that auto-approve file-editing tools. */
   private static readonly EDIT_MODES = new Set(['acceptEdits', 'bypassPermissions', 'dangerouslySkipPermissions'])
 
+  /** Permission modes in which every tool runs without asking. */
+  private static readonly BYPASS_MODES = new Set(['bypassPermissions', 'dangerouslySkipPermissions'])
+
+  /** Tools that are a question to the user, not a permission: asked in every mode. */
+  private static readonly USER_INTERACTION_TOOLS = new Set(['AskUserQuestion', 'ExitPlanMode'])
+
   /** Read-only tools that are safe in every permission mode (including plan). */
   private static readonly READ_ONLY_TOOLS = new Set(['Read', 'Glob', 'Grep'])
 
@@ -725,6 +731,12 @@ export class PromptRouter {
     // The PreToolUse hook intercepts them before Claude's native permission
     // logic runs, so we must enforce permission mode here.
     if (PromptRouter.FILE_TOOLS.has(toolName) && PromptRouter.EDIT_MODES.has(session.permissionMode ?? '')) {
+      return 'permissionMode'
+    }
+    // Bypass modes accept every tool. The PreToolUse hook asks here before
+    // Claude's own permission logic runs, so the mode is enforced here too:
+    // the hook only knows the mode the process was started with.
+    if (PromptRouter.BYPASS_MODES.has(session.permissionMode ?? '') && !PromptRouter.USER_INTERACTION_TOOLS.has(toolName) && !this.isPlanModeActive(session)) {
       return 'permissionMode'
     }
     if (toolName === 'Bash') {
