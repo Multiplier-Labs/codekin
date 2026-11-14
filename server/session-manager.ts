@@ -34,6 +34,7 @@ import { DATA_DIR, PORT } from './config.js'
 import { CanvasStore } from './canvas-store.js'
 import { CanvasSessions } from './canvas-sessions.js'
 import { PreviewManager } from './preview-manager.js'
+import { AppToolCalls } from './app-tool-calls.js'
 import { ApprovalManager } from './approval-manager.js'
 import { PromptRouter, type PromptResponseOutcome } from './prompt-router.js'
 import { isIsolationBlocked, SessionLifecycle } from './session-lifecycle.js'
@@ -147,6 +148,8 @@ export class SessionManager {
   readonly canvas: CanvasSessions
   /** Live previews of dev servers in Canvas (docs/CANVAS-SPEC.md §9); off until ws-server configures ports. */
   readonly previews: PreviewManager
+  /** Tool calls MCP Apps in Canvas make on their own server. */
+  readonly appToolCalls: AppToolCalls
   /** Exposed so ws-server can pass its port to child Claude processes. */
   _serverPort = PORT
   /** Exposed so ws-server can pass the auth token to child Claude processes. */
@@ -199,6 +202,11 @@ export class SessionManager {
       broadcast: (session, msg) => this.broadcast(session, msg),
       target: (sessionId, itemId) => this.canvas.previewTarget(sessionId, itemId),
       publish: (sessionId, input, source) => this.canvas.publishPreview(sessionId, input, source),
+    })
+    this.appToolCalls = new AppToolCalls({
+      appServer: (sessionId, itemId) => this.canvas.mcpAppServer(sessionId, itemId),
+      process: (sessionId) => this.sessions.get(sessionId)?.claudeProcess ?? null,
+      start: (sessionId) => this.startClaude(sessionId),
     })
     this._approvalManager = new ApprovalManager()
     this.diffManager = new DiffManager()
@@ -1141,6 +1149,7 @@ export class SessionManager {
     this.sessions.delete(sessionId)
     this.canvas.removeSession(sessionId)
     this.previews.removeSession(sessionId)
+    this.appToolCalls.forgetSession(sessionId)
     this.persistToDisk()
     this._globalBroadcast?.({ type: 'sessions_updated' })
     return true

@@ -63,6 +63,13 @@ export interface CodingProcess extends EventEmitter<ClaudeProcessEvents> {
    */
   setEffort?(effort: string | undefined): void
 
+  /**
+   * Call a tool for an MCP App shown in Canvas, without a model turn. The
+   * result goes to the app, not the agent. Providers that can't show MCP
+   * Apps omit this.
+   */
+  callAppTool?(request: import('./mcp-app.js').AppToolCallRequest): Promise<import('./mcp-app.js').AppToolCallOutcome>
+
   /** Seed task/todo state from a previous process's last known list (session restore). */
   seedTasks(tasks: TaskItem[]): void
 

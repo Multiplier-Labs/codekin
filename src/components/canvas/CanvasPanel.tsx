@@ -231,7 +231,7 @@ export function CanvasPanel({ canvas, replacesChat, isMobile, onBackToChat, last
             ? <CompareView item={selected} from={compare.from} to={compare.to} a={canvas.revisionContent(compare.from)} b={canvas.revisionContent(compare.to)} source={sourceMode} />
             : sourceMode && view.state === 'ready'
               ? <pre className="px-8 py-6 font-mono text-meta text-ink whitespace-pre-wrap break-words">{view.content.content}</pre>
-              : <CanvasItemView key={live ? selected.id : viewKey} view={view} onAttach={attach} onOpenFile={canvas.openFile} toc={width >= TOC_FROM} sandboxOrigin={sandboxOrigin} onSendMessage={onSendMessage} preview={canvas.preview} isMobile={isMobile} />}
+              : <CanvasItemView key={live ? selected.id : viewKey} view={view} onAttach={attach} onOpenFile={canvas.openFile} toc={width >= TOC_FROM} sandboxOrigin={sandboxOrigin} onSendMessage={onSendMessage} preview={canvas.preview} isMobile={isMobile} onCallAppTool={canvas.callAppTool} />}
       </div>
 
       {selection && !compare && (isMobile ? (

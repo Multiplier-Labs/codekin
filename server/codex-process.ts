@@ -22,7 +22,7 @@
  * ~/.codex/auth.json, reused by app-server with automatic token refresh).
  */
 
-import { appDocument, isOwnServer, toContentBlocks } from './mcp-app.js'
+import { APP_TOOL_CALL_TIMEOUT_MS, appDocument, appToolRefusal, codexServerTools, isOwnServer, toCallResult, toContentBlocks, type AppToolCallOutcome, type AppToolCallRequest } from './mcp-app.js'
 import { spawn, type ChildProcess } from 'child_process'
 import { createInterface, type Interface } from 'readline'
 import { existsSync } from 'fs'
@@ -814,6 +814,25 @@ export class CodexProcess extends EventEmitter<ClaudeProcessEvents> implements C
       })
     } catch (err) {
       console.warn('[mcp-app] Could not read the app for', item.server, item.tool, err)
+    }
+  }
+
+  /**
+   * An MCP App's tool call (`mcpServer/tool/call`). The app-server doesn't
+   * say whether it applies approval rules to these calls, so Codekin makes
+   * one only after the user confirmed it.
+   */
+  async callAppTool(req: AppToolCallRequest): Promise<AppToolCallOutcome> {
+    if (!req.confirmed) return { ok: false, needsConfirmation: true, error: 'Codex app tool calls are confirmed in Codekin.' }
+    if (!this.threadId) return { ok: false, error: 'The Codex thread has not started yet.' }
+    try {
+      const list = await this.request('mcpServerStatus/list', { threadId: this.threadId, detail: 'toolsAndAuthOnly' })
+      const refused = appToolRefusal(req.server, req.tool, codexServerTools(list, req.server))
+      if (refused) return { ok: false, error: refused }
+      const result = await this.request('mcpServer/tool/call', { server: req.server, tool: req.tool, threadId: this.threadId, arguments: req.arguments }, APP_TOOL_CALL_TIMEOUT_MS)
+      return { ok: true, result: toCallResult(result) }
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) }
     }
   }
 

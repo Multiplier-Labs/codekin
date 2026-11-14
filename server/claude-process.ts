@@ -11,7 +11,7 @@
  * - Turn results and process exit
  */
 
-import { appDocument, findClaudeAppTool, showsApp, toContentBlocks, type McpAppCall } from './mcp-app.js'
+import { APP_TOOL_CALL_TIMEOUT_MS, appDocument, appToolRefusal, claudeMcpToolName, claudeServerPending, claudeServerTools, findClaudeAppTool, showsApp, toCallResult, toContentBlocks, type AppToolCallOutcome, type AppToolCallRequest, type McpAppCall } from './mcp-app.js'
 import { spawn, execFileSync, type ChildProcess } from 'child_process'
 import { createInterface, type Interface } from 'readline'
 import { existsSync } from 'fs'
@@ -150,6 +150,13 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> implements 
   private pendingOutboundControl = new Map<string, (ok: boolean, response?: Record<string, unknown>) => void>
   /** The CLI can describe tool UIs and read their resources (init capabilities). */
   private mcpAppsSupported = false
+  /** `mcp_call` applies the session's permission rules (check_permissions) and returns raw results (result_not_for_model). */
+  private appCallsChecked = false
+  private appCallsRaw = false
+  /** A system/init arrived (it carries the capabilities); before the first turn there is none. */
+  private sawInit = false
+  /** The `initialize` request asked for capabilities when no turn has run yet. */
+  private appCallCaps: Promise<void> | null = null
   /** MCP tool calls in flight: tool_use id → name and input (for MCP Apps). */
   private mcpToolUses = new Map<string, { name: string; input: Record<string, unknown> }>()
   /** Cached `mcp_status` (tool definitions with their UI metadata). */
@@ -370,6 +377,8 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> implements 
           this.sessionId = (event as ClaudeSystemInit).session_id || this.sessionId
           const caps = (event as { capabilities?: unknown }).capabilities
           this.mcpAppsSupported = Array.isArray(caps) && caps.includes('mcp_tool_ui_meta_v1') && caps.includes('mcp_read_resource_v1')
+          this.sawInit = true
+          this.noteAppCallCaps(caps)
           const model = ('model' in event ? (event as Record<string, unknown>).model : 'unknown') as string
           this.emit('system_init', model)
         }
@@ -421,7 +430,8 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> implements 
           const resolve = this.pendingOutboundControl.get(resp.request_id)
           if (resolve) {
             this.pendingOutboundControl.delete(resp.request_id)
-            resolve(resp.subtype === 'success', (resp as { response?: Record<string, unknown> }).response)
+            const r = resp as { response?: Record<string, unknown>; error?: unknown }
+            resolve(resp.subtype === 'success', resp.subtype === 'success' ? r.response : { error: r.error })
           }
         }
         break
@@ -538,13 +548,75 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> implements 
   }
 
   /** Send a control request to the CLI and wait for its response (null on failure or timeout). */
-  private controlRequest(request: Record<string, unknown>, timeoutMs = 10_000): Promise<Record<string, unknown> | null> {
+  private async controlRequest(request: Record<string, unknown>, timeoutMs = 10_000): Promise<Record<string, unknown> | null> {
+    const r = await this.controlCall(request, timeoutMs)
+    return r.ok ? r.response : null
+  }
+
+  /** A control request with its error: the CLI's message, or a timeout. */
+  private controlCall(request: Record<string, unknown>, timeoutMs: number): Promise<{ ok: true; response: Record<string, unknown> } | { ok: false; error: string }> {
     return new Promise((resolve) => {
       const requestId = randomUUID()
-      const timer = setTimeout(() => { this.pendingOutboundControl.delete(requestId); resolve(null) }, timeoutMs)
-      this.pendingOutboundControl.set(requestId, (ok, response) => { clearTimeout(timer); resolve(ok ? response ?? {} : null) })
+      const timer = setTimeout(() => {
+        this.pendingOutboundControl.delete(requestId)
+        resolve({ ok: false, error: `No answer from Claude Code within ${Math.round(timeoutMs / 1000)} s.` })
+      }, timeoutMs)
+      this.pendingOutboundControl.set(requestId, (ok, response) => {
+        clearTimeout(timer)
+        const error = typeof response?.error === 'string' ? response.error : 'Claude Code refused the request.'
+        resolve(ok ? { ok: true, response: response ?? {} } : { ok: false, error })
+      })
       this.sendRaw(JSON.stringify({ type: 'control_request', request_id: requestId, request }))
     })
+  }
+
+  private noteAppCallCaps(caps: unknown): void {
+    if (!Array.isArray(caps)) return
+    this.appCallsChecked ||= caps.includes('mcp_call_check_permissions_v1')
+    this.appCallsRaw ||= caps.includes('mcp_call_result_not_for_model_v1')
+  }
+
+  /**
+   * The CLI's app-call capabilities. A process restarted without a turn yet
+   * (reopening a session) has sent no system/init, so ask `initialize`,
+   * whose response lists the same capabilities.
+   */
+  private appCallCapabilities(): Promise<void> {
+    if (this.sawInit) return Promise.resolve()
+    this.appCallCaps ??= this.controlRequest({ subtype: 'initialize' }).then((r) => { this.noteAppCallCaps(r?.capabilities) })
+    return this.appCallCaps
+  }
+
+  /**
+   * An MCP App's tool call (Claude Code `mcp_call`). With
+   * `check_permissions` the CLI decides it as it would the model's own call
+   * to that tool: permission rules and mode, hooks, and an approval prompt
+   * through can_use_tool when one is needed. A CLI without that check gets
+   * the call only after the user confirmed it in Codekin. The result stays
+   * out of the model's context.
+   */
+  async callAppTool(req: AppToolCallRequest): Promise<AppToolCallOutcome> {
+    await this.appCallCapabilities()
+    if (!this.appCallsChecked && !req.confirmed) {
+      return { ok: false, needsConfirmation: true, error: 'This Claude Code version can\'t apply the session\'s permission rules to app tool calls.' }
+    }
+    // A just-started CLI may still be connecting to the server: wait for it, briefly.
+    let status = await this.controlRequest({ subtype: 'mcp_status' })
+    for (let i = 0; i < 30 && claudeServerPending(status, req.server); i++) {
+      await new Promise(r => setTimeout(r, 500))
+      status = await this.controlRequest({ subtype: 'mcp_status' })
+    }
+    const tools = claudeServerTools(status, req.server)
+    const refused = appToolRefusal(req.server, req.tool, tools)
+    if (refused) return { ok: false, error: refused }
+    const r = await this.controlCall({
+      subtype: 'mcp_call',
+      tool: claudeMcpToolName(req.server, req.tool),
+      arguments: req.arguments,
+      ...(this.appCallsChecked ? { check_permissions: true } : {}),
+      ...(this.appCallsRaw ? { result_not_for_model: true } : {}),
+    }, APP_TOOL_CALL_TIMEOUT_MS)
+    return r.ok ? { ok: true, result: toCallResult(r.response) } : { ok: false, error: r.error }
   }
 
   /**

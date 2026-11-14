@@ -6,7 +6,7 @@
 
 import { lazy, Suspense, useMemo, useRef } from 'react'
 import { IconAlertTriangle, IconLoader2, IconShieldLock } from '@tabler/icons-react'
-import type { CanvasView, PreviewApi } from '../../hooks/useCanvas'
+import type { AppToolOutcome, CanvasView, PreviewApi } from '../../hooks/useCanvas'
 import { MarkdownRenderer } from '../MarkdownRenderer'
 import { markdownHeadings } from '../../lib/canvasItems'
 import type { CanvasSelectionKind } from '../../lib/canvasContext'
@@ -33,9 +33,11 @@ interface Props {
   /** Live previews: their state and controls. */
   preview?: PreviewApi
   isMobile?: boolean
+  /** An MCP App calls a tool on its own server. */
+  onCallAppTool?: (itemId: string, tool: string, args: Record<string, unknown>, confirmed: boolean) => Promise<AppToolOutcome>
 }
 
-export function CanvasItemView({ view, onAttach, onOpenFile, toc, sandboxOrigin, onSendMessage, preview, isMobile }: Props) {
+export function CanvasItemView({ view, onAttach, onOpenFile, toc, sandboxOrigin, onSendMessage, preview, isMobile, onCallAppTool }: Props) {
   if (view.state === 'loading') {
     return (
       <div className="flex flex-1 items-center justify-center gap-2 text-meta text-ink-muted" role="status">
@@ -77,7 +79,8 @@ export function CanvasItemView({ view, onAttach, onOpenFile, toc, sandboxOrigin,
     if (sandboxOrigin) {
       return (
         <Suspense fallback={<div className="flex flex-1 items-center justify-center gap-2 text-meta text-ink-muted"><IconLoader2 size={18} className="animate-spin" /> Loading…</div>}>
-          <McpAppView origin={sandboxOrigin} content={content.content} onSendMessage={onSendMessage ?? (() => {})} />
+          <McpAppView origin={sandboxOrigin} content={content.content} onSendMessage={onSendMessage ?? (() => {})}
+            onCallTool={onCallAppTool ? (tool, args, confirmed) => onCallAppTool(item.id, tool, args, confirmed) : undefined} />
         </Suspense>
       )
     }

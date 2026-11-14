@@ -480,6 +480,19 @@ export function handleWsMessage(msg: WsClientMessage, ctx: WsHandlerContext): vo
       break
     }
 
+    case 'mcp_app_call': {
+      const sessionId = clientSessions.get(ws)
+      const { itemId, callId } = msg
+      if (typeof callId !== 'string' || typeof itemId !== 'string') break
+      if (!sessionId) { send({ type: 'mcp_app_result', sessionId: '', itemId, callId, error: 'Not in a session' }); break }
+      void sessions.appToolCalls.call(sessionId, itemId, msg.tool, msg.arguments, msg.confirmed === true).then((outcome) => {
+        send(outcome.ok
+          ? { type: 'mcp_app_result', sessionId, itemId, callId, result: outcome.result }
+          : { type: 'mcp_app_result', sessionId, itemId, callId, error: outcome.error, ...(outcome.needsConfirmation ? { needsConfirmation: true } : {}) })
+      })
+      break
+    }
+
     // --- Live preview: dev servers in Canvas (docs/CANVAS-SPEC.md §9) ---
 
     case 'preview_configs':
