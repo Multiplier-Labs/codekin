@@ -78,7 +78,9 @@ Canvas uses the session WebSocket, like review comments, so it follows the sessi
   - **Codex:** `-c mcp_servers.codekin_canvas.*` overrides, which forward the session env by name and set `default_tools_approval_mode="approve"`.
   - **Grok:** ACP `session/new` `mcpServers`. Its `use_tool` permission requests for these tools are allowed without a prompt.
 - The tools need no approval because they write only to the session's own Canvas.
-- OpenCode sessions don't get the server yet.
+- **OpenCode** runs one shared `opencode serve` for every session, so it can't get a per-session MCP server. Instead, Codekin writes custom tools to `DATA_DIR/opencode/tool/canvas.ts` and starts that server with `OPENCODE_CONFIG_DIR` pointing there. The tools are `canvas_show`, `canvas_update` and `canvas_list`.
+  - OpenCode passes each call the calling session's id. The tools send it to `/api/opencode-canvas/:openCodeSession/items`, which maps it to the Codekin session. That route accepts only a token derived for this purpose and set in the OpenCode server's environment.
+  - If you set `OPENCODE_CONFIG_DIR` yourself, Codekin leaves it alone, and OpenCode sessions run without Canvas.
 
 The session list carries `canvas: { items, pinnedBehind }` per session, so the sidebar can show a count and a dot when a pinned item has a newer revision.
 

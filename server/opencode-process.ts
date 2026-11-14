@@ -161,13 +161,21 @@ async function ensureOpenCodeServer(workingDir: string): Promise<string> {
   return `http://localhost:${serverState.port}`
 }
 
+/** Extra environment for the shared `opencode serve` (Canvas tools: see opencode-canvas.ts). */
+let extraServerEnv: Record<string, string> = {}
+
+/** Set environment the shared OpenCode server starts with; applies from its next start. */
+export function configureOpenCodeServerEnv(env: Record<string, string>): void {
+  extraServerEnv = env
+}
+
 async function startOpenCodeServer(workingDir: string): Promise<void> {
   // Pick a port in the ephemeral range
   serverState.port = 14096 + Math.floor(Math.random() * 1000)
   serverState.password = randomUUID()
 
   // Full parent environment minus stale API keys and GIT_* — see harness-env.ts.
-  const env = buildHarnessEnv({ OPENCODE_SERVER_PASSWORD: serverState.password })
+  const env = buildHarnessEnv({ ...extraServerEnv, OPENCODE_SERVER_PASSWORD: serverState.password })
 
   const proc = spawn('opencode', ['serve', '--port', String(serverState.port)], {
     cwd: workingDir,
