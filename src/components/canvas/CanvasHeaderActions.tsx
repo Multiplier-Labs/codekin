@@ -82,7 +82,9 @@ export function CanvasHeaderActions({ item, revision, narrow, sourceMode, onTogg
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [copied, setCopied] = useState(false)
   const pinned = item.pinnedRevision !== undefined
-  const canSource = item.kind !== 'image'
+  // A live preview has no source to show, and pinning it would mean nothing.
+  const live = item.kind === 'preview'
+  const canSource = item.kind !== 'image' && !live
 
   const copy = () => {
     if (copyText === undefined) return
@@ -96,12 +98,12 @@ export function CanvasHeaderActions({ item, revision, narrow, sourceMode, onTogg
 
   return (
     <div className="flex shrink-0 items-center gap-0.5">
-      <button type="button" onClick={() => { onPin(pinned ? null : revision) }} aria-pressed={pinned}
+      {!live && <button type="button" onClick={() => { onPin(pinned ? null : revision) }} aria-pressed={pinned}
         className={`${ICON_BTN} ${pinned ? 'text-accent-5 hover:text-accent-5' : ''}`}
         title={pinned ? `Pinned at rev ${item.pinnedRevision}: new revisions wait. Click to unpin.` : `Pin at rev ${revision} so new revisions wait`}
         aria-label={pinned ? 'Unpin' : 'Pin'}>
         {pinned ? <IconPinFilled size={17} /> : <IconPin size={17} />}
-      </button>
+      </button>}
       {!narrow && canSource && (
         <button type="button" onClick={onToggleSource} aria-pressed={sourceMode} className={`${ICON_BTN} ${sourceMode ? 'bg-primary-11 text-ink' : ''}`}
           title={sourceMode ? 'Show rendered' : 'View source'} aria-label={sourceMode ? 'Show rendered' : 'View source'}>
@@ -125,7 +127,9 @@ export function CanvasHeaderActions({ item, revision, narrow, sourceMode, onTogg
             {onCompare && row(<IconGitCompare size={16} />, revision < item.latest ? `Compare rev ${revision} with rev ${item.latest}` : `Compare with rev ${revision - 1}`, onCompare)}
             {confirmDelete ? (
               <div className="px-2.5 py-2 text-meta">
-                <p className="text-ink">Delete “{item.title}” and its {item.revisions.length} revision{item.revisions.length === 1 ? '' : 's'}?</p>
+                <p className="text-ink">{live
+                  ? `Remove the preview “${item.title}”? A server Codekin started for it stops.`
+                  : `Delete “${item.title}” and its ${item.revisions.length} revision${item.revisions.length === 1 ? '' : 's'}?`}</p>
                 <div className="mt-2 flex gap-2">
                   <button type="button" onClick={() => { onDelete(); setMenuOpen(false) }} className="rounded-control bg-error-5 px-2.5 py-1 font-medium text-ink-inverse hover:opacity-90">Delete</button>
                   <button type="button" onClick={() => { setConfirmDelete(false) }} className="rounded-control px-2.5 py-1 text-ink-muted hover:text-ink">Cancel</button>

@@ -331,4 +331,18 @@ describe('canvas', () => {
       expect(checkServerFrame(watcher, joined(watcher), frame({ type, sessionId: 's2' }))).toBe(false)
     }
   })
+
+  it('keeps previews to the owner: controls and state', () => {
+    for (const msg of [
+      { type: 'preview_configs' }, { type: 'preview_open', itemId: 'x' }, { type: 'preview_launch', name: 'web' },
+      { type: 'preview_stop', itemId: 'x' }, { type: 'preview_restart', itemId: 'x' }, { type: 'preview_logs', itemId: 'x' },
+    ]) {
+      expect(checkClientFrame(editor, joined(editor), frame(msg)).allowed).toBe(false)
+      expect(checkClientFrame(owner, joined(owner), frame(msg)).allowed).toBe(true)
+    }
+    for (const type of ['preview_state', 'preview_log', 'preview_configs']) {
+      expect(checkServerFrame(editor, joined(editor), frame({ type, sessionId: 's1' }))).toBe(false)
+      expect(checkServerFrame(owner, joined(owner), frame({ type, sessionId: 's1' }))).toBe(true)
+    }
+  })
 })

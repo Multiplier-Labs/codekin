@@ -12,7 +12,8 @@
 import express, { Router } from 'express'
 import type { Request } from 'express'
 import { CanvasError } from './canvas-store.js'
-import type { CanvasPublishInput, CanvasSessions } from './canvas-sessions.js'
+import type { CanvasPublishInput, CanvasSessions, PreviewPublishInput } from './canvas-sessions.js'
+import { PreviewError, type PreviewManager } from './preview-manager.js'
 import type { CanvasItem } from './types.js'
 
 type ExtractFn = (req: Request) => string | undefined
@@ -35,6 +36,7 @@ export function createCanvasRouter(
   verifySessionToken: VerifySessionFn,
   canvas: () => CanvasSessions,
   opencode?: OpenCodeCanvasAccess,
+  previews?: () => PreviewManager,
 ): Router {
   const router = Router()
   const json = express.json({ limit: '1536kb' })
@@ -59,6 +61,24 @@ export function createCanvasRouter(
       res.status(500).json({ error: 'The Canvas request failed.' })
     }
   }
+
+  /** canvas_preview: show a dev server the agent started, once its port answers. */
+  const preview = async (sessionId: string, body: PreviewPublishInput, res: express.Response) => {
+    try {
+      if (!previews) throw new PreviewError('Previews are not available on this Codekin.')
+      await previews().checkAgentTarget(body)
+      const item = await canvas().publishPreview(sessionId, body)
+      res.json({ item: describe(item), enabled: previews().enabled })
+    } catch (err) {
+      if (err instanceof CanvasError || err instanceof PreviewError) return res.status(400).json({ error: err.message })
+      console.error('[canvas] preview failed', err)
+      res.status(500).json({ error: 'The Canvas request failed.' })
+    }
+  }
+  router.post('/api/sessions/:id/canvas/preview', json, (req: Request<{ id: string }, unknown, PreviewPublishInput>, res) => {
+    if (!authorized(req)) return res.status(401).json({ error: 'Unauthorized' })
+    void preview(req.params.id, typeof req.body === 'object' && req.body ? req.body : { port: undefined }, res)
+  })
 
   router.post('/api/sessions/:id/canvas/items', json, (req: Request<{ id: string }, unknown, CanvasPublishInput>, res) => {
     void publish()(req, res)
@@ -94,6 +114,11 @@ export function createCanvasRouter(
         res.status(500).json({ error: 'The Canvas request failed.' })
       }
     }
+    router.post('/api/opencode-canvas/:oc/preview', json, (req: Request<{ oc: string }, unknown, PreviewPublishInput>, res) => {
+      const sessionId = resolveSession(req, res)
+      if (!sessionId) return
+      void preview(sessionId, typeof req.body === 'object' && req.body ? req.body : { port: undefined }, res)
+    })
     router.post('/api/opencode-canvas/:oc/items', json, (req: Request<{ oc: string }, unknown, CanvasPublishInput>, res) => { void publishFor(req, res) })
     router.post('/api/opencode-canvas/:oc/items/:itemId', json, (req: Request<{ oc: string; itemId: string }, unknown, CanvasPublishInput>, res) => { void publishFor(req, res, req.params.itemId) })
   }

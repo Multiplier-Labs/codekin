@@ -88,6 +88,18 @@ export type WsClientMessage =
   /** Pin an item at a revision so new ones wait; null unpins. */
   | { type: 'canvas_pin'; itemId: string; revision: number | null }
   | { type: 'canvas_delete'; itemId: string }
+  // Live preview (docs/CANVAS-SPEC.md §9): a dev server shown in Canvas through Codekin's proxy.
+  /** The session folder's launch configurations (.claude/launch.json). */
+  | { type: 'preview_configs' }
+  /** Get a preview item's proxy ready to frame, and its state. */
+  | { type: 'preview_open'; itemId: string }
+  /** Start a launch configuration by name (the user's choice, after seeing its command). */
+  | { type: 'preview_launch'; name: string }
+  /** Stop or restart a server Codekin started. */
+  | { type: 'preview_stop'; itemId: string }
+  | { type: 'preview_restart'; itemId: string }
+  /** The server output Codekin kept for a preview it started. */
+  | { type: 'preview_logs'; itemId: string }
   | { type: 'move_to_worktree' }
   | { type: 'retry_worktree' }
   | { type: 'use_existing_checkout' }
@@ -177,6 +189,11 @@ export type WsServerMessage =
   | { type: 'canvas_event'; sessionId: string; itemId: string; kind: CanvasItemKind; title: string; revision: number; action: 'created' | 'updated'; by?: CanvasItemSource['type'] }
   /** A failed request. `itemId`/`revision` are set when it was a canvas_get for that revision. */
   | { type: 'canvas_error'; message: string; sessionId?: string; itemId?: string; revision?: number }
+  /** A preview's server and proxy state; broadcast on every change. */
+  | { type: 'preview_state'; sessionId: string; preview: PreviewState }
+  | { type: 'preview_configs'; sessionId: string; file: string; configs: PreviewLaunchConfig[]; error?: string }
+  /** Server output lines; `reset` replaces what the client holds (a reply to preview_logs, or a restart). */
+  | { type: 'preview_log'; sessionId: string; itemId: string; lines: string[]; reset?: boolean }
 
 /** Task milestones Joe posts back into the conversation a task came from. */
 export type JoeMilestone = 'accepted' | 'decision' | 'blocked' | 'review'
@@ -237,7 +254,57 @@ export interface ReviewComment {
 }
 
 /** What a Canvas item shows (docs/CANVAS-SPEC.md §2). */
-export type CanvasItemKind = 'markdown' | 'table' | 'diagram' | 'image' | 'chart' | 'html' | 'mcp_app'
+export type CanvasItemKind = 'markdown' | 'table' | 'diagram' | 'image' | 'chart' | 'html' | 'mcp_app' | 'preview'
+
+/** A preview item's content (JSON): which local server it shows. */
+export interface PreviewTarget {
+  port: number
+  /** Path the preview opens at. */
+  path: string
+  /** The launch configuration that starts it, when the user started it from one. */
+  config?: string
+}
+
+/**
+ * - starting: Codekin started the server and is waiting for its port;
+ * - running: the port answers;
+ * - stopped: nothing answers (it was stopped, or never started);
+ * - crashed: the server Codekin started exited on its own.
+ */
+export type PreviewStatus = 'starting' | 'running' | 'stopped' | 'crashed'
+
+export interface PreviewState {
+  itemId: string
+  status: PreviewStatus
+  /** The dev server's port on this machine. */
+  targetPort: number
+  /** Codekin's proxy port for this preview (its own origin); absent when previews are off or none is free. */
+  proxyPort?: number
+  /** Path on the proxy that admits the frame (it carries the preview's key) and redirects to the app. */
+  entry?: string
+  /** Codekin started the server (from a launch configuration) and can stop or restart it. */
+  managed: boolean
+  config?: string
+  command?: string
+  exitCode?: number | null
+  error?: string
+  /** Something worth knowing that isn't a failure, e.g. the port was already in use. */
+  notice?: string
+}
+
+/** A launch configuration as the user sees it before starting it. */
+export interface PreviewLaunchConfig {
+  name: string
+  /** The command line; null for an entry that attaches to a server you run (url only). */
+  command: string | null
+  port: number
+  cwd?: string
+  url?: string
+  /** Names of the env variables it sets (values stay on the machine). */
+  envKeys?: string[]
+  /** Why it can't be started as written. */
+  error?: string
+}
 
 /** Who made a Canvas item. */
 export type CanvasItemSource =
@@ -245,6 +312,8 @@ export type CanvasItemSource =
   /** Opened by the user from a file; `root` is the attached folder it came from, if any. */
   | { type: 'file'; path: string; root?: string }
   | { type: 'mcp'; server: string }
+  /** A preview the user started from a launch configuration. */
+  | { type: 'launch'; config: string }
 
 /** One stored revision of a Canvas item. */
 export interface CanvasRevision {

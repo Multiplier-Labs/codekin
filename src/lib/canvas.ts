@@ -42,6 +42,7 @@ export function sourceLabel(item: CanvasItem): string {
     case 'agent': return 'Agent'
     case 'file': return 'You'
     case 'mcp': return item.source.server
+    case 'launch': return 'You'
   }
 }
 
@@ -51,9 +52,9 @@ export function sourceLabel(item: CanvasItem): string {
  * bare canvas_show); other tool names come back unchanged.
  */
 export function displayToolName(name: string): string {
-  const m = /^(?:mcp__codekin_canvas__|codekin_canvas(?:__|\.))?canvas_(show|update|list)$/.exec(name)
+  const m = /^(?:mcp__codekin_canvas__|codekin_canvas(?:__|\.))?canvas_(show|update|list|preview)$/.exec(name)
   if (!m) return name
-  return { show: 'Canvas: show', update: 'Canvas: update', list: 'Canvas: list' }[m[1] as 'show' | 'update' | 'list']
+  return { show: 'Canvas: show', update: 'Canvas: update', list: 'Canvas: list', preview: 'Canvas: preview' }[m[1] as 'show' | 'update' | 'list' | 'preview']
 }
 
 /** Short relative time: "just now", "4 min ago", "3 h ago", "2 d ago". */

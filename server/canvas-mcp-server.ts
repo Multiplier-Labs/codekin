@@ -14,7 +14,7 @@ import { pathToFileURL } from 'url'
 import { z } from 'zod'
 
 export const CANVAS_MCP_SERVER_NAME = 'codekin_canvas'
-export const CANVAS_MCP_TOOLS = ['canvas_show', 'canvas_update', 'canvas_list'] as const
+export const CANVAS_MCP_TOOLS = ['canvas_show', 'canvas_update', 'canvas_list', 'canvas_preview'] as const
 
 export interface CanvasApi {
   request(method: 'GET' | 'POST', path: string, body?: unknown): Promise<unknown>
@@ -79,6 +79,7 @@ export function buildCanvasMcpServer(api: CanvasApi): McpServer {
         'reports and explanations (markdown), tabular results (table: CSV, TSV or JSON rows), architecture or flow diagrams (diagram: Mermaid), images such as screenshots (image: a file path),',
         'interactive charts (chart: a Vega-Lite JSON spec with its data inline as data.values; add a selection param so the user can select points or ranges), and small interactive pages (html: one self-contained file with inline scripts and styles; it has no network access).',
         'Give each item a short title, mention it in one line of your reply, and revise it with canvas_update rather than creating a near-duplicate.',
+        'To show a web app you are working on, start its dev server yourself in the background, then call canvas_preview with its port: the user sees it live and can pick elements to point you at.',
       ].join(' '),
     },
   )
@@ -118,6 +119,22 @@ export function buildCanvasMcpServer(api: CanvasApi): McpServer {
     ({ itemId, ...rest }) => run(async () => {
       const { item } = await api.request('POST', `/items/${encodeURIComponent(itemId)}`, rest) as ItemReply
       return `Updated "${item.title}" in Canvas (now revision ${item.revision}).`
+    }),
+  )
+
+  server.registerTool(
+    'canvas_preview',
+    {
+      description: 'Show a running dev server (on this machine) live in the Canvas, e.g. after starting `npm run dev` in the background. Codekin never starts it for you: start it first and wait until it is ready. Calling again for the same port updates the preview (e.g. a new path).',
+      inputSchema: {
+        port: z.number().int().min(1).max(65535).describe('The port the dev server listens on, e.g. 5173'),
+        path: z.string().optional().describe('Page to open, starting with / (default /)'),
+        title: z.string().optional().describe('Short title, e.g. "Web app"'),
+      },
+    },
+    (args) => run(async () => {
+      const { item, enabled } = await api.request('POST', '/preview', args) as ItemReply & { enabled?: boolean }
+      return `Previewing port ${args.port} in Canvas as "${item.title}" (id ${item.id}).${enabled === false ? ' Note: previews are turned off on this Codekin, so the user sees only the address.' : ' The user can pick elements in it, which reach you as context.'}`
     }),
   )
 

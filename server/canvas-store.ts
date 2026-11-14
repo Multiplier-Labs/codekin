@@ -29,7 +29,7 @@ export const CANVAS_LIMITS = {
   maxNodeFieldLength: 1000,
 } as const
 
-export const CANVAS_KINDS: readonly CanvasItemKind[] = ['markdown', 'table', 'diagram', 'image', 'chart', 'html', 'mcp_app']
+export const CANVAS_KINDS: readonly CanvasItemKind[] = ['markdown', 'table', 'diagram', 'image', 'chart', 'html', 'mcp_app', 'preview']
 
 /** Media types each kind accepts. */
 const MEDIA_TYPES: Record<CanvasItemKind, readonly string[]> = {
@@ -43,6 +43,8 @@ const MEDIA_TYPES: Record<CanvasItemKind, readonly string[]> = {
   html: ['text/html'],
   /** An MCP App: one tool call (input, result) and its UI document (see mcp-app.ts). */
   mcp_app: ['application/vnd.codekin.mcp-app+json'],
+  /** A dev server on this machine, shown live through the preview proxy (PreviewTarget). */
+  preview: ['application/vnd.codekin.preview+json'],
 }
 
 const ITEM_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
@@ -176,6 +178,14 @@ function checkContent(kind: CanvasItemKind, input: CanvasContentInput): Buffer {
     try { parsed = JSON.parse(text) } catch { /* below */ }
     const r = (typeof parsed === 'object' && parsed !== null ? parsed : {}) as { html?: unknown; server?: unknown; tool?: unknown }
     if (typeof r.html !== 'string' || typeof r.server !== 'string' || typeof r.tool !== 'string') throw new CanvasError('Not an MCP App record.')
+  }
+  if (input.mediaType === 'application/vnd.codekin.preview+json') {
+    let parsed: unknown = null
+    try { parsed = JSON.parse(text) } catch { /* below */ }
+    const t = (typeof parsed === 'object' && parsed !== null ? parsed : {}) as { port?: unknown; path?: unknown }
+    if (typeof t.port !== 'number' || !Number.isInteger(t.port) || t.port < 1 || t.port > 65535 || typeof t.path !== 'string' || !t.path.startsWith('/')) {
+      throw new CanvasError('Not a preview target.')
+    }
   }
   if (input.mediaType === 'application/vnd.vegalite+json') {
     let parsed: unknown

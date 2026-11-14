@@ -1,6 +1,6 @@
 # Session Canvas
 
-**Status:** Slices 1–5 implemented: item model and store (#896), layout shell (#897), agent publishing (#898), renderers (#899), revisions (#900), selection → context (#901), the composer (#902), OpenCode tools (#903) the sandbox origin with charts and HTML items (#904), and MCP Apps display. Slice 7 (live preview) is next.
+**Status:** Slices 1–7 implemented: item model and store (#896), layout shell (#897), agent publishing (#898), renderers (#899), revisions (#900), selection → context (#901), the composer (#902), OpenCode tools (#903), the sandbox origin with charts and HTML items (#904), MCP Apps display (#905), and live preview of local dev servers.
 
 ## 1. Summary
 
@@ -12,7 +12,8 @@ Three ways in:
 
 1. **The agent publishes** an item through a `canvas_show` / `canvas_update` tool on a Codekin MCP server added to every session (slice 3).
 2. **The user opens a file** in Canvas from Changes, Docs or a file link in chat.
-3. **An MCP tool returns a UI**, which the provider adapter detects (slice 5).
+3. **An MCP tool returns a UI**, which the provider adapter detects (slice 6).
+4. **A dev server runs on this machine.** The agent starts it and calls `canvas_preview`, or the user starts one from `.claude/launch.json`. Canvas shows the app live (slice 7, see "Live preview" in section 8).
 
 ## 2. Item model
 
@@ -22,9 +23,9 @@ An item belongs to one session and has an ordered list of revisions.
 |---|---|
 | `id` | Random id, unique within the session |
 | `sessionId` | Owning session |
-| `kind` | `markdown`, `table`, `diagram`, `image`, `chart` (Vega-Lite), `html`, or `mcp_app` (from a tool call; later `preview`) |
+| `kind` | `markdown`, `table`, `diagram`, `image`, `chart` (Vega-Lite), `html`, `mcp_app` (from a tool call) or `preview` (a dev server) |
 | `title` | Shown in the switcher and chat card |
-| `source` | Who made it: `{ type: 'agent' }`, `{ type: 'file', path }` (opened by the user) or `{ type: 'mcp', server }` |
+| `source` | Who made it: `{ type: 'agent' }`, `{ type: 'file', path }` (opened by the user), `{ type: 'mcp', server }` or `{ type: 'launch', config }` (a preview the user started) |
 | `revisions` | `{ n, createdAt, size, mediaType }`, numbered from 1 |
 | `latest` | Highest revision number |
 | `pinnedRevision` | Set when the user pins; new revisions then wait instead of replacing the view |
@@ -36,6 +37,7 @@ An item belongs to one session and has an ordered list of revisions.
 - `table`: CSV, TSV or a JSON array of objects.
 - `diagram`: Mermaid source, plus optional node metadata `{ [nodeId]: { file?, line?, description? } }`. Mermaid renders with `securityLevel: 'strict'`, which disables its own click handlers. Codekin attaches its own handlers to the rendered node elements and looks each node up in the metadata. Mermaid is loaded only when a diagram is first shown. Under a strict `style-src 'self'`, its `<style>` element and `style` attributes are moved into a constructed stylesheet and CSSOM, which CSP doesn't restrict.
 - `image`: PNG, JPEG, GIF, WebP or SVG bytes. SVG is only ever rendered through `<img>`, so scripts in it never run.
+- `preview`: `{ port, path, config? }`, the local server it shows. A new revision means it points somewhere else (another path or port). The page itself is never stored.
 
 **Limits:** 100 items per session, 50 revisions per item (the oldest unpinned revisions are dropped first), 1 MiB per text revision and 2 MiB per image revision. A dropped revision that an attachment still refers to shows "This revision is no longer available".
 
@@ -67,9 +69,21 @@ Canvas uses the session WebSocket, like review comments, so it follows the sessi
 | `canvas_event { sessionId, itemId, kind, title, revision, action }` | Added to the transcript when an item is `created` or `updated`; renders as the chat card |
 | `canvas_error { sessionId?, message }` | A failed request |
 
+**Live preview** (section 8):
+
+| Message | Effect |
+|---|---|
+| `preview_configs` → `preview_configs { file, configs, error? }` | The session folder's launch configurations, each with its command, port, `cwd` and the names (not values) of its `env` |
+| `preview_open { itemId }` | Give the item a proxy and report its state |
+| `preview_launch { name }` | Start a launch configuration and show its preview item (created on first start) |
+| `preview_stop` / `preview_restart { itemId }` | Stop or restart a server Codekin started |
+| `preview_logs { itemId }` → `preview_log { lines, reset }` | The server output Codekin kept. New lines are broadcast as they come |
+| `preview_state { sessionId, preview }` | Broadcast on every change: `status` (`starting`, `running`, `stopped`, `crashed`), `targetPort`, `proxyPort` and `entry` (the proxy URL that admits the frame), `managed`, `config`, `command`, `exitCode`, `error`, `notice` |
+
 **Agent publishing.**
 
-- Every Claude, Codex and Grok session gets a stdio MCP server, `codekin_canvas` (`server/canvas-mcp-server.ts`), with three tools: `canvas_show`, `canvas_update` and `canvas_list`.
+- Every Claude, Codex and Grok session gets a stdio MCP server, `codekin_canvas` (`server/canvas-mcp-server.ts`), with four tools: `canvas_show`, `canvas_update`, `canvas_list` and `canvas_preview`.
+- `canvas_preview { port, path?, title? }` shows a dev server the agent started itself (`POST /api/sessions/:id/canvas/preview`). It is refused while nothing listens on the port, and for Codekin's own ports. Calling it again for the same port revises that item.
 - The server calls `POST/GET /api/sessions/:id/canvas/items[/:itemId]` with the session-scoped token the agent's process already carries. That token reaches only its own session.
 - These routes are local only; the relay never proxies them.
 - Content is inline text, or a file in the session's folder, an attached folder or the screenshots folder. Images always come from a file.
@@ -78,7 +92,7 @@ Canvas uses the session WebSocket, like review comments, so it follows the sessi
   - **Codex:** `-c mcp_servers.codekin_canvas.*` overrides, which forward the session env by name and set `default_tools_approval_mode="approve"`.
   - **Grok:** ACP `session/new` `mcpServers`. Its `use_tool` permission requests for these tools are allowed without a prompt.
 - The tools need no approval because they write only to the session's own Canvas.
-- **OpenCode** runs one shared `opencode serve` for every session, so it can't get a per-session MCP server. Instead, Codekin writes custom tools to `DATA_DIR/opencode/tool/canvas.ts` and starts that server with `OPENCODE_CONFIG_DIR` pointing there. The tools are `canvas_show`, `canvas_update` and `canvas_list`.
+- **OpenCode** runs one shared `opencode serve` for every session, so it can't get a per-session MCP server. Instead, Codekin writes custom tools to `DATA_DIR/opencode/tool/canvas.ts` and starts that server with `OPENCODE_CONFIG_DIR` pointing there. The tools are `canvas_show`, `canvas_update`, `canvas_preview` and `canvas_list`.
   - OpenCode passes each call the calling session's id. The tools send it to `/api/opencode-canvas/:openCodeSession/items`, which maps it to the Codekin session. That route accepts only a token derived for this purpose and set in the OpenCode server's environment.
   - If you set `OPENCODE_CONFIG_DIR` yourself, Codekin leaves it alone, and OpenCode sessions run without Canvas.
 
@@ -90,6 +104,7 @@ The session list carries `canvas: { items, pinnedBehind }` per session, so the s
 - `canvas_item` frames for items opened from repository files also need `view_diff`, because their content is code, as with diffs.
 - `canvas_open_file` needs `view_diff` and `send_prompt`.
 - Pin and delete are owner-only.
+- Previews are owner-only, both the `preview_*` requests and the `preview_*` frames. Their state carries the proxy's key, and server output can carry anything the dev server prints.
 
 ## 4. Layout: canvas-forward
 
@@ -182,7 +197,7 @@ Where the page lives:
 | Behind a reverse proxy on your own domain | A second hostname that serves `dist/sandbox`, ideally on a different registrable domain from Codekin's | `CANVAS_SANDBOX_ORIGIN=https://sandbox.example.net`, plus `nginx/sandbox.example` |
 | Hosted web app built with `build:hosted` | The same, baked into the build | `VITE_CANVAS_SANDBOX_ORIGIN=https://sandbox.example.net` |
 
-- **Codekin's own CSP** gets `frame-src` set to the sandbox origin only. With a port, that's that port on any host, because the browser may reach Codekin by any name.
+- **Codekin's own CSP** gets `frame-src` set to the sandbox origin and the preview ports only. With a port, that's that port on any host, because the browser may reach Codekin by any name.
 - **`CANVAS_SANDBOX_FRAME_ANCESTORS`** narrows which pages may frame the sandbox. The default is any, because the page holds nothing and does nothing on its own.
 - **Without a sandbox,** chart and HTML items show their source with a note explaining why.
 
@@ -210,6 +225,43 @@ A tool whose definition declares a UI resource (`_meta.ui.resourceUri`, the MCP 
 - **Network:** apps get none, whatever their resource's `_meta.ui.csp` declares. Apps must be self-contained, the single-file pattern ext-apps recommends.
 - **Codekin controls stay outside the sandbox frame.** Every request a sandboxed app makes on the user's behalf goes through a confirmation in Codekin's chrome. That covers sending a message, opening a link and calling a tool, and tool calls also go through the normal approval rules.
 
+### Live preview
+
+A `preview` item shows a dev server running on the machine Codekin runs on.
+
+**How servers start.** Codekin runs a command only when the user asks:
+
+- **The agent** starts the server in its own shell, so the session's approval rules apply. It then calls `canvas_preview` with the port. Codekin never runs anything on the agent's behalf.
+- **The user** starts a configuration from the repository's `.claude/launch.json`, the file Claude Code's desktop app uses. Canvas lists the configurations, with their commands, when it is empty, and offers **Start** on a stopped preview.
+  - Codekin reads `name`, `runtimeExecutable` + `runtimeArgs` (or `program` + `args`, run with `node`), `port` (default 3000), `cwd` (inside the project), `env` and `url`.
+  - An entry with only a localhost `url` attaches to a server you run yourself.
+  - `${workspaceFolder}` is replaced in `cwd`, arguments and `env`. Comments and trailing commas are allowed.
+  - `autoPort` is not supported: when the port is already in use, Codekin shows what answers there instead of starting another server.
+  - A server Codekin starts runs in its own process group, in the session's folder, with the agent CLIs' environment minus Codekin's own variables and `NODE_ENV`, plus `PORT` and the entry's `env`.
+  - Codekin keeps the last 1,000 lines of its output and stops it when the preview is deleted, the session is deleted or Codekin shuts down.
+
+**The proxy** (`server/preview-proxy.ts`). Each open preview gets its own proxy port, so the app runs on its own origin: never Codekin's, nor the sandbox's, nor another preview's.
+
+- **Where it forwards.** HTTP and WebSocket traffic (hot reload) goes to `localhost:<port>` (IPv4, then IPv6) and nowhere else. Codekin's own port, the sandbox port and the preview ports are refused as targets.
+- **Who it admits.** A browser gets in only after opening the preview's entry URL, which carries a random per-preview key. After that the key travels in an `HttpOnly` cookie named for the proxy port. Codekin gives the entry URL only to its own authenticated clients (owner-only over a relay), so another machine that can reach the port gets nothing.
+- **How it presents requests.** `Host` and `Origin` look like the dev server's own (`localhost:<port>`), which satisfies dev servers' host checks (Vite's `allowedHosts`, for example). Codekin's cookie is stripped before forwarding, and `Location` headers that point at the dev server become paths.
+- **How it frames the page.** `X-Frame-Options` and `frame-ancestors` are dropped. Codekin frames the page with `sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals allow-downloads"`: the app keeps its own origin, but can't navigate Codekin's tab.
+- **The added script.** HTML pages get a small script (`/__codekin/preview.js`, served by the proxy) that does nothing until Canvas says hello from its origin. It then:
+  - reports the page's location and title;
+  - reports console errors and warnings and uncaught errors;
+  - goes back, forward or reloads on request;
+  - runs the element picker. The user hovers to outline elements and clicks one. The selector, text, markup excerpt, size and, in React development builds, the component name and source are attached to the next message (`what="element"`).
+  - Console errors and the server's output can be attached too (`what="console"`).
+  - Canvas treats everything the script sends as untrusted text from the app.
+- **Ports.** `CANVAS_PREVIEW_PORTS` sets the proxy ports: a range (`32362-32371`) or a list. The default is ten ports from Codekin's port + 10, and `off` turns previews off. When every port is in use, the preview opened longest ago gives up its port. Each preview gets the same port back when it is free, so the app's storage on that origin survives. Codekin's CSP adds the ports to `frame-src`.
+- **Status.** A stopped or crashed server shows its status and last output in place of the page, never a stale copy. Codekin probes the port every few seconds, so a server the agent restarts comes back on its own.
+
+**Where it works.** Previews work wherever the browser reaches Codekin's machine directly: localhost, the desktop app, or a LAN or tailnet address on which the proxy ports are reachable.
+
+- **Not over https.** A Codekin page served over https can't frame the http proxy. Canvas offers **Open in a new tab** instead.
+- **Not through the relay.** The hosted web app and relay sessions can't reach the proxy ports. Canvas says so, and the agent still sees the item.
+- **Tunnels.** If you reach Codekin through an SSH tunnel, forward the preview ports too.
+
 ## 9. Slices
 
 | # | Slice | Contents |
@@ -220,6 +272,6 @@ A tool whose definition declares a UI resource (`_meta.ui.resourceUri`, the MCP 
 | 4 | Selection → context | Selection toolbar, attachments, composer redesign (section 6) |
 | 5 | Sandbox origin | Separate origin and CSP, then sandboxed charts and HTML artifacts (done) |
 | 6 | MCP Apps (display) | Adapter enrichment for Claude and Codex, `AppBridge` host (done) |
-| 7 | Live preview | Local first, then self-hosted remote |
+| 7 | Live preview | Local dev servers: proxy, launch configurations, picker, console and server output (done). Previews through the relay are not supported |
 
 Interactive MCP Apps (app-initiated tool calls) and relay-tunnelled previews are out of scope until there is a supported path and evidence they're needed.

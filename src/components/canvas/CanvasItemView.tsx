@@ -6,13 +6,14 @@
 
 import { lazy, Suspense, useMemo, useRef } from 'react'
 import { IconAlertTriangle, IconLoader2, IconShieldLock } from '@tabler/icons-react'
-import type { CanvasView } from '../../hooks/useCanvas'
+import type { CanvasView, PreviewApi } from '../../hooks/useCanvas'
 import { MarkdownRenderer } from '../MarkdownRenderer'
 import { markdownHeadings } from '../../lib/canvasItems'
 import type { CanvasSelectionKind } from '../../lib/canvasContext'
 import { DiagramView } from './DiagramView'
 import { TableView } from './TableView'
 import { SandboxFrame } from './SandboxFrame'
+import { PreviewView } from './PreviewView'
 
 // ext-apps and the MCP protocol code load only when an MCP App is shown.
 const McpAppView = lazy(() => import('./McpAppView'))
@@ -29,9 +30,12 @@ interface Props {
   sandboxOrigin?: string | null
   /** An MCP App asked to send a message as the user (already confirmed). */
   onSendMessage?: (text: string) => void
+  /** Live previews: their state and controls. */
+  preview?: PreviewApi
+  isMobile?: boolean
 }
 
-export function CanvasItemView({ view, onAttach, onOpenFile, toc, sandboxOrigin, onSendMessage }: Props) {
+export function CanvasItemView({ view, onAttach, onOpenFile, toc, sandboxOrigin, onSendMessage, preview, isMobile }: Props) {
   if (view.state === 'loading') {
     return (
       <div className="flex flex-1 items-center justify-center gap-2 text-meta text-ink-muted" role="status">
@@ -53,6 +57,10 @@ export function CanvasItemView({ view, onAttach, onOpenFile, toc, sandboxOrigin,
   }
 
   const { item, content } = view
+  if (item.kind === 'preview') {
+    if (!preview) return null
+    return <PreviewView item={item} content={content.content} preview={preview} onAttach={onAttach} isMobile={isMobile} />
+  }
   if (item.kind === 'markdown') return <MarkdownItem content={content.content} toc={!!toc} />
   if (item.kind === 'image') {
     return (
@@ -82,7 +90,7 @@ export function CanvasItemView({ view, onAttach, onOpenFile, toc, sandboxOrigin,
           origin={sandboxOrigin}
           kind={item.kind}
           content={content.content}
-          author={item.source.type === 'agent' ? 'the agent' : item.source.type === 'file' ? 'you' : item.source.server}
+          author={item.source.type === 'agent' ? 'the agent' : item.source.type === 'mcp' ? item.source.server : 'you'}
           onSelection={(label, excerpt, ask) => { onAttach('chart', excerpt, label, ask) }}
         />
       )

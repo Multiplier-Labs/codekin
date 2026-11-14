@@ -6,8 +6,8 @@
  */
 
 import { useEffect, useRef, useState } from 'react'
-import { IconChevronLeft, IconCopy, IconGitCompare, IconHierarchy2, IconMessage, IconMessageQuestion, IconTable, IconX } from '@tabler/icons-react'
-import type { CanvasApi } from '../../hooks/useCanvas'
+import { IconChevronLeft, IconCopy, IconGitCompare, IconHierarchy2, IconMessage, IconMessageQuestion, IconPlayerPlay, IconTable, IconWorld, IconX } from '@tabler/icons-react'
+import type { CanvasApi, PreviewApi } from '../../hooks/useCanvas'
 import { CanvasItemPicker } from './CanvasItemPicker'
 import { CanvasItemView } from './CanvasItemView'
 import { CanvasHeaderActions, RevisionPicker } from './CanvasHeaderActions'
@@ -116,7 +116,8 @@ export function CanvasPanel({ canvas, replacesChat, isMobile, onBackToChat, last
   }
 
   const narrow = width < NARROW
-  const revisionPicker = selected && view.state !== 'empty'
+  const live = selected?.kind === 'preview'
+  const revisionPicker = selected && view.state !== 'empty' && !live
     ? <RevisionPicker item={selected} revision={view.revision} onShow={canvas.showRevision} />
     : null
   const actions = selected && view.state !== 'empty' && (
@@ -126,9 +127,9 @@ export function CanvasPanel({ canvas, replacesChat, isMobile, onBackToChat, last
       narrow={narrow}
       sourceMode={sourceMode}
       onToggleSource={() => { setSourceMode(m => !m) }}
-      copyText={view.state === 'ready' && selected.kind !== 'image' ? view.content.content : undefined}
+      copyText={view.state === 'ready' && selected.kind !== 'image' && !live ? view.content.content : undefined}
       onPin={canvas.pin}
-      onCompare={view.revision < selected.latest
+      onCompare={live ? undefined : view.revision < selected.latest
         ? () => { canvas.setCompare({ from: view.revision, to: selected.latest }) }
         : view.revision > 1 && selected.revisions.some(r => r.n === view.revision - 1)
           ? () => { canvas.setCompare({ from: view.revision - 1, to: view.revision }) }
@@ -201,7 +202,7 @@ export function CanvasPanel({ canvas, replacesChat, isMobile, onBackToChat, last
         </div>
       )}
 
-      {selected && view.state !== 'empty' && (compare ? (
+      {selected && view.state !== 'empty' && !live && (compare ? (
         <div className="flex shrink-0 items-center gap-2 border-b border-edge bg-surface px-4 py-1.5 text-meta text-ink-muted" role="status">
           <IconGitCompare size={15} className="shrink-0" aria-hidden />
           <span className="min-w-0 flex-1 truncate">Comparing rev {compare.from} with rev {compare.to}{sourceMode ? ' (source)' : ''}</span>
@@ -225,12 +226,12 @@ export function CanvasPanel({ canvas, replacesChat, isMobile, onBackToChat, last
         }}
       >
         {view.state === 'empty'
-          ? <CanvasEmpty onSuggest={onSuggest} />
+          ? <CanvasEmpty onSuggest={onSuggest} preview={canvas.preview} />
           : compare && selected
             ? <CompareView item={selected} from={compare.from} to={compare.to} a={canvas.revisionContent(compare.from)} b={canvas.revisionContent(compare.to)} source={sourceMode} />
             : sourceMode && view.state === 'ready'
               ? <pre className="px-8 py-6 font-mono text-meta text-ink whitespace-pre-wrap break-words">{view.content.content}</pre>
-              : <CanvasItemView key={viewKey} view={view} onAttach={attach} onOpenFile={canvas.openFile} toc={width >= TOC_FROM} sandboxOrigin={sandboxOrigin} onSendMessage={onSendMessage} />}
+              : <CanvasItemView key={live ? selected.id : viewKey} view={view} onAttach={attach} onOpenFile={canvas.openFile} toc={width >= TOC_FROM} sandboxOrigin={sandboxOrigin} onSendMessage={onSendMessage} preview={canvas.preview} isMobile={isMobile} />}
       </div>
 
       {selection && !compare && (isMobile ? (
@@ -277,7 +278,9 @@ export function CanvasPanel({ canvas, replacesChat, isMobile, onBackToChat, last
   )
 }
 
-function CanvasEmpty({ onSuggest }: { onSuggest: (text: string) => void }) {
+function CanvasEmpty({ onSuggest, preview }: { onSuggest: (text: string) => void; preview: PreviewApi }) {
+  const { requestConfigs, configs } = preview
+  useEffect(() => { requestConfigs() }, [requestConfigs])
   return (
     <div className="m-auto w-full max-w-[620px] px-8 py-10">
       <h2 className="text-head font-bold text-ink">Nothing in Canvas yet</h2>
@@ -301,6 +304,38 @@ function CanvasEmpty({ onSuggest }: { onSuggest: (text: string) => void }) {
       <p className="text-body text-ink-muted">
         Use <span className="font-medium text-ink">Open in Canvas</span> on a Markdown file, table, diagram or image in Changes or Docs.
       </p>
+      <LaunchConfigs configs={configs} onLaunch={preview.launch} />
     </div>
+  )
+}
+
+/** Dev servers from .claude/launch.json, each with its command shown before it runs. */
+function LaunchConfigs({ configs, onLaunch }: { configs: PreviewApi['configs']; onLaunch: (name: string) => void }) {
+  if (!configs || (!configs.configs.length && !configs.error)) return null
+  return (
+    <>
+      <h3 className="mt-6 mb-2 text-micro font-bold uppercase tracking-wide text-ink-muted">Preview a dev server</h3>
+      {configs.error && <p className="mb-2 text-meta text-error-5" role="alert">{configs.error}</p>}
+      <ul className="flex flex-col gap-2">
+        {configs.configs.map(c => (
+          <li key={c.name} className="flex items-center gap-3 rounded-control border border-edge bg-page px-4 py-2.5">
+            <IconWorld size={18} stroke={1.75} className="shrink-0 text-success-5" aria-hidden />
+            <div className="min-w-0 flex-1">
+              <div className="text-body text-ink"><span className="font-bold">{c.name}</span> <span className="text-ink-muted">· port {c.port}</span></div>
+              {c.error
+                ? <div className="text-meta text-error-5">{c.error}</div>
+                : <div className="truncate font-mono text-meta text-ink-muted" title={c.command ?? undefined}>
+                    {c.command ? `$ ${c.command}` : `Shows ${c.url ?? `localhost:${c.port}`}, a server you run`}{c.cwd ? `  (in ${c.cwd})` : ''}{c.envKeys?.length ? `  + ${c.envKeys.join(', ')}` : ''}
+                  </div>}
+            </div>
+            <button type="button" disabled={!!c.error} onClick={() => { onLaunch(c.name) }}
+              className="flex shrink-0 items-center gap-1.5 rounded-control bg-primary-fill px-3 py-1.5 text-meta font-medium text-on-primary-fill hover:opacity-90 disabled:opacity-40">
+              <IconPlayerPlay size={15} /> {c.command ? 'Run' : 'Show'}
+            </button>
+          </li>
+        ))}
+      </ul>
+      <p className="mt-2 text-meta text-ink-faint">From {configs.file}. Run starts the command on this computer, in the session's folder.</p>
+    </>
   )
 }
