@@ -44,6 +44,8 @@ export interface PreviewApi {
   stop: (itemId: string) => void
   restart: (itemId: string) => void
   requestLogs: (itemId: string) => void
+  /** Bumped on every (re)join: a shown preview asks for its proxy again (Codekin may have restarted). */
+  generation: number
 }
 
 const MAX_CLIENT_LOG = 1000
@@ -70,6 +72,8 @@ export interface CanvasApi {
   handleMessage: (msg: WsServerMessage) => boolean
   /** Ask for the joined session's items (after joining or reconnecting). */
   refresh: () => void
+  /** Ask again for the shown revision after it failed to load. */
+  retry: () => void
   /** Open an item at a revision (a sent context chip); the latest when it is gone. */
   openAt: (itemId: string, revision: number) => void
   /** View a specific revision of the selected item; null follows the pinned or latest one. */
@@ -150,6 +154,7 @@ export function useCanvas(sessionId: string | null, send: (msg: WsClientMessage)
   const [previewStates, setPreviewStates] = useState<Record<string, PreviewState | undefined>>({})
   const [previewLogs, setPreviewLogs] = useState<Record<string, string[] | undefined>>({})
   const [launchConfigs, setLaunchConfigs] = useState<Record<string, PreviewApi['configs'] | undefined>>({})
+  const [previewGeneration, setPreviewGeneration] = useState(0)
   /** App tool calls waiting for mcp_app_result, by callId. */
   const appCalls = useRef(new Map<string, (outcome: AppToolOutcome) => void>())
   /** A launch configuration the user started: its preview is shown when its state arrives. */
@@ -233,9 +238,10 @@ export function useCanvas(sessionId: string | null, send: (msg: WsClientMessage)
     if (!sessionId) return
     const path = normalizePath(rawPath)
     setNotice(null)
-    // Already open: show it now; the server adds a revision only if the file changed.
-    showFile(items, sessionId, path, root)
-    pendingOpen.current = { sessionId, path, root }
+    // Already open: show it now; the server adds a revision only if the file
+    // changed (and sends nothing when it didn't). Otherwise it is shown once
+    // its item arrives.
+    pendingOpen.current = showFile(items, sessionId, path, root) ? null : { sessionId, path, root }
     send({ type: 'canvas_open_file', path, ...(root ? { root } : {}) })
   }, [sessionId, items, send, showFile])
 
@@ -277,6 +283,12 @@ export function useCanvas(sessionId: string | null, send: (msg: WsClientMessage)
     return contents[k] ?? (error !== undefined ? { error } : 'loading')
   }, [selected, sessionId, contents, errors])
 
+  const retry = useCallback(() => {
+    if (!key) return
+    inflight.current.delete(key)
+    setErrors(prev => ({ ...prev, [key]: undefined }))
+  }, [key])
+
   const handleMessage = useCallback((msg: WsServerMessage): boolean => {
     switch (msg.type) {
       case 'canvas_items': {
@@ -306,6 +318,18 @@ export function useCanvas(sessionId: string | null, send: (msg: WsClientMessage)
           setNotice(msg.message)
         }
         return true
+      }
+      case 'session_joined': {
+        // A (re)join after a dropped connection or a Codekin restart: requests
+        // sent before it may never be answered, and preview proxies may be gone.
+        inflight.current.clear()
+        setPreviewStates(prev => Object.fromEntries(Object.entries(prev).filter(([k]) => !k.startsWith(`${msg.sessionId}/`))))
+        setPreviewGeneration(g => g + 1)
+        for (const [callId, resolve] of appCalls.current) {
+          appCalls.current.delete(callId)
+          resolve({ ok: false, error: 'The connection to Codekin dropped during the call. Try again.' })
+        }
+        return false
       }
       case 'mcp_app_result': {
         const resolve = appCalls.current.get(msg.callId)
@@ -367,7 +391,8 @@ export function useCanvas(sessionId: string | null, send: (msg: WsClientMessage)
     state: (itemId) => (sessionId ? previewStates[`${sessionId}/${itemId}`] : undefined),
     logs: (itemId) => (sessionId ? previewLogs[`${sessionId}/${itemId}`] ?? [] : []),
     configs: sessionId ? launchConfigs[sessionId] ?? null : null,
-  }), [previewActions, sessionId, previewStates, previewLogs, launchConfigs])
+    generation: previewGeneration,
+  }), [previewActions, sessionId, previewStates, previewLogs, launchConfigs, previewGeneration])
 
   const callAppTool = useCallback((itemId: string, tool: string, args: Record<string, unknown>, confirmed: boolean): Promise<AppToolOutcome> => {
     const callId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
@@ -382,12 +407,15 @@ export function useCanvas(sessionId: string | null, send: (msg: WsClientMessage)
   }, [send])
 
   // A new session starts without a stale notice.
-  useEffect(() => { setNotice(null) }, [sessionId]) // eslint-disable-line react-hooks/set-state-in-effect -- reset per session
+  useEffect(() => {
+    setNotice(null) // eslint-disable-line react-hooks/set-state-in-effect -- reset per session
+    pendingOpen.current = null
+  }, [sessionId])
 
   return {
     items, loaded: !!sessionId && sessionId in itemsBySession, selected, view, open, notice,
     dismissNotice: () => { setNotice(null) },
-    setOpen, toggle, select, step, openFile, handleMessage, refresh,
+    setOpen, toggle, select, step, openFile, handleMessage, refresh, retry,
     openAt, showRevision, pin, remove, setReading, compare, setCompare, revisionContent, preview, callAppTool,
   }
 }

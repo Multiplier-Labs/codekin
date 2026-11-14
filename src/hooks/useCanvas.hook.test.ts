@@ -229,4 +229,49 @@ describe('useCanvas openAt', () => {
     act(() => { hook.openAt('gone', 1) })
     expect(hook.notice).toBe('That Canvas item no longer exists.')
   })
+
+  it('asks again for content after a rejoin, when the first request was never answered', () => {
+    render('s1')
+    deliver({ type: 'canvas_items', sessionId: 's1', items: [item('a')] })
+    act(() => { hook.setOpen(true) })
+    expect(sent.filter(m => m.type === 'canvas_get')).toHaveLength(1)
+    // The socket dropped before the reply; nothing comes back.
+    deliver({ type: 'session_joined', sessionId: 's1', sessionName: 's', workingDir: '/r', active: true, outputBuffer: [] })
+    deliver({ type: 'canvas_items', sessionId: 's1', items: [item('a', { updatedAt: '2026-11-14T11:00:00Z' })] })
+    expect(sent.filter(m => m.type === 'canvas_get')).toHaveLength(2)
+    expect(hook.preview.generation).toBe(1)
+  })
+
+  it('tries again after a load error', () => {
+    render('s1')
+    deliver({ type: 'canvas_items', sessionId: 's1', items: [item('a')] })
+    act(() => { hook.setOpen(true) })
+    deliver({ type: 'canvas_error', sessionId: 's1', itemId: 'a', revision: 1, message: 'disk error' })
+    expect(hook.view.state).toBe('error')
+    act(() => { hook.retry() })
+    expect(hook.view.state).toBe('loading')
+    expect(sent.filter(m => m.type === 'canvas_get')).toHaveLength(2)
+  })
+
+  it('fails app tool calls that were waiting when the connection dropped', async () => {
+    render('s1')
+    let outcome: unknown
+    act(() => { void hook.callAppTool('app', 'bump', {}, false).then(o => { outcome = o }) })
+    deliver({ type: 'session_joined', sessionId: 's1', sessionName: 's', workingDir: '/r', active: true, outputBuffer: [] })
+    await act(async () => { await Promise.resolve() })
+    expect(outcome).toMatchObject({ ok: false, error: expect.stringMatching(/connection/) })
+  })
+
+  it('re-opening an unchanged file shows it, and arms nothing that could jump back to it later', () => {
+    render('s1')
+    const file = item('f', { source: { type: 'file', path: 'docs/a.md' } })
+    deliver({ type: 'canvas_items', sessionId: 's1', items: [file, item('b')] })
+    act(() => { hook.openFile('docs/a.md') })
+    expect(hook.selected?.id).toBe('f')
+    // The user moves on and closes Canvas; the server sent nothing for the unchanged file.
+    act(() => { hook.select('b'); hook.setOpen(false) })
+    deliver({ type: 'canvas_items', sessionId: 's1', items: [file, item('b'), item('c')] })
+    expect(hook.open).toBe(false)
+    expect(hook.selected?.id).toBe('b')
+  })
 })

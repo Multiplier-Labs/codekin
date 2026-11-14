@@ -23,7 +23,7 @@ const WEB = { name: 'web', command: 'npm run dev', port: 5173, env: { NODE_OPTIO
 function api(state?: PreviewState, logs: string[] = []): PreviewApi {
   return {
     state: () => state, logs: () => logs, configs: { file: '.claude/launch.json', configs: [WEB] },
-    requestConfigs: vi.fn(), open: vi.fn(), launch: vi.fn(), stop: vi.fn(), restart: vi.fn(), requestLogs: vi.fn(),
+    generation: 0, requestConfigs: vi.fn(), open: vi.fn(), launch: vi.fn(), stop: vi.fn(), restart: vi.fn(), requestLogs: vi.fn(),
   }
 }
 
