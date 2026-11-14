@@ -16,6 +16,7 @@ export type {
   JoeMilestone, JoeMessageTask,
   DiffScope, DiffView, DiffFileStatus, DiffFile, DiffHunk, DiffLine, DiffSummary, DiffReview,
   ReviewAnchor, ReviewComment,
+  CanvasItem, CanvasItemKind, CanvasItemMeta, CanvasItemSource, CanvasRevision,
   PrLookupState, PrChecksSummary, PullRequestInfo, PrStatus,
   PromptOption, PromptQuestion,
 } from '../server/protocol'
@@ -198,6 +199,8 @@ export interface Session {
   provider?: CodingProvider
   /** Model pinned to this session, if one was chosen (shown in the sidebar row's tooltip). */
   model?: string
+  /** Canvas summary: item count, and whether a pinned item has a newer revision waiting. */
+  canvas?: { items: number; pinnedBehind: boolean }
   /** Where the session runs. Derived by the server from the session's root; absent from older servers. */
   place?: SessionPlace
   /** Folders attached beside the session's own (phase 3), each with its place. */

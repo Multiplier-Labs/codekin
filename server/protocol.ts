@@ -79,6 +79,15 @@ export type WsClientMessage =
   /** Send drafts (all, or `ids`) to the agent as one prompt; stale ones only with includeStale. */
   | { type: 'review_feedback_send'; ids?: string[]; includeStale?: boolean; relayUser?: string; relayRole?: 'owner' | 'grantee' }
   | { type: 'discard_changes'; scope: DiffScope; paths?: string[]; statuses?: Record<string, DiffFileStatus>; root?: string }
+  // Canvas (docs/CANVAS-SPEC.md): items beside the chat, scoped to the joined session.
+  | { type: 'canvas_list' }
+  /** One item's content at `revision` (the latest when omitted). */
+  | { type: 'canvas_get'; itemId: string; revision?: number }
+  /** Open a file from the session's folder (or an attached `root`) as an item. */
+  | { type: 'canvas_open_file'; path: string; root?: string }
+  /** Pin an item at a revision so new ones wait; null unpins. */
+  | { type: 'canvas_pin'; itemId: string; revision: number | null }
+  | { type: 'canvas_delete'; itemId: string }
   | { type: 'move_to_worktree' }
   | { type: 'retry_worktree' }
   | { type: 'use_existing_checkout' }
@@ -160,6 +169,13 @@ export type WsServerMessage =
   /** How much there is to review: files with uncommitted changes, and commits on the branch since its base (null when unknown). */
   | { type: 'change_summary'; sessionId: string; uncommittedFiles: number; branchCommits: number | null }
   | { type: 'review_error'; message: string; sessionId?: string }
+  /** The session's Canvas items; sent on request and broadcast after every change. */
+  | { type: 'canvas_items'; sessionId: string; items: CanvasItem[] }
+  /** One revision of an item. `content` is UTF-8 text, or base64 for images. */
+  | { type: 'canvas_item'; sessionId: string; item: CanvasItem; revision: number; content: string; encoding: 'utf8' | 'base64'; meta?: CanvasItemMeta }
+  /** Transcript entry for a new item or revision; renders as a chat card. */
+  | { type: 'canvas_event'; sessionId: string; itemId: string; kind: CanvasItemKind; title: string; revision: number; action: 'created' | 'updated' }
+  | { type: 'canvas_error'; message: string; sessionId?: string }
 
 /** Task milestones Joe posts back into the conversation a task came from. */
 export type JoeMilestone = 'accepted' | 'decision' | 'blocked' | 'review'
@@ -217,6 +233,48 @@ export interface ReviewComment {
   sentAt?: string
   /** Computed when listed: the anchored lines have changed in the working tree. */
   stale?: boolean
+}
+
+/** What a Canvas item shows (docs/CANVAS-SPEC.md §2). */
+export type CanvasItemKind = 'markdown' | 'table' | 'diagram' | 'image'
+
+/** Who made a Canvas item. */
+export type CanvasItemSource =
+  | { type: 'agent' }
+  /** Opened by the user from a file; `root` is the attached folder it came from, if any. */
+  | { type: 'file'; path: string; root?: string }
+  | { type: 'mcp'; server: string }
+
+/** One stored revision of a Canvas item. */
+export interface CanvasRevision {
+  /** 1-based, increasing. Dropped revisions leave gaps. */
+  n: number
+  createdAt: string
+  /** Content size in bytes. */
+  size: number
+  mediaType: string
+}
+
+/** Kind-specific data stored with a revision. */
+export interface CanvasItemMeta {
+  /** Diagram node id → what the node refers to. */
+  nodes?: Record<string, { file?: string; line?: number; description?: string }>
+}
+
+/** A Canvas item: a named, revisioned output beside a session's chat. */
+export interface CanvasItem {
+  id: string
+  kind: CanvasItemKind
+  title: string
+  source: CanvasItemSource
+  /** Oldest first. */
+  revisions: CanvasRevision[]
+  /** Highest revision number. */
+  latest: number
+  /** Set while pinned: the view stays here and newer revisions wait. */
+  pinnedRevision?: number
+  createdAt: string
+  updatedAt: string
 }
 
 /** Outcome of a pull request lookup; everything except 'found' and 'none' means "unknown". */

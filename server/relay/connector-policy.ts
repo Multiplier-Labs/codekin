@@ -288,11 +288,18 @@ export function checkServerFrame(policy: ChannelPolicy, state: ChannelState, fra
   if (!hasPermission(policy, state.sessionId, 'view')) return false
   // Code, review comments and PR details are part of the diff: a grantee
   // without view_diff must not receive them, even as a broadcast.
-  if (typeof msg?.type === 'string' && DIFF_FRAME_TYPES.has(msg.type)) {
+  if (typeof msg?.type === 'string' && (DIFF_FRAME_TYPES.has(msg.type) || isFileCanvasItem(msg))) {
     const granted = state.sessionId ? policy.grants[state.sessionId] : undefined
     if (!granted?.includes('view_diff')) return false
   }
   return true
+}
+
+/** A Canvas item's content read from a repository file: code, so diff-gated. */
+function isFileCanvasItem(msg: LocalFrame): boolean {
+  if (msg.type !== 'canvas_item') return false
+  const source = (msg as { item?: { source?: { type?: unknown } } }).item?.source
+  return source?.type === 'file'
 }
 
 /** Prompt options that save a standing approval rule in the owner's project. */
@@ -374,6 +381,17 @@ export function checkClientFrame(policy: ChannelPolicy, state: ChannelState, fra
 
     case 'get_change_summary':
       return requirePermission(policy, state, 'view_diff', 'Viewing changes is not granted')
+
+    // Canvas: reading is part of viewing the session. Opening a repository
+    // file reads code (view_diff) and adds it to the shared session
+    // (send_prompt). Pinning and deleting fall through to owner-only.
+    case 'canvas_list':
+    case 'canvas_get':
+      return requirePermission(policy, state, 'view', 'Viewing this session is not granted')
+    case 'canvas_open_file': {
+      const read = requirePermission(policy, state, 'view_diff', 'Viewing files is not granted')
+      return read.allowed ? requirePermission(policy, state, 'send_prompt', 'Adding to this session is not granted') : read
+    }
 
     case 'input':
       return requirePermission(policy, state, 'send_prompt', 'Sending prompts is not granted')
