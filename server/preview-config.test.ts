@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import path from 'path'
 import { displayCommand, parseJsonc, publicConfig, readLaunchConfigs, resolveLaunchEntry } from './preview-config.js'
@@ -30,7 +30,10 @@ describe('resolveLaunchEntry', () => {
     expect(c.port).toBe(5173)
     expect(c.cwd).toBe('web')
     expect(c.env.MODE).toBe(`${root}/x`)
-    expect(publicConfig(c)).toEqual({ name: 'web', command: 'npm run dev', port: 5173, cwd: 'web', envKeys: ['MODE'] })
+    expect(publicConfig(c)).toEqual({ name: 'web', command: 'npm run dev', port: 5173, cwd: 'web', env: { MODE: `${root}/x` }, digest: expect.stringMatching(/^[0-9a-f]{32}$/) })
+    // The digest changes with anything that changes what runs.
+    expect(publicConfig({ ...c, args: ['run', 'evil'] }).digest).not.toBe(publicConfig(c).digest)
+    expect(publicConfig({ ...c, env: { NODE_OPTIONS: '--require x' } }).digest).not.toBe(publicConfig(c).digest)
   })
 
   it('runs program entries with node and defaults the port to 3000', () => {
@@ -90,5 +93,19 @@ describe('readLaunchConfigs', () => {
     expect((await readLaunchConfigs(root)).error).toMatch(/can't be read/)
     writeFileSync(path.join(root, '.claude/launch.json'), '{}')
     expect((await readLaunchConfigs(root)).error).toMatch(/no "configurations"/)
+  })
+})
+
+describe('readLaunchConfigs file checks', () => {
+  let root: string
+  beforeEach(() => { root = mkdtempSync(path.join(tmpdir(), 'launch-')); mkdirSync(path.join(root, '.claude')) })
+  afterEach(() => { rmSync(root, { recursive: true, force: true }) })
+
+  it('refuses a link or an oversized file before reading it', async () => {
+    symlinkSync('/dev/zero', path.join(root, '.claude/launch.json'))
+    expect((await readLaunchConfigs(root)).error).toMatch(/plain file/)
+    rmSync(path.join(root, '.claude/launch.json'))
+    writeFileSync(path.join(root, '.claude/launch.json'), ' '.repeat(300 * 1024))
+    expect((await readLaunchConfigs(root)).error).toMatch(/too large/)
   })
 })

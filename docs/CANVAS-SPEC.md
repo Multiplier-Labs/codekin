@@ -245,7 +245,9 @@ A `preview` item shows a dev server running on the machine Codekin runs on.
   - An entry with only a localhost `url` attaches to a server you run yourself.
   - `${workspaceFolder}` is replaced in `cwd`, arguments and `env`. Comments and trailing commas are allowed.
   - `autoPort` is not supported: when the port is already in use, Codekin shows what answers there instead of starting another server.
-  - A server Codekin starts runs in its own process group, in the session's folder, with the agent CLIs' environment minus Codekin's own variables and `NODE_ENV`, plus `PORT` and the entry's `env`.
+  - **What you see is what runs.** The list and a stopped preview show the whole command, its folder and every `env` value. Starting sends back a digest of what was shown, and Codekin refuses (and shows the new command) if the file changed since. **Restart** runs exactly what was started, not what the file says now.
+  - A server Codekin starts runs in its own process group, in the session's folder. Its environment is the agent CLIs' environment minus Codekin's own variables, credentials (names ending in `TOKEN`, `SECRET`, `PASSWORD`, `API_KEY`, …) and `NODE_ENV`, plus `PORT` and the entry's `env`. Stopping signals the whole group, and kills what's left after five seconds.
+  - One preview operation runs at a time per session, so pressing Start twice starts one server.
   - Codekin keeps the last 1,000 lines of its output and stops it when the preview is deleted, the session is deleted or Codekin shuts down.
 
 **The proxy** (`server/preview-proxy.ts`). Each open preview gets its own proxy port, so the app runs on its own origin: never Codekin's, nor the sandbox's, nor another preview's.
@@ -254,13 +256,15 @@ A `preview` item shows a dev server running on the machine Codekin runs on.
 - **Who it admits.** A browser gets in only after opening the preview's entry URL, which carries a random per-preview key. After that the key travels in an `HttpOnly` cookie named for the proxy port. Codekin gives the entry URL only to its own authenticated clients (owner-only over a relay), so another machine that can reach the port gets nothing.
 - **How it presents requests.** `Host` and `Origin` look like the dev server's own (`localhost:<port>`), which satisfies dev servers' host checks (Vite's `allowedHosts`, for example). Codekin's cookie is stripped before forwarding, and `Location` headers that point at the dev server become paths.
 - **How it frames the page.** `X-Frame-Options` and `frame-ancestors` are dropped. Codekin frames the page with `sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals allow-downloads"`: the app keeps its own origin, but can't navigate Codekin's tab.
-- **The added script.** HTML pages get a small script (`/__codekin/preview.js`, served by the proxy) that does nothing until Canvas says hello from its origin. It then:
+- **The added script.** HTML pages (documents, not fragments a page fetches) get a small script (`/__codekin/preview.js`, served by the proxy) that does nothing until Canvas says hello from its origin. It then:
   - reports the page's location and title;
   - reports console errors and warnings and uncaught errors;
   - goes back, forward or reloads on request;
-  - runs the element picker. The user hovers to outline elements and clicks one. The selector, text, markup excerpt, size and, in React development builds, the component name and source are attached to the next message (`what="element"`).
+  - runs the element picker. A pick is accepted only while the user has the picker on, one per press. The user hovers to outline elements and clicks one. The selector, text, markup excerpt, size and, in React development builds, the component name and source are attached to the next message (`what="element"`).
   - Console errors and the server's output can be attached too (`what="console"`).
   - Canvas treats everything the script sends as untrusted text from the app.
+- **Shared origins.** A proxy port serves different previews over time. When a port changes holder, the entry response sends `Clear-Site-Data: "storage"`, and service worker scripts are refused, so one app's storage and workers never reach another.
+- **Only Codekin drives the script.** It answers a `hello` only from a top-level page on Codekin's own port.
 - **Ports.** `CANVAS_PREVIEW_PORTS` sets the proxy ports: a range (`32362-32371`) or a list. The default is ten ports from Codekin's port + 10, and `off` turns previews off. When every port is in use, the preview opened longest ago gives up its port. Each preview gets the same port back when it is free, so the app's storage on that origin survives. Codekin's CSP adds the ports to `frame-src`.
 - **Status.** A stopped or crashed server shows its status and last output in place of the page, never a stale copy. Codekin probes the port every few seconds, so a server the agent restarts comes back on its own.
 

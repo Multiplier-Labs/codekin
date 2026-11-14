@@ -28,7 +28,7 @@ export type CanvasView =
   | { state: 'error'; item: CanvasItem; revision: number; message: string }
   | { state: 'ready'; item: CanvasItem; revision: number; content: CanvasContent }
 
-/** Live previews of dev servers (docs/CANVAS-SPEC.md §9) in the joined session. */
+/** Live previews of dev servers (docs/CANVAS-SPEC.md §8) in the joined session. */
 export interface PreviewApi {
   /** A preview item's server and proxy state; undefined until it was opened. */
   state: (itemId: string) => PreviewState | undefined
@@ -39,8 +39,8 @@ export interface PreviewApi {
   requestConfigs: () => void
   /** Get the item's proxy ready and its state (on showing it). */
   open: (itemId: string) => void
-  /** Start a launch configuration, then show its preview. */
-  launch: (name: string) => void
+  /** Start a launch configuration the user saw (`digest` from its config), then show its preview. */
+  launch: (name: string, digest: string | undefined) => void
   stop: (itemId: string) => void
   restart: (itemId: string) => void
   requestLogs: (itemId: string) => void
@@ -352,11 +352,11 @@ export function useCanvas(sessionId: string | null, send: (msg: WsClientMessage)
   const previewActions = useMemo(() => ({
     requestConfigs: () => { if (sessionId) send({ type: 'preview_configs' }) },
     open: (itemId: string) => { if (sessionId) send({ type: 'preview_open', itemId }) },
-    launch: (name: string) => {
+    launch: (name: string, digest: string | undefined) => {
       if (!sessionId) return
       setNotice(null)
       pendingLaunch.current = { sessionId, name }
-      send({ type: 'preview_launch', name })
+      send({ type: 'preview_launch', name, ...(digest ? { digest } : {}) })
     },
     stop: (itemId: string) => { send({ type: 'preview_stop', itemId }) },
     restart: (itemId: string) => { send({ type: 'preview_restart', itemId }) },

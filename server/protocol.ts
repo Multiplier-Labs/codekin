@@ -94,13 +94,13 @@ export type WsClientMessage =
    * needsConfirmation).
    */
   | { type: 'mcp_app_call'; itemId: string; callId: string; tool: string; arguments?: Record<string, unknown>; confirmed?: boolean }
-  // Live preview (docs/CANVAS-SPEC.md §9): a dev server shown in Canvas through Codekin's proxy.
+  // Live preview (docs/CANVAS-SPEC.md §8): a dev server shown in Canvas through Codekin's proxy.
   /** The session folder's launch configurations (.claude/launch.json). */
   | { type: 'preview_configs' }
   /** Get a preview item's proxy ready to frame, and its state. */
   | { type: 'preview_open'; itemId: string }
-  /** Start a launch configuration by name (the user's choice, after seeing its command). */
-  | { type: 'preview_launch'; name: string }
+  /** Start a launch configuration by name, after the user saw it; `digest` is the shown config's (refused if the file changed since). */
+  | { type: 'preview_launch'; name: string; digest?: string }
   /** Stop or restart a server Codekin started. */
   | { type: 'preview_stop'; itemId: string }
   | { type: 'preview_restart'; itemId: string }
@@ -308,8 +308,10 @@ export interface PreviewLaunchConfig {
   port: number
   cwd?: string
   url?: string
-  /** Names of the env variables it sets (values stay on the machine). */
-  envKeys?: string[]
+  /** The env variables it sets, as written in the file. */
+  env?: Record<string, string>
+  /** Identifies exactly what runs (command, folder, env); a start sends it back, and is refused if the file changed since. */
+  digest?: string
   /** Why it can't be started as written. */
   error?: string
 }

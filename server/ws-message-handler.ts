@@ -496,7 +496,7 @@ export function handleWsMessage(msg: WsClientMessage, ctx: WsHandlerContext): vo
       break
     }
 
-    // --- Live preview: dev servers in Canvas (docs/CANVAS-SPEC.md §9) ---
+    // --- Live preview: dev servers in Canvas (docs/CANVAS-SPEC.md §8) ---
 
     case 'preview_configs':
     case 'preview_open':
@@ -512,8 +512,8 @@ export function handleWsMessage(msg: WsClientMessage, ctx: WsHandlerContext): vo
       else if (msg.type === 'preview_logs') send(previews.logs(sessionId, msg.itemId))
       else if (typeof (msg.type === 'preview_launch' ? msg.name : msg.itemId) !== 'string') done('Missing preview.')
       else if (msg.type === 'preview_open') void previews.open(sessionId, msg.itemId).then(done)
-      else if (msg.type === 'preview_launch') void previews.launch(sessionId, msg.name).then(done)
-      else if (msg.type === 'preview_stop') done(previews.stop(sessionId, msg.itemId))
+      else if (msg.type === 'preview_launch') void previews.launch(sessionId, msg.name, typeof msg.digest === 'string' ? msg.digest : undefined).then(done)
+      else if (msg.type === 'preview_stop') void previews.stop(sessionId, msg.itemId).then(done)
       else void previews.restart(sessionId, msg.itemId).then(done)
       break
     }

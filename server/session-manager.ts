@@ -146,7 +146,7 @@ export class SessionManager {
   readonly archive: SessionArchive
   /** Canvas items beside each session's chat (docs/CANVAS-SPEC.md). */
   readonly canvas: CanvasSessions
-  /** Live previews of dev servers in Canvas (docs/CANVAS-SPEC.md §9); off until ws-server configures ports. */
+  /** Live previews of dev servers in Canvas (docs/CANVAS-SPEC.md §8); off until ws-server configures ports. */
   readonly previews: PreviewManager
   /** Tool calls MCP Apps in Canvas make on their own server. */
   readonly appToolCalls: AppToolCalls

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import http from 'http'
 import net from 'net'
 import type { AddressInfo } from 'net'
-import { createPreviewProxy, downstreamHeaders, injectScript, PREVIEW_ENTRY_PATH, PREVIEW_SCRIPT_PATH, rewriteLocation, safePath } from './preview-proxy.js'
+import { createPreviewProxy, downstreamHeaders, injectScript, PREVIEW_ENTRY_PATH, PREVIEW_SCRIPT_PATH, previewClientScript, rewriteLocation, safePath } from './preview-proxy.js'
 
 const listen = (server: http.Server) => new Promise<number>((resolve) => {
   server.listen(0, '127.0.0.1', () => { resolve((server.address() as AddressInfo).port) })
@@ -23,6 +23,10 @@ describe('preview proxy helpers', () => {
     expect(safePath('/settings?a=1')).toBe('/settings?a=1')
     expect(safePath('//evil.example.com')).toBe('/')
     expect(safePath('/\\evil.example.com')).toBe('/')
+    expect(safePath('/\t/evil.example/x')).toBe('/')
+    expect(safePath('/a\nb')).toBe('/')
+    expect(safePath('/a\\b')).toBe('/')
+    expect(safePath('/settings#tab')).toBe('/settings#tab')
     expect(safePath('https://evil.example.com')).toBe('/')
     expect(safePath(null)).toBe('/')
   })
@@ -174,5 +178,65 @@ describe('createPreviewProxy', () => {
     })
     expect(reply).toContain('403')
     expect(seen).toHaveLength(0)
+  })
+
+  it('injects the script into pages, not into fragments a page fetches', async () => {
+    const page = await request(proxyPort, '/', { cookie: cookie(), 'sec-fetch-dest': 'document' })
+    expect(page.body).toContain(PREVIEW_SCRIPT_PATH)
+    const fragment = await request(proxyPort, '/', { cookie: cookie(), 'sec-fetch-dest': 'empty' })
+    expect(fragment.body).not.toContain(PREVIEW_SCRIPT_PATH)
+  })
+
+  it('refuses service worker scripts', async () => {
+    const res = await request(proxyPort, '/sw.js', { cookie: cookie(), 'service-worker': 'script' })
+    expect(res.status).toBe(403)
+  })
+
+  it('answers a bad entry URL instead of throwing', async () => {
+    const res = await request(proxyPort, `${PREVIEW_ENTRY_PATH}?k=${key}&to=%2F%E6%97%A5`)
+    expect([302, 400]).toContain(res.status)
+  })
+
+  it('drops the upstream request when the browser goes away', async () => {
+    let upstreamClosed = false
+    upstream.removeAllListeners('request')
+    upstream.on('request', (req, res) => {
+      res.writeHead(200, { 'Content-Type': 'text/event-stream' })
+      res.write('data: 1\n\n')
+      req.socket.on('close', () => { upstreamClosed = true })
+    })
+    await new Promise<void>((resolve) => {
+      const r = http.get({ host: '127.0.0.1', port: proxyPort, path: '/events', headers: { cookie: cookie() } }, (res) => {
+        res.once('data', () => { r.destroy(); resolve() })
+      })
+    })
+    for (let i = 0; i < 40 && !upstreamClosed; i++) await new Promise(r => setTimeout(r, 25))
+    expect(upstreamClosed).toBe(true)
+  })
+})
+
+describe('createPreviewProxy host fallback and site data', () => {
+  it('tries the next host for each request, and clears site data once for a new holder', async () => {
+    const up = http.createServer((_q, r) => { r.writeHead(200, { 'Content-Type': 'text/plain' }); r.end('v4') })
+    const upPort = await listen(up)
+    const k = 'k'.repeat(32)
+    // The first host refuses: every request still reaches the second.
+    const proxy = createPreviewProxy({ targetPort: upPort, key: k, cookieName: 'c', targetHosts: ['127.0.0.2', '127.0.0.1'], clearSiteData: true })
+    const port = await listen(proxy)
+    try {
+      const entry1 = await request(port, `${PREVIEW_ENTRY_PATH}?k=${k}&to=/`)
+      expect(entry1.headers['clear-site-data']).toBe('"storage"')
+      const entry2 = await request(port, `${PREVIEW_ENTRY_PATH}?k=${k}&to=/`)
+      expect(entry2.headers['clear-site-data']).toBeUndefined()
+      for (let i = 0; i < 3; i++) expect((await request(port, '/', { cookie: `c=${k}` })).body).toBe('v4')
+    } finally {
+      proxy.closeAllConnections(); proxy.close(); up.closeAllConnections(); up.close()
+    }
+  })
+})
+
+describe('preview script', () => {
+  it('names the Codekin port it answers', () => {
+    expect(previewClientScript([32352])).toMatch(/\)\(\[32352\]\);$/)
   })
 })

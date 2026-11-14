@@ -1,5 +1,5 @@
 /**
- * The preview proxy (docs/CANVAS-SPEC.md §9): shows a dev server running on
+ * The preview proxy (docs/CANVAS-SPEC.md §8): shows a dev server running on
  * this machine inside Canvas.
  *
  * Each preview gets its own proxy port, so the app runs on its own origin,
@@ -20,6 +20,7 @@
 import { timingSafeEqual } from 'crypto'
 import http from 'http'
 import net from 'net'
+import { pipeline } from 'stream'
 
 export const PREVIEW_ENTRY_PATH = '/__codekin/enter'
 export const PREVIEW_SCRIPT_PATH = '/__codekin/preview.js'
@@ -37,6 +38,10 @@ export interface PreviewProxyOptions {
   cookieName: string
   /** Hosts to try for the target, in order (dev servers bind IPv4, IPv6 or both). */
   targetHosts?: string[]
+  /** This origin was another preview's (or an earlier Codekin's): clear its storage on entry. */
+  clearSiteData?: boolean
+  /** Codekin's port(s): the only parent page the injected script answers. */
+  hostPorts?: number[]
 }
 
 function sameKey(a: string, b: string): boolean {
@@ -65,10 +70,29 @@ export function admitted(req: http.IncomingMessage, opts: Pick<PreviewProxyOptio
   return value !== undefined && sameKey(value, opts.key)
 }
 
-/** A redirect target that stays on the proxy: a path, never another host. */
+/**
+ * A redirect target that stays on the proxy: a path, never another host.
+ * Browsers drop tabs and newlines and read backslashes as slashes, so
+ * `/\t/evil.example` would leave: control characters, spaces and
+ * backslashes are refused outright, and the result must resolve here.
+ */
 export function safePath(to: string | null | undefined): string {
-  if (!to || !to.startsWith('/') || to.startsWith('//') || to.startsWith('/\\')) return '/'
-  return to
+  // eslint-disable-next-line no-control-regex
+  if (!to || !to.startsWith('/') || /[\u0000-\u0020\u007f\\]/.test(to)) return '/'
+  try {
+    const u = new URL(to, 'http://proxy.invalid')
+    if (u.origin !== 'http://proxy.invalid') return '/'
+    return `${u.pathname}${u.search}${u.hash}`
+  } catch {
+    return '/'
+  }
+}
+
+/** Whether a response is a page (gets the preview script), not a fragment a page fetched. */
+export function isDocument(req: http.IncomingMessage, html: string): boolean {
+  const dest = req.headers['sec-fetch-dest']
+  if (dest) return dest === 'document' || dest === 'iframe'
+  return /<(html|head)[\s>]/i.test(html.slice(0, 4096))
 }
 
 /** Request headers as the dev server should see them. */
@@ -151,26 +175,26 @@ function plainPage(res: http.ServerResponse, status: number, title: string, body
 
 export function createPreviewProxy(opts: PreviewProxyOptions): http.Server {
   const hosts = opts.targetHosts ?? ['127.0.0.1', '::1']
-  let hostIndex = 0
-  const target = () => hosts[hostIndex]
-  /** Try the next host after a refused connection; true when there is one. */
-  const nextHost = () => {
-    if (hostIndex + 1 >= hosts.length) { hostIndex = 0; return false }
-    hostIndex++
-    return true
-  }
+  /** The host that answered last: tried first. Each request tries every host once. */
+  let preferred = 0
+  const order = () => hosts.map((_, i) => hosts[(preferred + i) % hosts.length])
+  const worked = (host: string) => { preferred = Math.max(0, hosts.indexOf(host)) }
+  let clearSiteData = opts.clearSiteData === true
 
-  const forward = (req: http.IncomingMessage, res: http.ServerResponse, attempt = 0) => {
+  const forward = (req: http.IncomingMessage, res: http.ServerResponse, tries: string[]) => {
+    const host = tries[0]
     const upstream = http.request({
-      host: target(), port: opts.targetPort, method: req.method, path: req.url, headers: upstreamHeaders(req, opts.targetPort),
+      host, port: opts.targetPort, method: req.method, path: req.url, headers: upstreamHeaders(req, opts.targetPort),
     }, (up) => {
+      worked(host)
       const headers = downstreamHeaders(up.headers, opts.targetPort)
       const type = up.headers['content-type'] ?? ''
       const encoded = up.headers['content-encoding'] && up.headers['content-encoding'] !== 'identity'
       const html = /^text\/html/i.test(type) && !encoded && req.method !== 'HEAD' && up.statusCode !== 204 && up.statusCode !== 304
       if (!html) {
         res.writeHead(up.statusCode ?? 502, headers)
-        up.pipe(res)
+        // Ends or aborts together: a dead upstream ends the response, a closed response the upstream.
+        pipeline(up, res, () => { upstream.destroy() })
         return
       }
       const chunks: Buffer[] = []
@@ -183,24 +207,28 @@ export function createPreviewProxy(opts: PreviewProxyOptions): http.Server {
         if (size > MAX_HTML_BYTES) {
           // Too large to rewrite: send what we have, then stream the rest.
           passThrough = true
+          up.pause()
           res.writeHead(up.statusCode ?? 200, headers)
           for (const c of chunks) res.write(c)
-          up.pipe(res)
+          pipeline(up, res, () => { upstream.destroy() })
         }
       })
       up.on('end', () => {
         if (passThrough) return
-        const body = Buffer.from(injectScript(Buffer.concat(chunks).toString('utf-8')))
+        const text = Buffer.concat(chunks).toString('utf-8')
+        const body = isDocument(req, text) ? Buffer.from(injectScript(text)) : Buffer.concat(chunks)
         delete headers['content-length']
         res.writeHead(up.statusCode ?? 200, { ...headers, 'content-length': body.length })
         res.end(body)
       })
       up.on('error', () => { res.destroy() })
     })
+    // The browser went away (a reload, a closed stream): stop asking the dev server.
+    res.on('close', () => { if (!res.writableFinished) upstream.destroy() })
     upstream.on('error', (err: NodeJS.ErrnoException) => {
       // Another loopback address may answer; only bodiless requests can be sent again.
       const replayable = req.method === 'GET' || req.method === 'HEAD'
-      if (err.code === 'ECONNREFUSED' && attempt === 0 && replayable && nextHost()) { forward(req, res, 1); return }
+      if (err.code === 'ECONNREFUSED' && replayable && tries.length > 1 && !res.headersSent) { forward(req, res, tries.slice(1)); return }
       if (res.headersSent) { res.destroy(); return }
       plainPage(res, 502, 'Not running', `Nothing is answering on port ${opts.targetPort}. Start the dev server, then reload.`)
     })
@@ -208,6 +236,15 @@ export function createPreviewProxy(opts: PreviewProxyOptions): http.Server {
   }
 
   const server = http.createServer((req, res) => {
+    try {
+      handle(req, res)
+    } catch (err) {
+      console.warn('[preview] bad request', err instanceof Error ? err.message : err)
+      if (!res.headersSent) { res.writeHead(400); res.end() } else res.destroy()
+    }
+  })
+
+  const handle = (req: http.IncomingMessage, res: http.ServerResponse) => {
     const url = new URL(req.url ?? '/', 'http://proxy')
     if (url.pathname === PREVIEW_ENTRY_PATH) {
       const key = url.searchParams.get('k')
@@ -217,18 +254,23 @@ export function createPreviewProxy(opts: PreviewProxyOptions): http.Server {
         Location: safePath(url.searchParams.get('to')),
         'Cache-Control': 'no-store',
         'Referrer-Policy': 'no-referrer',
+        // A new holder of this origin starts clean: no storage or service worker from another app.
+        ...(clearSiteData ? { 'Clear-Site-Data': '"storage"' } : {}),
       })
+      clearSiteData = false
       res.end()
       return
     }
     if (!admitted(req, opts)) { plainPage(res, 403, 'Preview', 'Open this preview from the Canvas in Codekin.'); return }
+    // Preview origins are shared over time: a service worker would outlive the app that registered it.
+    if (req.headers['service-worker'] === 'script') { plainPage(res, 403, 'Preview', 'Service workers are off in Codekin previews.'); return }
     if (url.pathname === PREVIEW_SCRIPT_PATH) {
       res.writeHead(200, { 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'no-cache' })
-      res.end(previewClientScript())
+      res.end(previewClientScript(opts.hostPorts ?? []))
       return
     }
-    forward(req, res)
-  })
+    forward(req, res, order())
+  }
 
   // WebSockets (hot reload): the same admission and header rewriting, then raw bytes both ways.
   server.on('upgrade', (req: http.IncomingMessage, socket: net.Socket, head: Buffer) => {
@@ -240,20 +282,29 @@ export function createPreviewProxy(opts: PreviewProxyOptions): http.Server {
       for (const value of Array.isArray(v) ? v : [v]) lines.push(`${k}: ${String(value)}`)
     }
     lines.push('Connection: Upgrade', `Upgrade: ${req.headers.upgrade ?? 'websocket'}`)
-    const connect = (attempt: number) => {
-      const upstream = net.connect(opts.targetPort, target())
+    const tries = order()
+    let done = false
+    socket.on('error', () => { done = true })
+    socket.on('close', () => { done = true })
+    // Hosts are tried one after another; the client socket is wired only to the one that connects.
+    const connect = (i: number) => {
+      if (done) return
+      const host = tries[i]
+      const upstream = net.connect(opts.targetPort, host)
+      let connected = false
       upstream.once('connect', () => {
+        connected = true
+        worked(host)
         upstream.write(lines.join('\r\n') + '\r\n\r\n')
         if (head.length) upstream.write(head)
         socket.pipe(upstream).pipe(socket)
+        socket.on('close', () => { upstream.destroy() })
+        upstream.on('close', () => { socket.destroy() })
       })
       upstream.on('error', (err: NodeJS.ErrnoException) => {
-        if (err.code === 'ECONNREFUSED' && attempt === 0 && nextHost()) { connect(1); return }
+        if (!connected && err.code === 'ECONNREFUSED' && i + 1 < tries.length) { connect(i + 1); return }
         socket.destroy()
       })
-      socket.on('error', () => { upstream.destroy() })
-      socket.on('close', () => { upstream.destroy() })
-      upstream.on('close', () => { socket.destroy() })
     }
     connect(0)
   })
@@ -274,12 +325,12 @@ export function createPreviewProxy(opts: PreviewProxyOptions): http.Server {
  *
  * Everything it sends is treated by Codekin as untrusted text from the app.
  */
-export function previewClientScript(): string {
-  return `(${previewClient.toString()})();`
+export function previewClientScript(hostPorts: number[] = []): string {
+  return `(${previewClient.toString()})(${JSON.stringify(hostPorts)});`
 }
 
 /* c8 ignore start -- runs in the previewed page, not in Node */
-function previewClient(): void {
+function previewClient(hostPorts: number[]): void {
   const w = window as Window & { __codekinPreview?: boolean }
   if (w.__codekinPreview || window.parent === window) return
   w.__codekinPreview = true
@@ -436,6 +487,12 @@ function previewClient(): void {
     if (!d || typeof d.type !== 'string' || !d.type.startsWith('codekin-preview:')) return
     if (d.type === 'codekin-preview:hello') {
       if (host && host !== e.origin) return
+      // Only Codekin itself: a top-level page on Codekin's port. Another
+      // page that frames this preview gets nothing.
+      if (window.parent !== window.top) return
+      const u = new URL(e.origin)
+      const port = Number(u.port || (u.protocol === 'https:' ? 443 : 80))
+      if (hostPorts.length && !hostPorts.includes(port)) return
       host = e.origin
       for (const m of queue.splice(0)) window.parent.postMessage(m, host)
       sendLocation()
