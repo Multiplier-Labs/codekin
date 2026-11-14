@@ -10,6 +10,7 @@
  */
 
 import { randomUUID } from 'crypto'
+import fs from 'fs'
 import path from 'path'
 import { ApprovalManager } from './approval-manager.js'
 import type { CodingProcess } from './coding-process.js'
@@ -721,9 +722,38 @@ export class PromptRouter {
     const raw = toolInput.file_path ?? toolInput.notebook_path ?? toolInput.path
     if (raw === undefined || raw === null) return true // defaults to cwd
     if (typeof raw !== 'string') return false
-    const resolved = path.resolve(session.workingDir, raw)
-    const roots = [session.workingDir, session.groupDir, ...(session.addDirs ?? [])].filter((r): r is string => !!r)
-    return roots.some(root => resolved === root || resolved.startsWith(root + path.sep))
+    // Compare real paths: `repo/link/x` with `link → /elsewhere` is outside.
+    const resolved = PromptRouter.realPath(path.resolve(session.workingDir, raw))
+    if (resolved === null) return false
+    const roots = [session.workingDir, session.groupDir, ...(session.addDirs ?? [])]
+      .filter((r): r is string => !!r)
+      .map(r => PromptRouter.realPath(path.resolve(r)))
+      .filter((r): r is string => r !== null)
+    return roots.some(root => resolved === root || resolved.startsWith(root.endsWith(path.sep) ? root : root + path.sep))
+  }
+
+  /**
+   * The path with every symlink resolved. A path that doesn't exist yet (a
+   * new file) resolves through its nearest existing parent. Null when that
+   * can't be done safely — a dangling symlink, which a write would follow
+   * to wherever it points, or an unreadable parent — so the caller asks.
+   */
+  private static realPath(absolute: string): string | null {
+    const rest: string[] = []
+    let current = absolute
+    for (;;) {
+      try {
+        return path.join(fs.realpathSync.native(current), ...rest)
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code !== 'ENOENT') return null
+      }
+      // Missing, unless it is a symlink whose target is missing.
+      try { fs.lstatSync(current); return null } catch { /* really missing */ }
+      const parent = path.dirname(current)
+      if (parent === current) return null
+      rest.unshift(path.basename(current))
+      current = parent
+    }
   }
 
   resolveAutoApproval(session: Session, toolName: string, toolInput: Record<string, unknown>): 'registry' | 'session' | 'headless' | 'permissionMode' | 'readOnly' | 'planDeny' | 'prompt' {

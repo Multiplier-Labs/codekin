@@ -34,7 +34,7 @@ An item belongs to one session and has an ordered list of revisions.
 **Content per kind**
 
 - `markdown`: UTF-8 Markdown, rendered by the existing `marked` + DOMPurify pipeline.
-- `table`: CSV, TSV or a JSON array of objects.
+- `table`: CSV, TSV or a JSON array of objects. Shown up to 200 columns, 250,000 rows and 500,000 cells (rows × columns); a larger table is cut to fit, with a notice saying how much is hidden.
 - `diagram`: Mermaid source, plus optional node metadata `{ [nodeId]: { file?, line?, description? } }`. Mermaid renders with `securityLevel: 'strict'`, which disables its own click handlers. Codekin attaches its own handlers to the rendered node elements and looks each node up in the metadata. Mermaid is loaded only when a diagram is first shown. Under a strict `style-src 'self'`, its `<style>` element and `style` attributes are moved into a constructed stylesheet and CSSOM, which CSP doesn't restrict.
 - `image`: PNG, JPEG, GIF, WebP or SVG bytes. SVG is only ever rendered through `<img>`, so scripts in it never run.
 - `preview`: `{ port, path, config? }`, the local server it shows. A new revision means it points somewhere else (another path or port). The page itself is never stored.
