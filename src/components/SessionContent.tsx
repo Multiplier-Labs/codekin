@@ -28,6 +28,14 @@ function contextPlaceholder(attachments: CanvasAttachment[] | undefined): string
   const what = attachments[0].what
   return what === 'rows' ? 'Ask about these rows…' : what === 'node' ? `Ask about ${attachments[0].label}…` : 'Ask about this…'
 }
+
+/**
+ * The transcript's top-right buttons (Canvas, Changes, "no git") share one
+ * size, so they line up as a row. Each brings its own colour; the border is
+ * always there (transparent on the filled Changes button) so heights match.
+ */
+const CORNER_BUTTON = 'flex items-center gap-1.5 rounded-control border px-3 py-1.5 text-body font-medium transition-colors'
+const CORNER_COUNT = 'rounded-control px-1.5 text-micro font-bold tabular-nums'
 import type { SkillGroup } from './SkillMenu'
 import type { SlashCommand } from '../lib/slashCommands'
 import type { ChatMessage, PermissionMode, TaskItem } from '../types'
@@ -284,35 +292,35 @@ export function SessionContent({
         {/* Canvas: once the session has items, and while Canvas is closed. */}
         {canvasCount > 0 && !canvasOpen && onOpenCanvas && (
           <button
-            className="flex shrink-0 items-center gap-1.5 rounded-control border border-edge-strong bg-surface px-2.5 py-1 text-meta font-medium text-ink transition-colors hover:border-focus"
+            className={`${CORNER_BUTTON} shrink-0 border-edge-strong bg-surface text-ink hover:border-focus`}
             onClick={onOpenCanvas}
             title={'Open Canvas (⌘\\)'}
           >
             <IconLayoutSidebarRight size={15} stroke={1.75} />
             Canvas
-            <span className="rounded-control bg-primary-fill px-1.5 text-micro font-bold tabular-nums text-on-primary-fill">{canvasCount}</span>
+            <span className={`${CORNER_COUNT} bg-primary-fill text-on-primary-fill`}>{canvasCount}</span>
           </button>
         )}
         {notRepo && !diffPanelOpen && (
           <button
-            className="flex min-w-0 items-center gap-1.5 rounded-control border border-edge-strong bg-surface px-2.5 py-1 text-meta text-ink-muted transition-colors hover:text-ink"
+            className={`${CORNER_BUTTON} min-w-0 border-edge-strong bg-surface text-ink-muted hover:text-ink`}
             onClick={onOpenDiffPanel}
             title={`${placePath ?? 'This folder'} is not a git repository — open Changes to initialize git`}
           >
-            {place?.kind === 'scratch' ? <IconPencil size={14} stroke={2} className="shrink-0" /> : <IconFolder size={14} stroke={2} className="shrink-0" />}
+            {place?.kind === 'scratch' ? <IconPencil size={15} stroke={2} className="shrink-0" /> : <IconFolder size={15} stroke={2} className="shrink-0" />}
             <span className="truncate font-mono">{placeLabel}</span>
             <span className="shrink-0 text-ink-muted">· no git</span>
           </button>
         )}
         {showChangesButton && !notRepo && !diffPanelOpen && (
           <button
-            className="flex shrink-0 items-center gap-1.5 rounded-control bg-primary-8 px-3 py-1.5 text-body font-medium text-on-primary backdrop-blur-sm transition-colors hover:bg-primary-7"
+            className={`${CORNER_BUTTON} shrink-0 border-transparent bg-primary-8 text-on-primary backdrop-blur-sm hover:bg-primary-7`}
             onClick={onOpenDiffPanel}
             title={`Review this session's changes${changesDetail ? ` — ${changesDetail}` : ''} (Ctrl+Shift+D)`}
           >
             <IconEye size={15} />
             Changes
-            {changesCount > 0 && <span className="rounded-control bg-on-primary/20 px-1.5 text-micro tabular-nums">{changesCount}</span>}
+            {changesCount > 0 && <span className={`${CORNER_COUNT} bg-on-primary/20`}>{changesCount}</span>}
           </button>
         )}
         </div>
