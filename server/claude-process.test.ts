@@ -767,79 +767,19 @@ describe('handleControlRequest', () => {
   })
 
   describe('other tools (auto-approve)', () => {
-    it('should auto-approve Write tool', () => {
-      cp.handleLine(JSON.stringify({
-        type: 'control_request',
-        request_id: 'req-write-1',
-        session_id: 'sess-1',
-        request: {
-          type: 'tool',
-          tool_name: 'Write',
-          input: { file_path: '/tmp/foo.ts', content: 'hello' },
-        },
-      }))
-
-      expect(cp.sendControlResponse).toHaveBeenCalledWith('req-write-1', 'allow')
-    })
-
-    it('should auto-approve Edit tool', () => {
-      cp.handleLine(JSON.stringify({
-        type: 'control_request',
-        request_id: 'req-edit-1',
-        session_id: 'sess-1',
-        request: {
-          type: 'tool',
-          tool_name: 'Edit',
-          input: { file_path: '/tmp/bar.ts' },
-        },
-      }))
-
-      expect(cp.sendControlResponse).toHaveBeenCalledWith('req-edit-1', 'allow')
-    })
-
-    it('should auto-approve Read tool', () => {
-      cp.handleLine(JSON.stringify({
-        type: 'control_request',
-        request_id: 'req-read-1',
-        session_id: 'sess-1',
-        request: {
-          type: 'tool',
-          tool_name: 'Read',
-          input: { file_path: '/tmp/baz.ts' },
-        },
-      }))
-
-      expect(cp.sendControlResponse).toHaveBeenCalledWith('req-read-1', 'allow')
-    })
-
-    it('should auto-approve Glob tool', () => {
-      cp.handleLine(JSON.stringify({
-        type: 'control_request',
-        request_id: 'req-glob-1',
-        session_id: 'sess-1',
-        request: {
-          type: 'tool',
-          tool_name: 'Glob',
-          input: { pattern: '**/*.ts' },
-        },
-      }))
-
-      expect(cp.sendControlResponse).toHaveBeenCalledWith('req-glob-1', 'allow')
-    })
-
-    it('should auto-approve Grep tool', () => {
-      cp.handleLine(JSON.stringify({
-        type: 'control_request',
-        request_id: 'req-grep-1',
-        session_id: 'sess-1',
-        request: {
-          type: 'tool',
-          tool_name: 'Grep',
-          input: { pattern: 'TODO' },
-        },
-      }))
-
-      expect(cp.sendControlResponse).toHaveBeenCalledWith('req-grep-1', 'allow')
+    it('forwards file tools to the session instead of approving them: the CLI asks only when its own rules refuse', () => {
+      const forwarded: Array<[string, string]> = []
+      cp.on('control_request', (reqId: string, tool: string) => forwarded.push([reqId, tool]))
+      for (const tool of ['Write', 'Edit', 'Read', 'Glob', 'Grep', 'NotebookEdit']) {
+        cp.handleLine(JSON.stringify({
+          type: 'control_request',
+          request_id: `req-${tool}`,
+          session_id: 'sess-1',
+          request: { type: 'tool', tool_name: tool, input: { file_path: '/home/u/.bashrc' } },
+        }))
+      }
+      expect(cp.sendControlResponse).not.toHaveBeenCalled()
+      expect(forwarded.map(f => f[1])).toEqual(['Write', 'Edit', 'Read', 'Glob', 'Grep', 'NotebookEdit'])
     })
 
     it('should auto-approve Task tool', () => {

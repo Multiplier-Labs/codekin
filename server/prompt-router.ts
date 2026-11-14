@@ -707,7 +707,7 @@ export class PromptRouter {
    * as in-project.
    */
   private isPathInProject(session: Session, toolInput: Record<string, unknown>): boolean {
-    const raw = toolInput.file_path ?? toolInput.path
+    const raw = toolInput.file_path ?? toolInput.notebook_path ?? toolInput.path
     if (raw === undefined || raw === null) return true // defaults to cwd
     if (typeof raw !== 'string') return false
     const resolved = path.resolve(session.workingDir, raw)
@@ -730,8 +730,11 @@ export class PromptRouter {
     // File tools are governed by permission mode, not per-tool approval.
     // The PreToolUse hook intercepts them before Claude's native permission
     // logic runs, so we must enforce permission mode here.
+    // "Accept edits" covers edits inside the session's folders only, as in
+    // Claude Code: a write elsewhere (~/.bashrc, another repo) is asked about.
     if (PromptRouter.FILE_TOOLS.has(toolName) && PromptRouter.EDIT_MODES.has(session.permissionMode ?? '')) {
-      return 'permissionMode'
+      const anywhere = PromptRouter.BYPASS_MODES.has(session.permissionMode ?? '') || !PromptRouter.WRITE_TOOLS.has(toolName)
+      if (anywhere || this.isPathInProject(session, toolInput)) return 'permissionMode'
     }
     // Bypass modes accept every tool. The PreToolUse hook asks here before
     // Claude's own permission logic runs, so the mode is enforced here too:

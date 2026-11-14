@@ -108,6 +108,22 @@ describe('PromptRouter', () => {
       expect(result).toBe('permissionMode')
     })
 
+    it('accepts edits inside the session folders in acceptEdits, and asks about writes elsewhere', () => {
+      session.permissionMode = 'acceptEdits'
+      const inside = `${session.workingDir}/src/a.ts`
+      expect(router.resolveAutoApproval(session, 'Write', { file_path: inside })).toBe('permissionMode')
+      expect(router.resolveAutoApproval(session, 'Edit', { file_path: 'src/a.ts' })).toBe('permissionMode')
+      for (const [tool, input] of [
+        ['Write', { file_path: '/home/u/.bashrc' }],
+        ['Edit', { file_path: `${session.workingDir}/../other/x.ts` }],
+        ['NotebookEdit', { notebook_path: '/tmp/n.ipynb' }],
+      ] as const) {
+        expect(router.resolveAutoApproval(session, tool, input)).toBe('prompt')
+      }
+      session.permissionMode = 'bypassPermissions'
+      expect(router.resolveAutoApproval(session, 'Write', { file_path: '/home/u/.bashrc' })).toBe('permissionMode')
+    })
+
     it('accepts every tool in the bypass modes, except questions to the user', () => {
       for (const mode of ['bypassPermissions', 'dangerouslySkipPermissions'] as const) {
         session.permissionMode = mode
@@ -222,7 +238,7 @@ describe('PromptRouter', () => {
   describe('requestToolApproval', () => {
     it('auto-approves via permissionMode', async () => {
       session.permissionMode = 'acceptEdits'
-      const result = await router.requestToolApproval('sess-1', 'Write', { file_path: '/test.ts' })
+      const result = await router.requestToolApproval('sess-1', 'Write', { file_path: `${session.workingDir}/test.ts` })
       expect(result).toEqual({ allow: true, always: false })
     })
 
