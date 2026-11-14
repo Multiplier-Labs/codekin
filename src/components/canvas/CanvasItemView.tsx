@@ -1,14 +1,24 @@
 /**
  * The body of a Canvas item. Markdown renders through the shared sanitized
- * pipeline and images only through <img> (so SVG scripts never run). Tables
- * and diagrams show their source until their renderers land in slice 3.
+ * pipeline, images only through <img> (so SVG scripts never run), tables in
+ * a sortable, filterable grid, and diagrams through Mermaid in strict mode.
  */
 
 import { IconAlertTriangle, IconLoader2 } from '@tabler/icons-react'
 import type { CanvasView } from '../../hooks/useCanvas'
 import { MarkdownRenderer } from '../MarkdownRenderer'
+import { DiagramView } from './DiagramView'
+import { TableView } from './TableView'
 
-export function CanvasItemView({ view }: { view: Exclude<CanvasView, { state: 'empty' }> }) {
+interface Props {
+  view: Exclude<CanvasView, { state: 'empty' }>
+  /** Put a question in the composer (diagram nodes). */
+  onAsk: (text: string) => void
+  /** Show a file in Canvas (diagram nodes). */
+  onOpenFile: (path: string) => void
+}
+
+export function CanvasItemView({ view, onAsk, onOpenFile }: Props) {
   if (view.state === 'loading') {
     return (
       <div className="flex flex-1 items-center justify-center gap-2 text-meta text-ink-muted" role="status">
@@ -48,8 +58,6 @@ export function CanvasItemView({ view }: { view: Exclude<CanvasView, { state: 'e
       </div>
     )
   }
-  // Tables and diagrams: source until their renderers land.
-  return (
-    <pre className="px-8 py-6 font-mono text-body text-ink whitespace-pre-wrap break-words">{content.content}</pre>
-  )
+  if (item.kind === 'table') return <TableView content={content.content} mediaType={content.mediaType} />
+  return <DiagramView source={content.content} meta={content.meta} onAsk={onAsk} onOpenFile={onOpenFile} />
 }

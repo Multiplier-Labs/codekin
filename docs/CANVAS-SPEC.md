@@ -1,6 +1,6 @@
 # Session Canvas
 
-**Status:** Slices 1 (item model and store, #896), 2 (layout shell, #897) and 3a (agent publishing, chat cards, auto-open) implemented; 3b (table and diagram renderers) and 3c (revisions UI) next.
+**Status:** Slices 1 (item model and store, #896), 2 (layout shell, #897), 3a (agent publishing, chat cards, auto-open, #898) and 3b (table and diagram renderers) implemented; 3c (revisions UI) next.
 
 ## 1. Summary
 
@@ -34,7 +34,7 @@ An item belongs to one session and has an ordered list of revisions.
 
 - `markdown`: UTF-8 Markdown, rendered by the existing `marked` + DOMPurify pipeline.
 - `table`: CSV, TSV or a JSON array of objects.
-- `diagram`: Mermaid source, plus optional node metadata `{ [nodeId]: { file?, line?, description? } }`. Mermaid renders with `securityLevel: 'strict'`, which disables its own click handlers. Codekin attaches its own handlers to the rendered node elements and looks each node up in the metadata.
+- `diagram`: Mermaid source, plus optional node metadata `{ [nodeId]: { file?, line?, description? } }`. Mermaid renders with `securityLevel: 'strict'`, which disables its own click handlers. Codekin attaches its own handlers to the rendered node elements and looks each node up in the metadata. Mermaid is loaded only when a diagram is first shown. Under a strict `style-src 'self'`, its `<style>` element and `style` attributes are moved into a constructed stylesheet and CSSOM, which CSP doesn't restrict.
 - `image`: PNG, JPEG, GIF, WebP or SVG bytes. SVG is only ever rendered through `<img>`, so scripts in it never run.
 
 **Limits:** 100 items per session, 50 revisions per item (the oldest unpinned revisions are dropped first), 1 MiB per text revision and 2 MiB per image revision. A dropped revision that an attachment still refers to shows "This revision is no longer available".

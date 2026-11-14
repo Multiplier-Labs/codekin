@@ -80,3 +80,12 @@ describe('displayToolName', () => {
     expect(displayToolName('Bash')).toBe('Bash')
   })
 })
+
+describe('mermaidNodeId', () => {
+  it('reads the node id from Mermaid flowchart element ids', async () => {
+    const { mermaidNodeId } = await import('./mermaidRender')
+    expect(mermaidNodeId({ id: 'flowchart-SM-3' } as Element)).toBe('SM')
+    expect(mermaidNodeId({ id: 'ck-mermaid-1-flowchart-node-a-12' } as Element)).toBe('node-a')
+    expect(mermaidNodeId({ id: 'L-A-B-0' } as Element)).toBeNull()
+  })
+})
