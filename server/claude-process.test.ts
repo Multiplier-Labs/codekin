@@ -913,16 +913,27 @@ describe('sendControlResponse', () => {
     expect(parsed.response.response.updatedInput).toEqual({ command: 'echo safe' })
   })
 
-  it('should format deny response as error subtype', () => {
+  it('should format deny as a successful answer with behavior deny, so the agent sees the reason', () => {
     const { cp, stdinData } = makeCPWithStdin()
 
     cp.sendControlResponse('req-44', 'deny', undefined, 'Not allowed')
 
     const parsed = JSON.parse(stdinData[0].replace(/\n$/, ''))
-    expect(parsed.response.subtype).toBe('error')
+    expect(parsed.response.subtype).toBe('success')
     expect(parsed.response.request_id).toBe('req-44')
-    expect(parsed.response.error).toBe('Not allowed')
-    expect(parsed.response.response).toBeUndefined()
+    expect(parsed.response.response).toEqual({ behavior: 'deny', message: 'Not allowed' })
+  })
+
+  it('should allow with the input the CLI asked about when no updated input is given', () => {
+    const { cp, stdinData } = makeCPWithStdin()
+
+    ;(cp as unknown as { handleControlRequest: (e: unknown) => void }).handleControlRequest({
+      type: 'control_request', request_id: 'req-47', request: { subtype: 'can_use_tool', tool_name: 'mcp__counter__echo', input: { text: 'hello world' } },
+    })
+    cp.sendControlResponse('req-47', 'allow')
+
+    const parsed = JSON.parse(stdinData.at(-1)!.replace(/\n$/, ''))
+    expect(parsed.response.response).toEqual({ behavior: 'allow', updatedInput: { text: 'hello world' } })
   })
 
   it('should include updatedInput in allow response when provided', () => {
@@ -941,8 +952,7 @@ describe('sendControlResponse', () => {
     cp.sendControlResponse('req-46', 'deny')
 
     const parsed = JSON.parse(stdinData[0].replace(/\n$/, ''))
-    expect(parsed.response.subtype).toBe('error')
-    expect(parsed.response.error).toBe('User denied permission')
+    expect(parsed.response.response).toEqual({ behavior: 'deny', message: 'The user denied permission.' })
   })
 })
 

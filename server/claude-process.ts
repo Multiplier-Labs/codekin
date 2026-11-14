@@ -146,6 +146,8 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> implements 
   private tasks = new Map<string, TaskItem>()
   private taskSeq = 0
 
+  /** Tool input of each can_use_tool request awaiting an answer, by request id. */
+  private controlInputs = new Map<string, Record<string, unknown>>()
   /** Outbound control requests (server → CLI, e.g. set_permission_mode) awaiting a control_response. */
   private pendingOutboundControl = new Map<string, (ok: boolean, response?: Record<string, unknown>) => void>
   /** The CLI can describe tool UIs and read their resources (init capabilities). */
@@ -219,6 +221,10 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> implements 
       ...(skipPermissions
         ? ['--dangerously-skip-permissions']
         : ['--permission-mode', this.permissionMode || 'acceptEdits']),
+      // Ask Codekin (can_use_tool control requests) whenever the CLI would
+      // prompt. Without it, a headless CLI denies every tool the PreToolUse
+      // hook doesn't cover, MCP tools included, with no prompt at all.
+      '--permission-prompt-tool', 'stdio',
       '--allowedTools', ['Bash(git:*)', ...(this.allowedTools || [])].join(','),
       '--add-dir', SCREENSHOTS_DIR,
       ...(this.addDirs || []).flatMap(d => ['--add-dir', d]),
@@ -718,6 +724,8 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> implements 
     const { request_id, request } = event
     const toolName = request.tool_name
     const toolInput = request.input
+    // Answered with the input as asked, unless the answer changes it.
+    if (toolInput && typeof toolInput === 'object') this.controlInputs.set(request_id, toolInput)
 
     if (toolName === 'AskUserQuestion') {
       // Parse questions from input and emit as a single prompt with all questions bundled.
@@ -771,26 +779,20 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> implements 
     // Inner response schema:
     //   allow: { behavior: "allow", updatedInput: Record<string, unknown> }  (updatedInput required)
     //   deny:  { behavior: "deny", message: string }                        (message required)
-    const response = behavior === 'deny'
-      ? {
-        type: 'control_response' as const,
-        response: {
-          subtype: 'error' as const,
-          request_id: requestId,
-          error: message || 'User denied permission',
-        },
-      }
-      : {
-        type: 'control_response' as const,
-        response: {
-          subtype: 'success' as const,
-          request_id: requestId,
-          response: {
-            behavior: 'allow' as const,
-            updatedInput: updatedInput ?? {},
-          },
-        },
-      }
+    // A deny is a successful answer: an error response reaches the agent as
+    // "Tool permission request failed: Error: …" instead of the reason.
+    const asked = this.controlInputs.get(requestId)
+    this.controlInputs.delete(requestId)
+    const response = {
+      type: 'control_response' as const,
+      response: {
+        subtype: 'success' as const,
+        request_id: requestId,
+        response: behavior === 'deny'
+          ? { behavior: 'deny' as const, message: message || 'The user denied permission.' }
+          : { behavior: 'allow' as const, updatedInput: updatedInput ?? asked ?? {} },
+      },
+    }
     this.sendRaw(JSON.stringify(response))
   }
 

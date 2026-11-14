@@ -79,6 +79,12 @@ describe('ClaudeProcess.start() — process event handlers', () => {
     expect(args[args.indexOf('--append-system-prompt') + 1]).toMatch(/canvas_show/)
   })
 
+  it('asks Codekin for permission through can_use_tool (--permission-prompt-tool stdio)', () => {
+    new ClaudeProcess('/tmp').start()
+    const args = mockSpawn.mock.calls[0][1] as string[]
+    expect(args[args.indexOf('--permission-prompt-tool') + 1]).toBe('stdio')
+  })
+
   it('adds no MCP config or Canvas hint without one', () => {
     new ClaudeProcess('/tmp').start()
     const args = mockSpawn.mock.calls[0][1] as string[]
