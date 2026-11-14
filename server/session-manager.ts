@@ -224,6 +224,7 @@ export class SessionManager {
       onThinkingEvent: (session, summary) => this.onThinkingEvent(session, summary),
       onToolOutputEvent: (session, content, isError) => this.onToolOutputEvent(session, content, isError),
       onImageEvent: (session, base64, mediaType) => this.onImageEvent(session, base64, mediaType),
+      onMcpApp: (session, call) => { void this.canvas.publishMcpApp(session.id, call) },
       onToolActiveEvent: (session, toolName, toolInput) => this.onToolActiveEvent(session, toolName, toolInput),
       onToolDoneEvent: (session, toolName, summary) => this.onToolDoneEvent(session, toolName, summary),
       handleClaudeResult: (session, sessionId, result, isError) => this.handleClaudeResult(session, sessionId, result, isError),

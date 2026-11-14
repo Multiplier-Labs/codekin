@@ -8,6 +8,7 @@
  * - Handling process exit and auto-restart logic (handleClaudeExit)
  */
 
+import type { McpAppCall } from './mcp-app.js'
 import { existsSync } from 'fs'
 import path from 'path'
 import type { ClaudeProcess } from './claude-process.js'
@@ -60,6 +61,8 @@ export interface SessionLifecycleDeps {
   onThinkingEvent(session: Session, summary: string): void
   onToolOutputEvent(session: Session, content: string, isError: boolean): void
   onImageEvent(session: Session, base64: string, mediaType: string): void
+  /** A tool call with a UI (MCP Apps), to show in the session's Canvas. */
+  onMcpApp(session: Session, call: McpAppCall): void
   onToolActiveEvent(session: Session, toolName: string, toolInput: string | undefined): void
   onToolDoneEvent(session: Session, toolName: string, summary: string | undefined): void
   handleClaudeResult(session: Session, sessionId: string, result: string, isError: boolean): void
@@ -283,6 +286,7 @@ export class SessionLifecycle {
     cp.on('thinking', (summary) => this.deps.onThinkingEvent(session, summary))
     cp.on('tool_output', (content, isError) => this.deps.onToolOutputEvent(session, content, isError))
     cp.on('image', (base64Data, mediaType) => this.deps.onImageEvent(session, base64Data, mediaType))
+    cp.on('mcp_app', (call) => { this.deps.onMcpApp(session, call) })
     cp.on('tool_active', (toolName, toolInput) => this.deps.onToolActiveEvent(session, toolName, toolInput))
     cp.on('tool_done', (toolName, summary) => this.deps.onToolDoneEvent(session, toolName, summary))
     cp.on('planning_mode', (active) => {

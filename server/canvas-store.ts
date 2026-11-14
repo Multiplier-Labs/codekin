@@ -29,7 +29,7 @@ export const CANVAS_LIMITS = {
   maxNodeFieldLength: 1000,
 } as const
 
-export const CANVAS_KINDS: readonly CanvasItemKind[] = ['markdown', 'table', 'diagram', 'image', 'chart', 'html']
+export const CANVAS_KINDS: readonly CanvasItemKind[] = ['markdown', 'table', 'diagram', 'image', 'chart', 'html', 'mcp_app']
 
 /** Media types each kind accepts. */
 const MEDIA_TYPES: Record<CanvasItemKind, readonly string[]> = {
@@ -41,6 +41,8 @@ const MEDIA_TYPES: Record<CanvasItemKind, readonly string[]> = {
   chart: ['application/vnd.vegalite+json'],
   /** A self-contained page, rendered in the sandbox origin with no network. */
   html: ['text/html'],
+  /** An MCP App: one tool call (input, result) and its UI document (see mcp-app.ts). */
+  mcp_app: ['application/vnd.codekin.mcp-app+json'],
 }
 
 const ITEM_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
@@ -169,6 +171,12 @@ function checkContent(kind: CanvasItemKind, input: CanvasContentInput): Buffer {
   if (buf.length > CANVAS_LIMITS.maxTextBytes) throw new CanvasError(`Text items can be at most ${CANVAS_LIMITS.maxTextBytes / 1024 / 1024} MiB.`)
   const text = decodeUtf8(buf)
   if (text === null) throw new CanvasError('Text items must be UTF-8.')
+  if (input.mediaType === 'application/vnd.codekin.mcp-app+json') {
+    let parsed: unknown = null
+    try { parsed = JSON.parse(text) } catch { /* below */ }
+    const r = (typeof parsed === 'object' && parsed !== null ? parsed : {}) as { html?: unknown; server?: unknown; tool?: unknown }
+    if (typeof r.html !== 'string' || typeof r.server !== 'string' || typeof r.tool !== 'string') throw new CanvasError('Not an MCP App record.')
+  }
   if (input.mediaType === 'application/vnd.vegalite+json') {
     let parsed: unknown
     try { parsed = JSON.parse(text) } catch { throw new CanvasError('The chart spec does not parse as JSON.') }

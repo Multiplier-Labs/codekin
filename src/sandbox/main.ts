@@ -111,7 +111,51 @@ function renderHtml(content: string) {
   root.replaceChildren(frame)
 }
 
-window.addEventListener('message', (event: MessageEvent) => {
+/**
+ * MCP Apps: this page is the spec's sandbox proxy. It announces itself
+ * (`ui/notifications/sandbox-proxy-ready`, repeated until answered), loads
+ * the app document it is sent into an inner frame with an opaque origin and
+ * no network, and relays every other JSON-RPC message between Codekin's
+ * AppBridge and the app.
+ */
+function runAppProxy() {
+  let inner: HTMLIFrameElement | null = null
+  let hostOrigin: string | null = null
+  const ready = { jsonrpc: '2.0', method: 'ui/notifications/sandbox-proxy-ready', params: {} }
+  let tries = 0
+  const announce = setInterval(() => {
+    if (inner || ++tries > 40) { clearInterval(announce); return }
+    window.parent.postMessage(ready, '*')
+  }, 250)
+  window.parent.postMessage(ready, '*')
+
+  window.addEventListener('message', (event: MessageEvent) => {
+    const data = event.data as { jsonrpc?: string; method?: string; params?: { html?: unknown } } | null
+    if (event.source === window.parent) {
+      hostOrigin ??= event.origin
+      if (event.origin !== hostOrigin || data?.jsonrpc !== '2.0') return
+      if (data.method === 'ui/notifications/sandbox-resource-ready') {
+        if (inner || typeof data.params?.html !== 'string') return
+        inner = document.createElement('iframe')
+        // Scripts and forms only: an opaque origin, no popups or top navigation.
+        inner.setAttribute('sandbox', 'allow-scripts allow-forms')
+        inner.setAttribute('referrerpolicy', 'no-referrer')
+        inner.title = 'MCP App'
+        inner.srcdoc = `<meta http-equiv="Content-Security-Policy" content="${HTML_ARTIFACT_CSP}">${data.params.html}`
+        root.replaceChildren(inner)
+        return
+      }
+      inner?.contentWindow?.postMessage(data, '*')
+      return
+    }
+    if (inner && event.source === inner.contentWindow && data?.jsonrpc === '2.0' && hostOrigin) {
+      window.parent.postMessage(data, hostOrigin)
+    }
+  })
+}
+
+if (new URLSearchParams(location.search).has('mcp-app')) runAppProxy()
+else window.addEventListener('message', (event: MessageEvent) => {
   if (event.source !== window.parent) return
   const msg = event.data as ToSandbox | null
   if (msg?.type !== 'codekin-sandbox:render' || typeof msg.content !== 'string' || typeof msg.id !== 'string') return
@@ -128,4 +172,4 @@ window.addEventListener('message', (event: MessageEvent) => {
   }
 })
 
-post({ type: 'codekin-sandbox:ready' })
+if (!new URLSearchParams(location.search).has('mcp-app')) post({ type: 'codekin-sandbox:ready' })

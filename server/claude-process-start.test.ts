@@ -86,6 +86,45 @@ describe('ClaudeProcess.start() — process event handlers', () => {
     expect(args[args.indexOf('--append-system-prompt') + 1]).not.toMatch(/canvas_show/)
   })
 
+  it('turns an MCP tool call with a UI into an mcp_app event, via mcp_status and mcp_read_resource', async () => {
+    const cp = new ClaudeProcess('/tmp') as CP
+    const apps: unknown[] = []
+    cp.on('mcp_app', (call: unknown) => apps.push(call))
+    cp.start()
+    const line = (m: unknown) => { fakeProc.stdout.write(JSON.stringify(m) + '\n') }
+    const settle = () => new Promise(r => setTimeout(r, 20))
+    const sentControls = () => (fakeProc.stdin.write.mock.calls as unknown[][])
+      .map(c => { try { return JSON.parse(String(c[0])) as { type?: string; request_id?: string; request?: { subtype?: string } } } catch { return {} } })
+      .filter(m => m.type === 'control_request')
+    line({ type: 'system', subtype: 'init', session_id: 's', model: 'm', capabilities: ['mcp_tool_ui_meta_v1', 'mcp_read_resource_v1'] })
+    line({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 'tu1', name: 'mcp__latency__latency_report', input: { days: 7 } }] } })
+    line({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'tu1', content: [{ type: 'text', text: '{"rows":[]}' }] }] }, tool_use_result: { structuredContent: { rows: [] } } })
+    await settle()
+    const status = sentControls().find(m => m.request?.subtype === 'mcp_status')!
+    line({ type: 'control_response', response: { subtype: 'success', request_id: status.request_id, response: { mcpServers: [{ name: 'latency', tools: [{ name: 'latency_report', _meta: { ui: { resourceUri: 'ui://latency/r.html' } } }] }] } } })
+    await settle()
+    const read = sentControls().find(m => m.request?.subtype === 'mcp_read_resource')!
+    expect(read.request).toEqual({ subtype: 'mcp_read_resource', serverName: 'latency', uri: 'ui://latency/r.html' })
+    line({ type: 'control_response', response: { subtype: 'success', request_id: read.request_id, response: { contents: [{ mimeType: 'text/html;profile=mcp-app', text: '<p>app</p>' }] } } })
+    await settle()
+    expect(apps).toEqual([{
+      server: 'latency', tool: 'latency_report', toolInput: { days: 7 },
+      result: { content: [{ type: 'text', text: '{"rows":[]}' }], structuredContent: { rows: [] } },
+      resourceUri: 'ui://latency/r.html', html: '<p>app</p>',
+    }])
+  })
+
+  it('leaves MCP tool calls alone when the CLI cannot describe tool UIs', async () => {
+    const cp = new ClaudeProcess('/tmp') as CP
+    cp.start()
+    const line = (m: unknown) => { fakeProc.stdout.write(JSON.stringify(m) + '\n') }
+    line({ type: 'system', subtype: 'init', session_id: 's', model: 'm', capabilities: [] })
+    line({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 'tu1', name: 'mcp__latency__latency_report', input: {} }] } })
+    line({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'tu1', content: 'x' }] } })
+    await new Promise(r => setTimeout(r, 20))
+    expect((fakeProc.stdin.write.mock.calls as unknown[][]).some(c => String(c[0]).includes('mcp_status'))).toBe(false)
+  })
+
   it('sets alive=true after start()', () => {
     const cp = new ClaudeProcess('/tmp') as CP
     cp.start()

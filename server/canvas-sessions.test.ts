@@ -169,3 +169,19 @@ describe('CanvasSessions.publish (agent tools)', () => {
     await expect(canvas.publish('nope', { kind: 'markdown', content: 'x' })).rejects.toThrow(/Session not found/)
   })
 })
+
+describe('CanvasSessions.publishMcpApp', () => {
+  it('stores a tool call with a UI as an mcp_app item from that server, with a chat card', async () => {
+    const item = await canvas.publishMcpApp('s1', {
+      server: 'latency', tool: 'latency_report', toolInput: {}, result: { content: [] }, resourceUri: 'ui://latency/r.html', html: '<p>app</p>',
+    })
+    expect(item).toMatchObject({ kind: 'mcp_app', title: 'Latency report', source: { type: 'mcp', server: 'latency' } })
+    expect(history.at(-1)).toMatchObject({ type: 'canvas_event', kind: 'mcp_app', by: 'mcp' })
+    const got = await canvas.get('s1', item!.id)
+    expect(JSON.parse((got as { content: string }).content)).toMatchObject({ server: 'latency', html: '<p>app</p>' })
+  })
+
+  it('is not something the agent can publish itself', async () => {
+    await expect(canvas.publish('s1', { title: 'x', kind: 'mcp_app', content: '{}' })).rejects.toThrow(/kind must be one of/)
+  })
+})
