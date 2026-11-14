@@ -17,6 +17,7 @@ import { changesButtonState } from '../lib/changesButton'
 import { InputBar, type InputBarHandle } from './InputBar'
 import { IconEye, IconFolder, IconLayoutSidebarRight, IconPencil, IconRobotFace } from '@tabler/icons-react'
 import type { JoeChatContext } from './JoeChatMessage'
+import type { CanvasCardContext } from './canvas/CanvasChatCard'
 import type { SkillGroup } from './SkillMenu'
 import type { SlashCommand } from '../lib/slashCommands'
 import type { ChatMessage, PermissionMode, TaskItem } from '../types'
@@ -42,6 +43,8 @@ export interface SessionContentProps {
   /** Canvas is showing (beside or instead of the chat). */
   canvasOpen?: boolean
   onOpenCanvas?: () => void
+  /** Canvas chat cards in the transcript. */
+  canvasCards?: CanvasCardContext
   activePrompt: PromptEntry | null
   promptQueueSize: number
   sendPromptResponse: (value: string | string[], requestId?: string) => void
@@ -125,6 +128,7 @@ export function SessionContent({
   canvasCount = 0,
   canvasOpen = false,
   onOpenCanvas,
+  canvasCards,
   activePrompt,
   promptQueueSize,
   sendPromptResponse,
@@ -199,6 +203,7 @@ export function SessionContent({
           activityLabel={isProviderDisabled ? undefined : activityLabel}
           joe={joe}
           agentName={joeName}
+          canvas={canvasCards}
         />
         <TodoPanel tasks={tasks} isProcessing={isProcessing} />
 

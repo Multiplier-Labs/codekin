@@ -70,6 +70,8 @@ export interface Prefs {
   canvasSessions: Record<string, { open?: boolean; itemId?: string }>
   /** Width of the chat column beside an open Canvas. */
   canvasChatWidth: number
+  /** When an agent's new Canvas item opens Canvas (unset = the first item in a session). */
+  canvasAutoOpen: 'first' | 'every' | 'never'
 }
 
 export type PrefKey = keyof Prefs

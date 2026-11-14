@@ -6,7 +6,7 @@
  */
 
 import type { ThemeId } from './themes/registry'
-import type { CodingProvider, JoeMessageTask, JoeMilestone, PermissionMode, TaskItem } from '../server/protocol'
+import type { CanvasItemKind, CodingProvider, JoeMessageTask, JoeMilestone, PermissionMode, TaskItem } from '../server/protocol'
 
 // The WebSocket wire protocol (messages and the types they carry) is defined
 // once in server/protocol.ts and shared with the server; re-exported here so
@@ -251,6 +251,8 @@ export type ChatMessage =
   | { type: 'tool_group'; tools: Array<{ name: string; summary?: string; active: boolean }>; ts?: number; key?: string }
   | { type: 'tool_output'; content: string; isError?: boolean; ts?: number; key?: string }
   | { type: 'image'; base64: string; mediaType: string; ts?: number; key?: string }
+  /** A Canvas item was created or revised (from a canvas_event); renders as a chat card. */
+  | { type: 'canvas_card'; itemId: string; kind: CanvasItemKind; title: string; revision: number; action: 'created' | 'updated'; ts?: number; key?: string }
   | { type: 'planning_mode'; active: boolean; ts?: number; key?: string }
   | { type: 'todo_list'; tasks: TaskItem[]; ts?: number; key?: string }
   | { type: 'tentative'; text: string; index: number; ts?: number; key?: string }

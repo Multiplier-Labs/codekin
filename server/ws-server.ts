@@ -13,6 +13,7 @@
 
 // Must stay the first import: takes exclusive ownership of the state
 // directories before any module opens state (desktop plan D7).
+import { createCanvasRouter } from './canvas-routes.js'
 import './data-ownership-boot.js'
 import express from 'express'
 import { createServer } from 'http'
@@ -255,6 +256,10 @@ app.post(
     res.status(result.statusCode).json(result.body)
   },
 )
+
+// Canvas items agents publish can be up to 1 MiB, past the default 100 kB
+// limit, so these routes parse their own bodies — register BEFORE express.json().
+app.use(createCanvasRouter(extractToken, verifyTokenOrSessionToken, () => sessions.canvas))
 
 // JSON body parser for all other routes
 app.use(express.json())

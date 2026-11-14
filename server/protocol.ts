@@ -174,7 +174,7 @@ export type WsServerMessage =
   /** One revision of an item. `content` is UTF-8 text, or base64 for images. */
   | { type: 'canvas_item'; sessionId: string; item: CanvasItem; revision: number; content: string; encoding: 'utf8' | 'base64'; meta?: CanvasItemMeta }
   /** Transcript entry for a new item or revision; renders as a chat card. */
-  | { type: 'canvas_event'; sessionId: string; itemId: string; kind: CanvasItemKind; title: string; revision: number; action: 'created' | 'updated' }
+  | { type: 'canvas_event'; sessionId: string; itemId: string; kind: CanvasItemKind; title: string; revision: number; action: 'created' | 'updated'; by?: CanvasItemSource['type'] }
   /** A failed request. `itemId`/`revision` are set when it was a canvas_get for that revision. */
   | { type: 'canvas_error'; message: string; sessionId?: string; itemId?: string; revision?: number }
 

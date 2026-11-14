@@ -383,6 +383,37 @@ describe('GrokProcess', () => {
     gp.stop()
   })
 
+  it('allows Codekin Canvas tool calls without a prompt, and still asks for other MCP tools', async () => {
+    const gp = new GrokProcess(WORKDIR)
+    const requests: string[] = []
+    gp.on('control_request', (_id, name, input) => requests.push(`${name}:${String(input.tool_name)}`))
+    gp.start()
+    const proc = lastProc()
+    await handshake(proc)
+    gp.sendMessage('show it')
+    const options = [{ optionId: 'allow-once', kind: 'allow_once' }, { optionId: 'reject-once', kind: 'reject_once' }]
+    const useTool = (id: number, tool: string) => feed(proc, {
+      id, method: 'session/request_permission',
+      params: { sessionId: 'sid-1', toolCall: { toolCallId: `u${id}`, title: 'use_tool', rawInput: { tool_name: tool, tool_input: {} }, _meta: { 'x.ai/tool': { name: 'use_tool' } } }, options },
+    })
+    await useTool(103, 'codekin_canvas__canvas_show')
+    await useTool(104, 'someone_else__delete_all')
+    expect(writes(proc).find(m => m.id === 103)?.result).toEqual({ outcome: { outcome: 'selected', optionId: 'allow-once' } })
+    expect(writes(proc).find(m => m.id === 104)).toBeUndefined()
+    expect(requests).toEqual(['use_tool:someone_else__delete_all'])
+    gp.stop()
+  })
+
+  it('declares Codekin MCP servers on session/new', async () => {
+    const server = { name: 'codekin_canvas', command: '/usr/bin/node', args: ['/x/canvas-mcp-server.js'], env: [{ name: 'CODEKIN_PORT', value: '1' }] }
+    const gp = new GrokProcess(WORKDIR, { mcpServers: [server] })
+    gp.start()
+    const proc = lastProc()
+    await handshake(proc)
+    expect(lastRequest(proc, 'session/new').params).toMatchObject({ mcpServers: [server] })
+    gp.stop()
+  })
+
   it('answers unsupported agent requests with a JSON-RPC error', async () => {
     const gp = new GrokProcess(WORKDIR)
     gp.start()

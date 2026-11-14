@@ -71,6 +71,21 @@ describe('ClaudeProcess.start() — process event handlers', () => {
     expect(mockSpawn.mock.calls[0][1]).not.toContain('--effort')
   })
 
+  it('adds Codekin MCP servers with --mcp-config and mentions Canvas in the system prompt', () => {
+    const config = '{"mcpServers":{"codekin_canvas":{"command":"node","args":["/x.js"]}}}'
+    new ClaudeProcess('/tmp', { mcpConfig: config }).start()
+    const args = mockSpawn.mock.calls[0][1] as string[]
+    expect(args[args.indexOf('--mcp-config') + 1]).toBe(config)
+    expect(args[args.indexOf('--append-system-prompt') + 1]).toMatch(/canvas_show/)
+  })
+
+  it('adds no MCP config or Canvas hint without one', () => {
+    new ClaudeProcess('/tmp').start()
+    const args = mockSpawn.mock.calls[0][1] as string[]
+    expect(args).not.toContain('--mcp-config')
+    expect(args[args.indexOf('--append-system-prompt') + 1]).not.toMatch(/canvas_show/)
+  })
+
   it('sets alive=true after start()', () => {
     const cp = new ClaudeProcess('/tmp') as CP
     cp.start()

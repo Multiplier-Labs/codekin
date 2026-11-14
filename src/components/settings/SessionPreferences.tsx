@@ -89,6 +89,7 @@ export function SessionPreferences({ token, autoWorktree, onAutoWorktreeChange, 
       </Block>
 
       <NotificationPreferences />
+      <CanvasPreferences />
 
       <Block title="Repositories & worktrees">
         <Rows>
@@ -170,6 +171,43 @@ export function SessionPreferences({ token, autoWorktree, onAutoWorktreeChange, 
         </Rows>
       </Block>
     </div>
+  )
+}
+
+const CANVAS_AUTO_OPEN = [
+  { value: 'first', label: 'First item in a session', description: 'Later items post a card in the chat.' },
+  { value: 'every', label: 'Every new item', description: 'Revisions still don’t switch the view.' },
+  { value: 'never', label: 'Never', description: 'Cards only. Open Canvas yourself.' },
+] as const
+
+/** When an agent publishing to Canvas opens it (never on phones, or while you are typing). */
+function CanvasPreferences() {
+  const mode = usePref('canvasAutoOpen') ?? 'first'
+  return (
+    <Block title="Canvas">
+      <fieldset>
+        <legend className="mb-2 text-body text-ink">Open Canvas when the agent shows something</legend>
+        <div className="flex flex-col gap-2">
+          {CANVAS_AUTO_OPEN.map(o => (
+            <label key={o.value} className="flex cursor-pointer items-start gap-2.5">
+              <input
+                type="radio"
+                name="settings-canvas-auto-open"
+                value={o.value}
+                checked={mode === o.value}
+                onChange={() => { setPref('canvasAutoOpen', o.value === 'first' ? undefined : o.value) }}
+                className={`${checkbox} mt-0.5`}
+              />
+              <span>
+                <span className="block text-body text-ink">{o.label}</span>
+                <span className="block text-meta text-ink-muted">{o.description}</span>
+              </span>
+            </label>
+          ))}
+        </div>
+        <p className="mt-2 text-meta text-ink-faint">Never on a phone, or while you are typing a message.</p>
+      </fieldset>
+    </Block>
   )
 }
 
