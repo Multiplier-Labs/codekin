@@ -45,7 +45,8 @@ function KindIcon({ place }: { place: SessionPlace }) {
   return place.git ? <IconGitBranch {...props} /> : <IconFolder {...props} />
 }
 
-const CHIP = 'flex shrink-0 items-center gap-1.5 rounded-control border border-edge-strong px-2 py-0.5 text-meta text-ink-muted'
+/** Header-sized controls (32px), the same size as the Canvas and Changes header buttons. */
+const CHIP = 'flex h-8 shrink-0 items-center gap-1.5 rounded-control border border-edge-strong px-2 text-meta text-ink-muted'
 
 export function ContextBar({
   token, path, place, attached, home, groups, recent, isMobile = false, disabled = false, onAttach, onDetach, worktree, onMoveToWorktree,
@@ -109,8 +110,8 @@ export function ContextBar({
   )
 
   return (
-    <div ref={wrapRef} className="relative flex-shrink-0 border-b border-edge">
-      <div className="flex items-center gap-1.5 overflow-x-auto px-3 py-1.5" role="toolbar" aria-label="Where this session works">
+    <div ref={wrapRef} className="relative min-w-0">
+      <div className="flex items-center gap-1.5 overflow-x-auto px-3" role="toolbar" aria-label="Where this session works">
         <span className={CHIP} title={path}>
           <KindIcon place={place} />
           <span className={place.kind === 'folder' || place.kind === 'scratch' ? 'font-mono' : ''}>{placeLabel(path, place)}</span>
@@ -154,10 +155,12 @@ export function ContextBar({
           disabled={disabled || busy}
           aria-haspopup="dialog"
           aria-expanded={pickerOpen}
-          className={`${CHIP} border-dashed hover:text-ink disabled:opacity-50`}
+          aria-label="Attach folder, repo or org"
+          title="Attach a folder, repo or org to this session"
+          className={`${CHIP} border-transparent hover:bg-surface-raised hover:text-ink disabled:opacity-50`}
         >
           <IconPlus size={14} stroke={2} className="shrink-0" />
-          {progress ?? 'Attach folder, repo or org'}
+          {progress ?? 'Attach'}
         </button>
         {error && <span className="shrink-0 text-meta text-error-4" role="alert">{error}</span>}
       </div>

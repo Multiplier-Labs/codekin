@@ -14,6 +14,7 @@ import { PromptButtons } from './PromptButtons'
 import { TentativeBanner } from './TentativeBanner'
 import { WorktreeRecoveryBanner } from './WorktreeRecoveryBanner'
 import { changesButtonState } from '../lib/changesButton'
+import { PANE_HEADER } from '../lib/paneHeader'
 import { InputBar, type InputBarHandle } from './InputBar'
 import { IconEye, IconFolder, IconLayoutSidebarRight, IconPencil, IconRobotFace } from '@tabler/icons-react'
 import type { JoeChatContext } from './JoeChatMessage'
@@ -30,12 +31,71 @@ function contextPlaceholder(attachments: CanvasAttachment[] | undefined): string
 }
 
 /**
- * The transcript's top-right buttons (Canvas, Changes, "no git") share one
- * size, so they line up as a row. Each brings its own colour; the border is
- * always there (transparent on the filled Changes button) so heights match.
+ * Canvas, Changes and "no git" as one group. In a session with a header they
+ * sit at its right end as 32px header buttons; otherwise they float in the
+ * transcript's top-right corner. Canvas takes priority: it is the filled
+ * button, sits on the right edge (next to where it opens) and never shrinks.
+ * Changes is outlined and, when space is short (compact), drops its label.
  */
-const CORNER_BUTTON = 'flex items-center gap-1.5 rounded-control border px-3 py-1.5 text-body font-medium transition-colors'
-const CORNER_COUNT = 'rounded-control px-1.5 text-micro font-bold tabular-nums'
+function SessionActions({ size, compact, canvasCount, onOpenCanvas, noGit, changes, onOpenDiffPanel }: {
+  size: 'header' | 'corner'
+  compact: boolean
+  canvasCount: number
+  onOpenCanvas?: () => void
+  noGit: { label: string; title: string; scratch: boolean } | null
+  changes: { count: number; detail?: string } | null
+  onOpenDiffPanel: () => void
+}) {
+  const showCanvas = canvasCount > 0 && !!onOpenCanvas
+  // The border is always there (transparent on the filled button) so heights match.
+  const base = size === 'header'
+    ? 'flex h-8 items-center gap-1.5 rounded-control border px-2.5 text-meta font-medium transition-colors'
+    : 'flex items-center gap-1.5 rounded-control border px-3 py-1.5 text-body font-medium transition-colors'
+  // Floating over the transcript, the quiet buttons need a solid ground.
+  const quiet = size === 'header' ? 'bg-transparent hover:bg-surface-raised' : 'bg-surface backdrop-blur-sm hover:bg-surface-raised'
+  const icon = size === 'header' ? 14 : 15
+  const count = 'rounded-control px-1.5 text-micro font-bold tabular-nums'
+  return (
+    <>
+      {noGit && (
+        <button
+          className={`${base} ${quiet} min-w-0 border-edge-strong text-ink-muted hover:text-ink`}
+          onClick={onOpenDiffPanel}
+          title={noGit.title}
+        >
+          {noGit.scratch ? <IconPencil size={icon} stroke={2} className="shrink-0" /> : <IconFolder size={icon} stroke={2} className="shrink-0" />}
+          {/* The header already names the folder. */}
+          {size === 'corner' && <span className="truncate font-mono">{noGit.label}</span>}
+          <span className="shrink-0">{size === 'corner' ? '· no git' : 'No git'}</span>
+        </button>
+      )}
+      {changes && (
+        <button
+          className={`${base} ${quiet} shrink-0 border-edge-strong text-ink`}
+          onClick={onOpenDiffPanel}
+          title={`Review this session's changes${changes.detail ? ` — ${changes.detail}` : ''} (Ctrl+Shift+D)`}
+          aria-label={`Changes${changes.count > 0 ? ` (${changes.count})` : ''}`}
+        >
+          <IconEye size={icon} className="shrink-0" />
+          {!(compact && showCanvas) && 'Changes'}
+          {changes.count > 0 && <span className={`${count} bg-surface-raised text-ink`}>{changes.count}</span>}
+        </button>
+      )}
+      {showCanvas && (
+        <button
+          className={`${base} shrink-0 border-transparent bg-primary-8 text-on-primary hover:bg-primary-7`}
+          onClick={onOpenCanvas}
+          title={'Open Canvas (⌘\\)'}
+        >
+          <IconLayoutSidebarRight size={icon} stroke={1.75} className="shrink-0" />
+          Canvas
+          <span className={`${count} bg-on-primary/20`}>{canvasCount}</span>
+        </button>
+      )}
+    </>
+  )
+}
+
 import type { SkillGroup } from './SkillMenu'
 import type { SlashCommand } from '../lib/slashCommands'
 import type { ChatMessage, PermissionMode, TaskItem } from '../types'
@@ -214,9 +274,33 @@ export function SessionContent({
   const placeLabel = placePath
     ? (place?.kind === 'scratch' ? `scratch/${placePath.replace(/\/+$/, '').split('/').pop() ?? ''}` : placePath.replace(/\/+$/, '').split('/').pop() ?? placePath)
     : activeRepoName
+  // Canvas once the session has items and while Canvas is closed; Changes
+  // (or "no git") until the Changes panel or strip is showing.
+  const actionCanvasCount = canvasOpen || !onOpenCanvas ? 0 : canvasCount
+  const noGit = notRepo && !diffPanelOpen ? { label: placeLabel, title: `${placePath ?? 'This folder'} is not a git repository — open Changes to initialize git`, scratch: place?.kind === 'scratch' } : null
+  const changes = showChangesButton && !notRepo && !diffPanelOpen ? { count: changesCount, detail: changesDetail } : null
+  const sessionActions = actionCanvasCount > 0 || noGit || changes ? (
+    <SessionActions
+      size={contextBar ? 'header' : 'corner'}
+      compact={isMobile}
+      canvasCount={actionCanvasCount}
+      onOpenCanvas={onOpenCanvas}
+      noGit={noGit}
+      changes={changes}
+      onOpenDiffPanel={onOpenDiffPanel}
+    />
+  ) : null
   return (
     <div className="flex flex-1 flex-col overflow-hidden min-h-0">
-      {contextBar}
+      {contextBar && (
+        /* The session header: where the session works on the left, Changes and
+           Canvas on the right. Same height and surface as the Canvas and
+           Changes headers, so the three line up side by side. */
+        <div className={`${PANE_HEADER} gap-1.5 pr-3`}>
+          <div className="min-w-0 flex-1">{contextBar}</div>
+          {sessionActions && <div className="flex shrink-0 items-center gap-1.5">{sessionActions}</div>}
+        </div>
+      )}
       <div className="relative flex-1 min-h-0 flex flex-col">
         <ChatView
           sessionId={activeSessionId}
@@ -283,47 +367,9 @@ export function SessionContent({
           </div>
         )}
 
-        {/* Changes button — top-right corner, visible whenever the session has
-            something to review: uncommitted files, commits on its branch, or
-            an edit just made in this browser. */}
-        {/* A folder without git has nothing to review: say where the session
-            runs instead, and open Changes, which offers to make it a repo. */}
-        <div className="absolute top-3 right-3 z-10 flex max-w-[70%] items-center gap-2">
-        {/* Canvas: once the session has items, and while Canvas is closed. */}
-        {canvasCount > 0 && !canvasOpen && onOpenCanvas && (
-          <button
-            className={`${CORNER_BUTTON} shrink-0 border-edge-strong bg-surface text-ink hover:border-focus`}
-            onClick={onOpenCanvas}
-            title={'Open Canvas (⌘\\)'}
-          >
-            <IconLayoutSidebarRight size={15} stroke={1.75} />
-            Canvas
-            <span className={`${CORNER_COUNT} bg-primary-fill text-on-primary-fill`}>{canvasCount}</span>
-          </button>
+        {!contextBar && sessionActions && (
+          <div className="absolute top-3 right-3 z-10 flex max-w-[70%] items-center gap-2">{sessionActions}</div>
         )}
-        {notRepo && !diffPanelOpen && (
-          <button
-            className={`${CORNER_BUTTON} min-w-0 border-edge-strong bg-surface text-ink-muted hover:text-ink`}
-            onClick={onOpenDiffPanel}
-            title={`${placePath ?? 'This folder'} is not a git repository — open Changes to initialize git`}
-          >
-            {place?.kind === 'scratch' ? <IconPencil size={15} stroke={2} className="shrink-0" /> : <IconFolder size={15} stroke={2} className="shrink-0" />}
-            <span className="truncate font-mono">{placeLabel}</span>
-            <span className="shrink-0 text-ink-muted">· no git</span>
-          </button>
-        )}
-        {showChangesButton && !notRepo && !diffPanelOpen && (
-          <button
-            className={`${CORNER_BUTTON} shrink-0 border-transparent bg-primary-8 text-on-primary backdrop-blur-sm hover:bg-primary-7`}
-            onClick={onOpenDiffPanel}
-            title={`Review this session's changes${changesDetail ? ` — ${changesDetail}` : ''} (Ctrl+Shift+D)`}
-          >
-            <IconEye size={15} />
-            Changes
-            {changesCount > 0 && <span className={`${CORNER_COUNT} bg-on-primary/20`}>{changesCount}</span>}
-          </button>
-        )}
-        </div>
       </div>
 
       {/* Smart prompt buttons (conditional) */}

@@ -25,6 +25,7 @@ import { DiffEmpty, DiffError, DiffLoading, DiffNotRepo } from './diff/DiffState
 import { DiscardConfirm } from './diff/DiscardConfirm'
 import { groupOrder } from './diff/diffFiles'
 import { getPref, setPref } from '../lib/prefs'
+import { PANE_HEADER } from '../lib/paneHeader'
 
 const MIN_WIDTH = 280
 const MAX_WIDTH = 1200
@@ -478,7 +479,7 @@ export function DiffPanel({ isOpen, onClose, send, onHandleMessage, onHandleTool
       )}
 
       {/* Panel header */}
-      <div className="flex shrink-0 items-center gap-2.5 border-b border-edge py-2.5 pl-4 pr-2">
+      <div className={`${PANE_HEADER} gap-2.5 pl-4 pr-2`}>
         {diff.summary.filesChanged > 0 && (
           <span className="h-2 w-2 shrink-0 rounded-full bg-success-5" />
         )}

@@ -15,6 +15,7 @@ import { CanvasHeaderActions, RevisionPicker } from './CanvasHeaderActions'
 import { CompareView } from './CompareView'
 import { RevisionBar } from './RevisionBar'
 import { makeAttachment, textLabel, type CanvasAttachment, type CanvasSelectionKind } from '../../lib/canvasContext'
+import { PANE_HEADER } from '../../lib/paneHeader'
 
 /** Below this Canvas width, view source and copy fold into the ⋯ menu. */
 const NARROW = 520
@@ -180,7 +181,7 @@ export function CanvasPanel({ canvas, replacesChat, isMobile, onBackToChat, last
           {revisionPicker && <div className="shrink-0 border-b border-edge px-2 py-0.5">{revisionPicker}</div>}
         </>
       ) : (
-        <header className="flex h-12 shrink-0 items-center gap-3 border-b border-edge bg-surface px-3">
+        <header className={`${PANE_HEADER} gap-3 px-3`}>
           {back}
           {back && <span className="h-5 w-px shrink-0 bg-edge" />}
           <span className="shrink-0 text-micro font-bold uppercase tracking-wide text-ink-muted">Canvas</span>

@@ -72,7 +72,7 @@ describe('ContextBar', () => {
     expect(text).toContain('scratch/brisk-otter')
     expect(text).toContain('~/notes')
     expect(text).toContain('acme-co')
-    expect(text).toContain('Attach folder, repo or org')
+    expect(button('Attach folder, repo or org')).toBeDefined()
   })
 
   it('detaches a folder with its × button', async () => {
