@@ -108,14 +108,41 @@ pub fn app_url(host: &str, port: u16, token: &str) -> String {
     format!("{}/#token={encoded}", server_origin(host, port))
 }
 
+/// The local server's `GET /api/canvas/sandbox` answer as an origin: the
+/// configured one, else the sandbox port on the host the window reaches the
+/// server by (as the frontend computes it). `None` when there is no sandbox.
+pub fn parse_canvas_sandbox(body: &str, host: &str) -> Option<String> {
+    let v: serde_json::Value = serde_json::from_str(body).ok()?;
+    if let Some(origin) = v.get("origin").and_then(|o| o.as_str()) {
+        let url = url::Url::parse(origin).ok()?;
+        return match url.scheme() {
+            "http" | "https" if url.host_str().is_some() => {
+                Some(url.origin().ascii_serialization())
+            }
+            _ => None,
+        };
+    }
+    let port = u16::try_from(v.get("port")?.as_u64()?).ok()?;
+    Some(server_origin(host, port))
+}
+
 /// Whether the main window may navigate to `url` itself: the app's own pages
-/// (the splash and error views) and the local server origin. Everything else
-/// opens in the default browser.
-pub fn is_allowed_navigation(url: &url::Url, server: Option<(&str, u16)>) -> bool {
+/// (the splash and error views), the local server origin and its Canvas
+/// sandbox. WebKit asks about every frame's navigation, not only the
+/// window's, so the sandbox the page frames has to pass here (it's a static
+/// page that holds nothing). Everything else opens in the default browser.
+pub fn is_allowed_navigation(
+    url: &url::Url,
+    server: Option<(&str, u16)>,
+    sandbox: Option<&str>,
+) -> bool {
     match url.scheme() {
         // Tauri's own asset protocol (macOS / Linux) and its Windows form.
         "tauri" => return true,
         "http" | "https" if url.host_str() == Some("tauri.localhost") => return true,
+        "http" | "https" if sandbox == Some(url.origin().ascii_serialization().as_str()) => {
+            return true
+        }
         _ => {}
     }
     let Some((host, port)) = server else {
@@ -250,7 +277,7 @@ mod tests {
 
     #[test]
     fn navigation_is_limited_to_the_app_and_the_local_server() {
-        let ok = |u: &str, s| is_allowed_navigation(&url::Url::parse(u).unwrap(), s);
+        let ok = |u: &str, s| is_allowed_navigation(&url::Url::parse(u).unwrap(), s, None);
         let server = Some(("127.0.0.1", 32352));
         assert!(ok("tauri://localhost/index.html", None));
         assert!(ok("http://tauri.localhost/index.html", None));
@@ -267,6 +294,55 @@ mod tests {
             Some(("192.168.1.5", 32352))
         ));
         assert!(!ok("http://localhost:32352/", Some(("192.168.1.5", 32352))));
+    }
+
+    #[test]
+    fn the_local_canvas_sandbox_may_load_too() {
+        let ok = |u: &str, sb| {
+            is_allowed_navigation(&url::Url::parse(u).unwrap(), Some(("127.0.0.1", 32352)), sb)
+        };
+        let sb = Some("http://127.0.0.1:32353");
+        assert!(ok("http://127.0.0.1:32353/index.html", sb));
+        assert!(!ok("http://127.0.0.1:32353/index.html", None));
+        assert!(!ok("http://127.0.0.1:32354/", sb));
+        assert!(!ok("https://127.0.0.1:32353/", sb));
+        assert!(ok(
+            "https://sandbox.example.net/index.html",
+            Some("https://sandbox.example.net")
+        ));
+    }
+
+    #[test]
+    fn canvas_sandbox_answers_become_origins() {
+        assert_eq!(
+            parse_canvas_sandbox(r#"{"origin":null,"port":32353}"#, "127.0.0.1").as_deref(),
+            Some("http://127.0.0.1:32353")
+        );
+        assert_eq!(
+            parse_canvas_sandbox(r#"{"origin":null,"port":32353}"#, "::1").as_deref(),
+            Some("http://[::1]:32353")
+        );
+        assert_eq!(
+            parse_canvas_sandbox(
+                r#"{"origin":"https://sandbox.example.net","port":null}"#,
+                "127.0.0.1"
+            )
+            .as_deref(),
+            Some("https://sandbox.example.net")
+        );
+        assert_eq!(
+            parse_canvas_sandbox(r#"{"origin":null,"port":null}"#, "127.0.0.1"),
+            None
+        );
+        assert_eq!(
+            parse_canvas_sandbox(r#"{"origin":"javascript:alert(1)"}"#, "127.0.0.1"),
+            None
+        );
+        assert_eq!(
+            parse_canvas_sandbox(r#"{"origin":null,"port":70000}"#, "127.0.0.1"),
+            None
+        );
+        assert_eq!(parse_canvas_sandbox("<html>", "127.0.0.1"), None);
     }
 
     #[test]

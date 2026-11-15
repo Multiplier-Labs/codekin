@@ -82,6 +82,9 @@ pub trait Ui: Send + 'static {
 pub struct Shared {
     pub connection: Mutex<Option<Connection>>,
     pub token: Mutex<Option<String>>,
+    /// Origin of the connected server's Canvas sandbox page, which the main
+    /// window's navigation guard lets load (as a frame).
+    pub sandbox: Mutex<Option<String>>,
     /// Where the supervisor reports the outcome of [`Ctl::StopForUpdate`].
     pub update_stopped: Mutex<Option<std::sync::mpsc::Sender<bool>>>,
 }
@@ -97,6 +100,26 @@ impl Shared {
     fn set(&self, c: Connection, token: Option<String>) {
         *self.connection.lock().unwrap() = Some(c);
         *self.token.lock().unwrap() = token;
+        *self.sandbox.lock().unwrap() = None;
+    }
+    pub fn sandbox(&self) -> Option<String> {
+        self.sandbox.lock().unwrap().clone()
+    }
+    /// Ask the server where its Canvas sandbox is, before the page loads.
+    /// Codekin's own sandbox server may still be binding as the main one
+    /// reports ready, so a missing answer is retried briefly.
+    fn learn_sandbox(&self, host: &str, port: u16, token: &str) {
+        for attempt in 0..3 {
+            if attempt > 0 {
+                std::thread::sleep(Duration::from_millis(200));
+            }
+            if let Some(origin) =
+                crate::http::canvas_sandbox(host, port, token, Duration::from_secs(2))
+            {
+                *self.sandbox.lock().unwrap() = Some(origin);
+                return;
+            }
+        }
     }
 }
 
@@ -192,6 +215,7 @@ impl<U: Ui> Supervisor<U> {
                     },
                     Some(cred.token.clone()),
                 );
+                self.shared.learn_sandbox(&host, port, &cred.token);
                 self.ui.show(View::App {
                     url: crate::protocol::app_url(&host, port, &cred.token),
                 });
@@ -218,6 +242,7 @@ impl<U: Ui> Supervisor<U> {
                     },
                     Some(cred.token.clone()),
                 );
+                self.shared.learn_sandbox(&host, port, &cred.token);
                 let url = crate::protocol::app_url(&host, port, &cred.token);
                 self.ui.show(View::App { url: url.clone() });
                 self.supervise_attached(&host, port, &version, &url)

@@ -46,6 +46,13 @@ export interface RelayConfig {
   /** How the desktop app names this relay when adding it (RELAY_NAME); defaults to the public host. */
   name?: string
   /**
+   * Origin of the Canvas sandbox page the web app frames
+   * (RELAY_CANVAS_SANDBOX_ORIGIN, the same value the web app was built with
+   * as VITE_CANVAS_SANDBOX_ORIGIN). Served by `GET /api/relay/info` so the
+   * desktop app lets its location window load that frame.
+   */
+  canvasSandboxOrigin?: string
+  /**
    * Sentry-API DSN for the relay's own errors (RELAY_ERROR_DSN). Unset, the
    * relay reports nothing anywhere.
    */
@@ -87,6 +94,24 @@ export function parseAccessRequestUrl(raw: string): string | undefined {
     // fall through
   }
   console.warn('[relay-config] Ignoring RELAY_ACCESS_REQUEST_URL: must be an https: or mailto: URL')
+  return undefined
+}
+
+/**
+ * RELAY_CANVAS_SANDBOX_ORIGIN as a bare origin: https://, or http:// on
+ * loopback for development. Anything else is ignored with a warning.
+ */
+export function parseCanvasSandboxOrigin(raw: string): string | undefined {
+  const value = raw.trim()
+  if (!value) return undefined
+  try {
+    const url = new URL(value)
+    const loopback = ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)
+    if (url.protocol === 'https:' || (url.protocol === 'http:' && loopback)) return url.origin
+  } catch {
+    // fall through
+  }
+  console.warn('[relay-config] Ignoring RELAY_CANVAS_SANDBOX_ORIGIN: must be an https: origin')
   return undefined
 }
 
@@ -141,6 +166,7 @@ export function loadRelayConfig(opts: { envFile?: string; requireSecrets?: boole
     accessRequestUrl: parseAccessRequestUrl(get('RELAY_ACCESS_REQUEST_URL')),
     mfaEncryptionKey: parseMfaEncryptionKey(get('MFA_ENCRYPTION_KEY')),
     name: get('RELAY_NAME').trim().slice(0, 64) || undefined,
+    canvasSandboxOrigin: parseCanvasSandboxOrigin(get('RELAY_CANVAS_SANDBOX_ORIGIN')),
     errorDsn: get('RELAY_ERROR_DSN').trim() || undefined,
     browserErrorDsn: get('RELAY_BROWSER_ERROR_DSN').trim() || undefined,
     errorEnvironment: get('RELAY_ERROR_ENVIRONMENT').trim() || (isProduction ? 'production' : 'development'),
