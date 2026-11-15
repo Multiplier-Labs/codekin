@@ -254,5 +254,8 @@ describe.skipIf(!realBrowser)('takeSnapshot with a real browser', () => {
     } finally {
       await dev.close()
     }
-  }, 40_000)
+    // takeSnapshot bounds each attempt at 30s, and on a host without a usable
+    // sandbox (CI runners) it launches Chrome twice. Under a loaded parallel
+    // run that legitimately takes past 40s, so let its own limits decide.
+  }, 90_000)
 })
