@@ -268,6 +268,7 @@ mod tests {
                 id: "a".into(),
                 name: "Acme".into(),
                 url: "https://relay.acme.dev".into(),
+                canvas_sandbox: None,
             }],
             last_location: last.map(str::to_string),
             start_mode: mode,

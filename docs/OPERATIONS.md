@@ -347,6 +347,7 @@ misconfiguration fails at start rather than at first login.
 | `AUDIT_RETENTION_DAYS` | no | default 90; `0` disables pruning |
 | `RELAY_ACCESS_REQUEST_URL` | no | `https:` or `mailto:` link shown on the sign-in page ("Request access") and on the not-allowed error; served by `GET /api/auth/config` |
 | `RELAY_NAME` | no | Name the desktop app suggests for this relay as a location; served by `GET /api/relay/info`. Defaults to the public host |
+| `RELAY_CANVAS_SANDBOX_ORIGIN` | no | The web app's Canvas sandbox origin (its `VITE_CANVAS_SANDBOX_ORIGIN`); served by `GET /api/relay/info` so the desktop app's location window may load it. `https:` only (plain `http:` on loopback) |
 | `RELAY_ERROR_DSN` | no | Sentry-API DSN (GlitchTip, Sentry) for the relay's errors; unset = no reporting. Only type, scrubbed message and stack frames are sent |
 | `RELAY_BROWSER_ERROR_DSN` | no | DSN for web-app errors tunnelled through `POST /api/telemetry/errors`; defaults to `RELAY_ERROR_DSN` |
 | `RELAY_STAGING` | no | `1` on a test deployment only: STAGING badge, `noindex`, and `relay-admin-cli mint-session <github-id>` for the gate suite (`scripts/staging/gate.mjs`) |

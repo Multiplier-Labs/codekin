@@ -16,7 +16,7 @@ import { listAuditEvents } from './audit.js'
 import type { RelayConfig } from './relay-config.js'
 import type { SessionUser } from './relay-auth-routes.js'
 
-const CONFIG = { publicUrl: 'https://app.example.com', ownerGithubId: 1, name: 'Example' } as RelayConfig
+const CONFIG = { publicUrl: 'https://app.example.com', ownerGithubId: 1, name: 'Example', canvasSandboxOrigin: 'https://sandbox.example.net' } as RelayConfig
 
 function pkce(): { verifier: string; challenge: string } {
   const verifier = randomBytes(32).toString('base64url')
@@ -119,6 +119,7 @@ describe('desktop auth routes', () => {
     const body = (await res.json()) as Record<string, unknown>
     expect(body.app).toBe('codekin-relay')
     expect(body.name).toBe('Example')
+    expect(body.canvasSandboxOrigin).toBe('https://sandbox.example.net')
     expect(typeof body.version).toBe('string')
   })
 

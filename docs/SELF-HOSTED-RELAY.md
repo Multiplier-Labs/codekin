@@ -62,6 +62,8 @@ On a machine that exports `NODE_ENV=production`, install with `NODE_ENV=developm
 `build:hosted`. Set it on the command, not in a `.env` file: a `.env` value also ends up in the
 local `npm run build`, whose sandbox would then be one that only allows your web app to frame it.
 Built without it, the web app shows Canvas charts and HTML items as source, with a note.
+Give the relay the same origin as `RELAY_CANVAS_SANDBOX_ORIGIN` ([step 4](#4-configure-the-relay)) so
+the desktop app can load the sandbox too.
 
 ## 4. Configure the relay
 
@@ -91,6 +93,7 @@ NODE_ENV=production
 | `AUDIT_RETENTION_DAYS` | no | Default `90`; `0` keeps everything. |
 | `RELAY_ACCESS_REQUEST_URL` | no | An `https:` or `mailto:` link shown on the sign-in page for people without access. |
 | `RELAY_NAME` | no | The name the Codekin desktop app suggests when this relay is added as a location (up to 64 characters). Defaults to the public host. |
+| `RELAY_CANVAS_SANDBOX_ORIGIN` | with a sandbox | The Canvas sandbox origin, the same value the web app was built with as `VITE_CANVAS_SANDBOX_ORIGIN` (e.g. `https://sandbox.example.net`). The Codekin desktop app only lets a location window load the relay's own origin and this one. Without it, Canvas charts and HTML items in the desktop app say the sandbox didn't answer. |
 | `RELAY_ERROR_DSN` | no | DSN of a Sentry-API error tracker (GlitchTip, Sentry). Unset, the relay reports errors nowhere. Events carry only error type, scrubbed message and stack frames ([RELAY-HARDENING.md §2](RELAY-HARDENING.md#2-error-reporting)). |
 | `RELAY_BROWSER_ERROR_DSN` | no | Separate DSN for errors from the web app, tunnelled through the relay. Defaults to `RELAY_ERROR_DSN`. |
 | `RELAY_STAGING` | no | `1` marks a test deployment: a STAGING badge in the app, `noindex` on responses, and `relay-admin-cli mint-session` allowed ([RELAY-HARDENING.md §7](RELAY-HARDENING.md#7-test-sessions-for-staging)). Never set it on a relay people use. |
