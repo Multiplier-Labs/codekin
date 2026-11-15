@@ -8,12 +8,27 @@ import path from 'path'
 import { devServerEnv, PreviewManager, previewFrameSrc, previewSettings, probePort } from './preview-manager.js'
 import type { CanvasItem, CanvasItemSource, PreviewState, PreviewTarget, Session, WsServerMessage } from './types.js'
 
-async function freePort(): Promise<number> {
-  const s = net.createServer()
-  await new Promise<void>(r => s.listen(0, '127.0.0.1', r))
-  const port = (s.address() as AddressInfo).port
-  await new Promise(r => s.close(r))
-  return port
+/**
+ * Distinct free ports, none in `exclude`. Every probe socket stays bound until all
+ * ports are picked: closing each one before binding the next lets the OS hand the
+ * same port out twice, which made devPort collide with a (denied) proxy port.
+ */
+async function freePorts(n: number, exclude: Iterable<number> = []): Promise<number[]> {
+  const skip = new Set(exclude)
+  const held: net.Server[] = []
+  const ports: number[] = []
+  try {
+    while (ports.length < n) {
+      const s = net.createServer()
+      await new Promise<void>(r => s.listen(0, '127.0.0.1', r))
+      held.push(s)
+      const port = (s.address() as AddressInfo).port
+      if (!skip.has(port)) ports.push(port)
+    }
+  } finally {
+    await Promise.all(held.map(s => new Promise(r => s.close(r))))
+  }
+  return ports
 }
 
 async function until<T>(fn: () => T | undefined, ms = 10_000): Promise<T> {
@@ -81,8 +96,9 @@ describe('PreviewManager', () => {
 
   beforeEach(async () => {
     root = mkdtempSync(path.join(tmpdir(), 'preview-'))
-    devPort = await freePort()
-    proxyPorts = [await freePort(), await freePort()]
+    const [dev, ...proxies] = await freePorts(3)
+    devPort = dev
+    proxyPorts = proxies
     sent = []
     items = new Map()
     let n = 0
@@ -252,7 +268,7 @@ describe('PreviewManager', () => {
     const first = await until(() => states().find(s => s.status === 'running'))
     expect(await manager.stop('s1', first.itemId)).toBeNull()
     await until(() => last()?.status === 'stopped' ? true : undefined)
-    const newPort = await freePort()
+    const [newPort] = await freePorts(1, [devPort, ...proxyPorts])
     const config = JSON.parse(readFileSync(path.join(root, '.claude/launch.json'), 'utf-8'))
     config.configurations[0].port = newPort
     writeFileSync(path.join(root, '.claude/launch.json'), JSON.stringify(config))
