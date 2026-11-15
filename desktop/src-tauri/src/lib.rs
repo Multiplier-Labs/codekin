@@ -334,8 +334,12 @@ fn build_window(app: &AppHandle, shared: Arc<Shared>) -> tauri::Result<WebviewWi
     .disable_drag_drop_handler()
     .on_navigation(move |url| {
         let server = shared.connection().server();
-        let allowed =
-            protocol::is_allowed_navigation(url, server.as_ref().map(|(h, p)| (h.as_str(), *p)));
+        let sandbox = shared.sandbox();
+        let allowed = protocol::is_allowed_navigation(
+            url,
+            server.as_ref().map(|(h, p)| (h.as_str(), *p)),
+            sandbox.as_deref(),
+        );
         if !allowed {
             // External links open in the default browser.
             open_external(&opener, url);

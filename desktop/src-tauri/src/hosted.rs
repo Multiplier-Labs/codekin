@@ -9,7 +9,7 @@
 //! commands below.
 
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use serde::Serialize;
@@ -323,6 +323,11 @@ fn build_location_window(
         NEXT_LABEL.fetch_add(1, Ordering::SeqCst)
     );
     let origin = location.url.clone();
+    // The relay's Canvas sandbox: the saved one now, the relay's current
+    // answer once it arrives (before anyone opens a chart, in practice).
+    let sandbox = Arc::new(Mutex::new(location.canvas_sandbox.clone()));
+    refresh_sandbox(app, location, Arc::clone(&sandbox));
+    let nav_sandbox = Arc::clone(&sandbox);
     let nav_app = app.clone();
     let new_window_app = app.clone();
     let mut builder = webview_builder(app, &label, location)?
@@ -338,7 +343,8 @@ fn build_location_window(
                 let _ = nav_app.run_on_main_thread(move || handle_page_request(&app, &url));
                 return false;
             }
-            if locations::location_navigation_allowed(url, &origin) {
+            let sandbox = nav_sandbox.lock().unwrap().clone();
+            if locations::location_navigation_allowed(url, &origin, sandbox.as_deref()) {
                 return true;
             }
             open_external(&nav_app, url);
@@ -359,6 +365,29 @@ fn build_location_window(
         let _ = w.set_focus();
     }
     Ok(w)
+}
+
+/// Ask the relay where its Canvas sandbox is now, for the open window and
+/// the saved location (so the next launch has it before the page loads).
+/// An unreachable relay changes nothing.
+fn refresh_sandbox(app: &AppHandle, location: &Location, sandbox: Arc<Mutex<Option<String>>>) {
+    let app = app.clone();
+    let id = location.id.clone();
+    let origin = location.url.clone();
+    std::thread::spawn(move || {
+        let Ok(info) = crate::http::relay_info(&origin, Duration::from_secs(10)) else {
+            return;
+        };
+        *sandbox.lock().unwrap() = info.canvas_sandbox.clone();
+        let bg = app.state::<BackgroundState>();
+        let mut prefs = bg.prefs.lock().unwrap();
+        if let Some(saved) = prefs.locations.iter_mut().find(|l| l.id == id) {
+            if saved.canvas_sandbox != info.canvas_sandbox {
+                saved.canvas_sandbox = info.canvas_sandbox;
+                let _ = prefs.save(&bg.prefs_file);
+            }
+        }
+    });
 }
 
 /// Show This Mac and bring it forward (starting its server if need be).
@@ -649,7 +678,7 @@ pub(crate) async fn save_new_location(
     origin: String,
 ) -> Result<Location, String> {
     let probe = origin.clone();
-    let relay_name = tauri::async_runtime::spawn_blocking(move || {
+    let info = tauri::async_runtime::spawn_blocking(move || {
         crate::http::relay_info(&probe, Duration::from_secs(10))
     })
     .await
@@ -657,11 +686,12 @@ pub(crate) async fn save_new_location(
     let name = name
         .map(|n| n.trim().to_string())
         .filter(|n| !n.is_empty())
-        .unwrap_or_else(|| locations::default_name(&origin, &relay_name));
+        .unwrap_or_else(|| locations::default_name(&origin, &info.name));
     let location = Location {
         id: locations::new_location_id(),
         name,
         url: origin,
+        canvas_sandbox: info.canvas_sandbox,
     };
     {
         let bg = app.state::<BackgroundState>();

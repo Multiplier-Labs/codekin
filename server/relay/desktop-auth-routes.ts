@@ -69,10 +69,17 @@ export function createDesktopAuthRouter({ db, config, store, disconnectSession }
   const origin = new URL(config.publicUrl).origin
   const version = codekinPackageVersion()
 
-  // Constant apart from the configured name; nothing about who is asking.
+  // Constant apart from configuration; nothing about who is asking. The
+  // desktop app lets its location window load canvasSandboxOrigin, the only
+  // other origin the web app frames.
   router.get('/api/relay/info', (_req, res) => {
     res.set('Cache-Control', 'no-store')
-    res.json({ app: 'codekin-relay', version, name: config.name ?? new URL(config.publicUrl).host })
+    res.json({
+      app: 'codekin-relay',
+      version,
+      name: config.name ?? new URL(config.publicUrl).host,
+      ...(config.canvasSandboxOrigin ? { canvasSandboxOrigin: config.canvasSandboxOrigin } : {}),
+    })
   })
 
   router.get('/api/auth/desktop/start', (req, res) => {

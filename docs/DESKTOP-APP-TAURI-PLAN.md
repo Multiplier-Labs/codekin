@@ -662,8 +662,11 @@ browser in as the attacker. Sessions created this way are marked `client: deskto
 ### Relay changes (Phase 4a)
 
 **Implemented** (#774; `server/relay/desktop-auth.ts`, `desktop-auth-routes.ts`):
-- `GET /api/relay/info` → `{ app: "codekin-relay", version, name }`, public; `name` is `RELAY_NAME`, else the
-  public host.
+- `GET /api/relay/info` → `{ app: "codekin-relay", version, name, canvasSandboxOrigin? }`, public; `name` is
+  `RELAY_NAME`, else the public host. `canvasSandboxOrigin` is `RELAY_CANVAS_SANDBOX_ORIGIN`, when set: the
+  location window's navigation guard also allows that origin, because WebKit runs the guard for frames too and
+  the web app frames its Canvas sandbox. The app saves it with the location and refreshes it whenever the
+  location's window opens. The This Mac window does the same with the local server's `GET /api/canvas/sandbox`.
 - `GET /api/auth/desktop/start`, `GET /api/auth/desktop/requests/:id`, `POST …/requests/:id/approve` (signed in,
   recent check) and `POST /api/auth/desktop/claim`, under the `/api/auth` rate limit. Requests and hashed codes
   live in `desktop_auth_requests` (migration 6). A wrong verifier burns the code; "sign out everywhere" revokes

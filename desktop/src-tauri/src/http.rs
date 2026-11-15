@@ -2,7 +2,8 @@
 //! `/api/health` for the active-session count before Quit / Restart.
 //! Never follows redirects, so the token can't be sent anywhere else.
 
-use crate::protocol::server_origin;
+use crate::locations::RelayInfo;
+use crate::protocol::{parse_canvas_sandbox, server_origin};
 use std::io;
 use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
 use std::time::Duration;
@@ -94,10 +95,26 @@ pub fn active_sessions(host: &str, port: u16, token: &str, timeout: Duration) ->
         .as_u64()
 }
 
+/// Where the local server's Canvas sandbox page is (`GET /api/canvas/sandbox`),
+/// or `None` when it has none or can't be asked.
+pub fn canvas_sandbox(host: &str, port: u16, token: &str, timeout: Duration) -> Option<String> {
+    let url = format!("{}/api/canvas/sandbox", server_origin(host, port));
+    let mut res = agent(timeout)
+        .get(&url)
+        .header("Authorization", &format!("Bearer {token}"))
+        .call()
+        .ok()?;
+    if res.status().as_u16() != 200 {
+        return None;
+    }
+    let body = res.body_mut().read_to_string().ok()?;
+    parse_canvas_sandbox(&body, host)
+}
+
 /// Check that `origin` is a Codekin relay (`GET /api/relay/info`) and return
-/// its display name. Uses the system's trust store, so a company relay with a
+/// what it says about itself. Uses the system's trust store, so a company relay with a
 /// private CA installed on the Mac works.
-pub fn relay_info(origin: &str, timeout: Duration) -> Result<String, String> {
+pub fn relay_info(origin: &str, timeout: Duration) -> Result<RelayInfo, String> {
     let tls = ureq::tls::TlsConfig::builder()
         .root_certs(ureq::tls::RootCerts::PlatformVerifier)
         .build();
@@ -210,14 +227,17 @@ mod tests {
         let port = serve(Box::leak(
             json(
                 "200 OK",
-                r#"{"app":"codekin-relay","version":"0.10.0","name":"Dev relay"}"#,
+                r#"{"app":"codekin-relay","version":"0.10.0","name":"Dev relay","canvasSandboxOrigin":"https://sandbox.example.net"}"#,
             )
             .into_boxed_str(),
         ));
         let origin = format!("http://127.0.0.1:{port}");
         assert_eq!(
             relay_info(&origin, Duration::from_secs(2)),
-            Ok("Dev relay".into())
+            Ok(RelayInfo {
+                name: "Dev relay".into(),
+                canvas_sandbox: Some("https://sandbox.example.net".into()),
+            })
         );
         let port = serve(Box::leak(
             json("200 OK", r#"{"app":"codekin","version":"0.10.0"}"#).into_boxed_str(),
@@ -225,6 +245,22 @@ mod tests {
         assert!(relay_info(&format!("http://127.0.0.1:{port}"), Duration::from_secs(2)).is_err());
         let port = serve(Box::leak(json("404 Not Found", "{}").into_boxed_str()));
         assert!(relay_info(&format!("http://127.0.0.1:{port}"), Duration::from_secs(2)).is_err());
+    }
+
+    #[test]
+    fn reads_the_local_canvas_sandbox() {
+        let port = serve(Box::leak(
+            json("200 OK", r#"{"origin":null,"port":32353}"#).into_boxed_str(),
+        ));
+        assert_eq!(
+            canvas_sandbox("127.0.0.1", port, "t", Duration::from_secs(2)).as_deref(),
+            Some("http://127.0.0.1:32353")
+        );
+        let port = serve(Box::leak(json("401 Unauthorized", "{}").into_boxed_str()));
+        assert_eq!(
+            canvas_sandbox("127.0.0.1", port, "t", Duration::from_secs(2)),
+            None
+        );
     }
 
     #[test]

@@ -16,6 +16,15 @@ pub struct Location {
     pub name: String,
     /// The relay's origin (`https://host[:port]`), no path.
     pub url: String,
+    /// Origin of the relay's Canvas sandbox page, from `/api/relay/info`:
+    /// the one other origin the location window may load (as a frame).
+    /// Refreshed each time the window opens; absent on older relays.
+    #[serde(
+        default,
+        rename = "canvasSandbox",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub canvas_sandbox: Option<String>,
 }
 
 /// How long the browser sign-in may take before its deep link is refused.
@@ -84,20 +93,52 @@ pub fn origin_of(url: &url::Url) -> String {
     url.origin().ascii_serialization()
 }
 
-/// `GET /api/relay/info` → the relay's display name, or `None` when the
-/// answer isn't from a Codekin relay.
-pub fn parse_relay_info(body: &str) -> Option<String> {
+/// What `GET /api/relay/info` says about a relay.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RelayInfo {
+    /// Display name; empty when the relay doesn't set one.
+    pub name: String,
+    /// Origin of its Canvas sandbox page, when it has one.
+    pub canvas_sandbox: Option<String>,
+}
+
+/// `GET /api/relay/info` → the relay's name and sandbox origin, or `None`
+/// when the answer isn't from a Codekin relay. A sandbox origin that isn't a
+/// valid one is dropped, not an error: the relay still works without it.
+pub fn parse_relay_info(body: &str) -> Option<RelayInfo> {
     let v: serde_json::Value = serde_json::from_str(body).ok()?;
     if v.get("app")?.as_str()? != "codekin-relay" {
         return None;
     }
-    Some(
-        v.get("name")
+    Some(RelayInfo {
+        name: v
+            .get("name")
             .and_then(|n| n.as_str())
             .unwrap_or("")
             .trim()
             .to_string(),
-    )
+        canvas_sandbox: v
+            .get("canvasSandboxOrigin")
+            .and_then(|o| o.as_str())
+            .and_then(sandbox_origin),
+    })
+}
+
+/// A relay's Canvas sandbox address as a bare origin: `https://`, or plain
+/// `http://` on loopback for relay development (as [`normalize_origin`]).
+/// No credentials; any path is dropped.
+pub fn sandbox_origin(raw: &str) -> Option<String> {
+    let url = url::Url::parse(raw.trim()).ok()?;
+    let host = url.host_str()?;
+    if !url.username().is_empty() || url.password().is_some() {
+        return None;
+    }
+    match url.scheme() {
+        "https" => {}
+        "http" if is_loopback(host) => {}
+        _ => return None,
+    }
+    Some(origin_of(&url))
 }
 
 /// A default name for a location: the relay's own name, else its host.
@@ -111,12 +152,19 @@ pub fn default_name(origin: &str, relay_name: &str) -> String {
         .unwrap_or_else(|| origin.to_string())
 }
 
-/// What the location window may show: its own origin and the bundled pages.
-pub fn location_navigation_allowed(url: &url::Url, origin: &str) -> bool {
+/// What the location window may show: its own origin, its Canvas sandbox
+/// and the bundled pages. WebKit asks about every frame's navigation, not
+/// only the window's, so the sandbox the hosted page frames must pass here
+/// too (it's a static page that holds nothing). Everything else is refused
+/// and opens in the default browser.
+pub fn location_navigation_allowed(url: &url::Url, origin: &str, sandbox: Option<&str>) -> bool {
     match url.scheme() {
         "tauri" => location_page_allowed(url),
         "http" | "https" if url.host_str() == Some("tauri.localhost") => location_page_allowed(url),
-        "http" | "https" => origin_of(url) == origin,
+        "http" | "https" => {
+            let o = origin_of(url);
+            o == origin || sandbox == Some(o.as_str())
+        }
         // about:blank and friends from the hosted page's own frames.
         "about" => true,
         _ => false,
@@ -295,6 +343,7 @@ mod tests {
             id: "abc".into(),
             name: "Hosted".into(),
             url: "https://app.codekin.ai".into(),
+            canvas_sandbox: None,
         }
     }
 
@@ -383,13 +432,36 @@ mod tests {
 
     #[test]
     fn relay_info_must_name_the_relay_app() {
+        let info = |name: &str, sandbox: Option<&str>| {
+            Some(RelayInfo {
+                name: name.into(),
+                canvas_sandbox: sandbox.map(String::from),
+            })
+        };
         assert_eq!(
             parse_relay_info(r#"{"app":"codekin-relay","version":"0.10.0","name":"Acme"}"#),
-            Some("Acme".into())
+            info("Acme", None)
         );
         assert_eq!(
             parse_relay_info(r#"{"app":"codekin-relay"}"#),
-            Some(String::new())
+            info("", None)
+        );
+        assert_eq!(
+            parse_relay_info(
+                r#"{"app":"codekin-relay","name":"Acme","canvasSandboxOrigin":"https://sandbox.example.net"}"#
+            ),
+            info("Acme", Some("https://sandbox.example.net"))
+        );
+        // An unusable sandbox origin is dropped; the relay is still a relay.
+        assert_eq!(
+            parse_relay_info(
+                r#"{"app":"codekin-relay","name":"Acme","canvasSandboxOrigin":"http://sandbox.example.net"}"#
+            ),
+            info("Acme", None)
+        );
+        assert_eq!(
+            parse_relay_info(r#"{"app":"codekin-relay","canvasSandboxOrigin":42}"#),
+            info("", None)
         );
         assert_eq!(
             parse_relay_info(r#"{"app":"codekin","version":"0.10.0"}"#),
@@ -398,6 +470,33 @@ mod tests {
         assert_eq!(parse_relay_info("<html>"), None);
         assert_eq!(default_name("https://relay.example", ""), "relay.example");
         assert_eq!(default_name("https://relay.example", "Acme"), "Acme");
+    }
+
+    #[test]
+    fn sandbox_origins_are_bare_https_origins() {
+        assert_eq!(
+            sandbox_origin("https://Sandbox.example.net/index.html").as_deref(),
+            Some("https://sandbox.example.net")
+        );
+        assert_eq!(
+            sandbox_origin("https://sandbox.example.net:8443").as_deref(),
+            Some("https://sandbox.example.net:8443")
+        );
+        assert_eq!(
+            sandbox_origin("http://127.0.0.1:5174").as_deref(),
+            Some("http://127.0.0.1:5174")
+        );
+        for bad in [
+            "",
+            "sandbox.example.net",
+            "http://sandbox.example.net",
+            "https://user@sandbox.example.net",
+            "tauri://localhost",
+            "codekin://auth",
+            "javascript:alert(1)",
+        ] {
+            assert_eq!(sandbox_origin(bad), None, "{bad:?} should be refused");
+        }
     }
 
     #[test]
@@ -413,41 +512,92 @@ mod tests {
         let o = "https://app.codekin.ai";
         assert!(location_navigation_allowed(
             &url("https://app.codekin.ai/settings"),
-            o
+            o,
+            None
         ));
         assert!(location_navigation_allowed(
             &url("tauri://localhost/index.html?view=signin"),
-            o
+            o,
+            None
         ));
         assert!(location_navigation_allowed(
             &url("http://tauri.localhost/index.html?view=claim"),
-            o
+            o,
+            None
         ));
         assert!(!location_navigation_allowed(
             &url("tauri://localhost/index.html?view=locations"),
-            o
+            o,
+            None
         ));
         assert!(!location_navigation_allowed(
             &url("tauri://localhost/index.html"),
-            o
+            o,
+            None
         ));
         assert!(!location_navigation_allowed(
             &url("https://github.com/login"),
-            o
+            o,
+            None
         ));
         assert!(!location_navigation_allowed(
             &url("http://app.codekin.ai/"),
-            o
+            o,
+            None
         ));
         assert!(!location_navigation_allowed(
             &url("https://evil.codekin.ai/"),
-            o
+            o,
+            None
         ));
         assert!(!location_navigation_allowed(
             &url("http://127.0.0.1:32352/"),
-            o
+            o,
+            None
         ));
-        assert!(!location_navigation_allowed(&url("codekin://sign-in"), o));
+        assert!(!location_navigation_allowed(
+            &url("codekin://sign-in"),
+            o,
+            None
+        ));
+    }
+
+    #[test]
+    fn the_relays_sandbox_may_load_too() {
+        let o = "https://app.codekin.ai";
+        let sb = Some("https://codekin-sandbox.com");
+        assert!(location_navigation_allowed(
+            &url("https://codekin-sandbox.com/index.html"),
+            o,
+            sb
+        ));
+        assert!(location_navigation_allowed(
+            &url("https://app.codekin.ai/"),
+            o,
+            sb
+        ));
+        // Only that origin: not without it, not a sibling, not plain http.
+        assert!(!location_navigation_allowed(
+            &url("https://codekin-sandbox.com/index.html"),
+            o,
+            None
+        ));
+        assert!(!location_navigation_allowed(
+            &url("https://evil.codekin-sandbox.com/"),
+            o,
+            sb
+        ));
+        assert!(!location_navigation_allowed(
+            &url("http://codekin-sandbox.com/"),
+            o,
+            sb
+        ));
+        // Bundled pages keep their own rule.
+        assert!(!location_navigation_allowed(
+            &url("tauri://localhost/index.html"),
+            o,
+            sb
+        ));
     }
 
     #[test]
