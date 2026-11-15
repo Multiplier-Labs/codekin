@@ -10,7 +10,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { CanvasItem, CanvasItemMeta, PreviewLaunchConfig, PreviewState, WsClientMessage, WsServerMessage } from '../types'
+import type { CanvasItem, CanvasItemMeta, PreviewLaunchConfig, PreviewState, SnapshotViewport, WsClientMessage, WsServerMessage } from '../types'
 import { getPref, setPref, usePref } from '../lib/prefs'
 import { shownRevision, trimSessionMap } from '../lib/canvas'
 
@@ -44,6 +44,10 @@ export interface PreviewApi {
   stop: (itemId: string) => void
   restart: (itemId: string) => void
   requestLogs: (itemId: string) => void
+  /** Take a snapshot of the page at `path` in a headless browser on the machine; it opens as an image item. */
+  snapshot: (itemId: string, path: string, viewport: SnapshotViewport) => void
+  /** A snapshot of this preview is being taken, or the last one failed (`error`). */
+  snapshotStatus: (itemId: string) => { busy: boolean; error?: string }
   /** Bumped on every (re)join: a shown preview asks for its proxy again (Codekin may have restarted). */
   generation: number
 }
@@ -155,6 +159,7 @@ export function useCanvas(sessionId: string | null, send: (msg: WsClientMessage)
   const [previewLogs, setPreviewLogs] = useState<Record<string, string[] | undefined>>({})
   const [launchConfigs, setLaunchConfigs] = useState<Record<string, PreviewApi['configs'] | undefined>>({})
   const [previewGeneration, setPreviewGeneration] = useState(0)
+  const [snapshots, setSnapshots] = useState<Record<string, { busy: boolean; error?: string } | undefined>>({})
   /** App tool calls waiting for mcp_app_result, by callId. */
   const appCalls = useRef(new Map<string, (outcome: AppToolOutcome) => void>())
   /** A launch configuration the user started: its preview is shown when its state arrives. */
@@ -324,6 +329,7 @@ export function useCanvas(sessionId: string | null, send: (msg: WsClientMessage)
         // sent before it may never be answered, and preview proxies may be gone.
         inflight.current.clear()
         setPreviewStates(prev => Object.fromEntries(Object.entries(prev).filter(([k]) => !k.startsWith(`${msg.sessionId}/`))))
+        setSnapshots(prev => Object.fromEntries(Object.entries(prev).filter(([k]) => !k.startsWith(`${msg.sessionId}/`))))
         setPreviewGeneration(g => g + 1)
         for (const [callId, resolve] of appCalls.current) {
           appCalls.current.delete(callId)
@@ -348,6 +354,11 @@ export function useCanvas(sessionId: string | null, send: (msg: WsClientMessage)
         }
         return true
       }
+      case 'preview_snapshot_result': {
+        setSnapshots(prev => ({ ...prev, [`${msg.sessionId}/${msg.itemId}`]: { busy: false, ...(msg.error ? { error: msg.error } : {}) } }))
+        if (msg.snapshotItemId) updateSessionState(msg.sessionId, { itemId: msg.snapshotItemId, open: true })
+        return true
+      }
       case 'preview_log': {
         const k = `${msg.sessionId}/${msg.itemId}`
         setPreviewLogs(prev => ({ ...prev, [k]: (msg.reset ? msg.lines : [...(prev[k] ?? []), ...msg.lines]).slice(-MAX_CLIENT_LOG) }))
@@ -359,8 +370,8 @@ export function useCanvas(sessionId: string | null, send: (msg: WsClientMessage)
       }
       case 'canvas_event': {
         // The event arrives before the updated list, so the list still lacks this item.
-        // Files and launch configurations the user opened are shown by their own request.
-        if (msg.action === 'created' && msg.by !== 'file' && msg.by !== 'launch') {
+        // Files, launch configurations and snapshots the user asked for are shown by their own request.
+        if (msg.action === 'created' && msg.by !== 'file' && msg.by !== 'launch' && msg.by !== 'snapshot') {
           const before = itemsRef.current[msg.sessionId] ?? []
           const first = !before.some(i => i.source.type !== 'file')
           if (optionsRef.current.shouldAutoOpen?.(first)) updateSessionState(msg.sessionId, { open: true, itemId: msg.itemId })
@@ -385,14 +396,20 @@ export function useCanvas(sessionId: string | null, send: (msg: WsClientMessage)
     stop: (itemId: string) => { send({ type: 'preview_stop', itemId }) },
     restart: (itemId: string) => { send({ type: 'preview_restart', itemId }) },
     requestLogs: (itemId: string) => { send({ type: 'preview_logs', itemId }) },
+    snapshot: (itemId: string, path: string, viewport: SnapshotViewport) => {
+      if (!sessionId) return
+      setSnapshots(prev => ({ ...prev, [`${sessionId}/${itemId}`]: { busy: true } }))
+      send({ type: 'preview_snapshot', itemId, path, viewport })
+    },
   }), [sessionId, send])
   const preview = useMemo<PreviewApi>(() => ({
     ...previewActions,
     state: (itemId) => (sessionId ? previewStates[`${sessionId}/${itemId}`] : undefined),
     logs: (itemId) => (sessionId ? previewLogs[`${sessionId}/${itemId}`] ?? [] : []),
     configs: sessionId ? launchConfigs[sessionId] ?? null : null,
+    snapshotStatus: (itemId) => (sessionId ? snapshots[`${sessionId}/${itemId}`] : undefined) ?? { busy: false },
     generation: previewGeneration,
-  }), [previewActions, sessionId, previewStates, previewLogs, launchConfigs, previewGeneration])
+  }), [previewActions, sessionId, previewStates, previewLogs, launchConfigs, snapshots, previewGeneration])
 
   const callAppTool = useCallback((itemId: string, tool: string, args: Record<string, unknown>, confirmed: boolean): Promise<AppToolOutcome> => {
     const callId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`

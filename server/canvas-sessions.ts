@@ -10,7 +10,7 @@ import path from 'path'
 import { CANVAS_KINDS, CANVAS_LIMITS, CanvasError, CanvasStore, canvasTypeForFile, type CanvasCreateInput } from './canvas-store.js'
 import { SCREENSHOTS_DIR } from './config.js'
 import type { McpAppCall } from './mcp-app.js'
-import type { CanvasItem, CanvasItemKind, CanvasItemSource, PreviewTarget, Session, WsServerMessage } from './types.js'
+import type { CanvasItem, CanvasItemKind, CanvasItemSource, PreviewTarget, Session, SnapshotMeta, WsServerMessage } from './types.js'
 
 /** What an agent sends to show or revise an item (canvas_show / canvas_update). */
 export interface CanvasPublishInput {
@@ -296,6 +296,28 @@ export class CanvasSessions {
     }
     const item = await this.store.create(sessionId, { kind: 'preview', title, source, content, mediaType: PREVIEW_MEDIA_TYPE })
     this.previewPorts.set(`${sessionId}:${item.id}`, port)
+    this.changed(session, item, 'created')
+    return item
+  }
+
+  /**
+   * Keep a snapshot of a preview: one image item per preview, revised on
+   * every snapshot, so its revisions are the preview's history (and two can
+   * be compared side by side).
+   */
+  async publishSnapshot(sessionId: string, previewItemId: string, image: { content: Buffer; mediaType: string }, meta: SnapshotMeta): Promise<CanvasItem> {
+    const session = this.deps.getSession(sessionId)
+    if (!session) throw new CanvasError('Session not found')
+    const preview = this.store.list(sessionId).find(i => i.id === previewItemId && i.kind === 'preview')
+    if (!preview) throw new CanvasError('That item is not a preview.')
+    const title = `Snapshot: ${preview.title}`.slice(0, CANVAS_LIMITS.maxTitleLength)
+    const existing = this.store.find(sessionId, i => i.kind === 'image' && i.source.type === 'snapshot' && i.source.preview === previewItemId)
+    if (existing) {
+      const updated = await this.store.addRevision(sessionId, existing.id, { ...image, meta: { snapshot: meta }, title })
+      if (updated) this.changed(session, updated, 'updated')
+      return updated ?? existing
+    }
+    const item = await this.store.create(sessionId, { kind: 'image', title, source: { type: 'snapshot', preview: previewItemId }, ...image, meta: { snapshot: meta } })
     this.changed(session, item, 'created')
     return item
   }

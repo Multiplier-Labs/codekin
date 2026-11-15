@@ -518,6 +518,17 @@ export function handleWsMessage(msg: WsClientMessage, ctx: WsHandlerContext): vo
       break
     }
 
+    case 'preview_snapshot': {
+      const sessionId = clientSessions.get(ws)
+      if (!sessionId) { send({ type: 'canvas_error', message: 'Not in a session' }); break }
+      if (typeof msg.itemId !== 'string') { send({ type: 'canvas_error', message: 'Missing preview.', sessionId }); break }
+      const itemId = msg.itemId
+      void sessions.previews.snapshot(sessionId, itemId, { path: msg.path, viewport: msg.viewport }).then((r) => {
+        send({ type: 'preview_snapshot_result', sessionId, itemId, ...r })
+      })
+      break
+    }
+
     case 'set_review_base': {
       const sessionId = clientSessions.get(ws)
       const { requestId, scope: view } = msg

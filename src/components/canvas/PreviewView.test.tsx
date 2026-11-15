@@ -20,12 +20,15 @@ const item: CanvasItem = { id: 'p1', kind: 'preview', title: 'web', source: { ty
 
 const WEB = { name: 'web', command: 'npm run dev', port: 5173, env: { NODE_OPTIONS: '--inspect' }, digest: 'd1' }
 
-function api(state?: PreviewState, logs: string[] = []): PreviewApi {
+function api(state?: PreviewState, logs: string[] = [], snapshot: { busy: boolean; error?: string } = { busy: false }): PreviewApi {
   return {
     state: () => state, logs: () => logs, configs: { file: '.claude/launch.json', configs: [WEB] },
     generation: 0, requestConfigs: vi.fn(), open: vi.fn(), launch: vi.fn(), stop: vi.fn(), restart: vi.fn(), requestLogs: vi.fn(),
+    snapshot: vi.fn(), snapshotStatus: () => snapshot,
   }
 }
+
+const snapshotButton = (el: HTMLElement) => el.querySelector<HTMLButtonElement>('button[aria-label="Take a snapshot"]')!
 
 function render(preview: PreviewApi, content = JSON.stringify({ port: 5173, path: '/', config: 'web' }), onAttach = vi.fn()) {
   container = document.createElement('div')
@@ -95,5 +98,32 @@ describe('PreviewView', () => {
     fromFrame(picked)
     fromFrame(picked)
     expect(onAttach).toHaveBeenCalledTimes(1)
+  })
+
+  it('takes a snapshot of the page shown, at the chosen viewport, when the machine has a browser', () => {
+    const preview = api({ itemId: 'p1', status: 'running', targetPort: 5173, managed: false, proxyPort: 40000, entry: '/__codekin/enter?k=abc&to=%2F', snapshots: true })
+    const el = render(preview, JSON.stringify({ port: 5173, path: '/settings' }))
+    act(() => { el.querySelector<HTMLButtonElement>('button[aria-label^="Phone"]')!.click() })
+    act(() => { snapshotButton(el).click() })
+    expect(preview.snapshot).toHaveBeenCalledWith('p1', '/settings', 'phone')
+  })
+
+  it('offers no snapshot without a browser on the machine, or while the server is down', () => {
+    const noBrowser = render(api({ itemId: 'p1', status: 'running', targetPort: 5173, managed: false, proxyPort: 40000, entry: '/__codekin/enter?k=abc&to=%2F', snapshots: false }))
+    expect(snapshotButton(noBrowser).disabled).toBe(true)
+    expect(snapshotButton(noBrowser).title).toContain('need Chrome or Chromium')
+    act(() => root!.unmount()); root = null; container?.remove()
+    const down = render(api({ itemId: 'p1', status: 'stopped', targetPort: 5173, managed: false, snapshots: true }))
+    expect(snapshotButton(down).disabled).toBe(true)
+  })
+
+  it('shows a snapshot in progress and why the last one failed', () => {
+    const state: PreviewState = { itemId: 'p1', status: 'running', targetPort: 5173, managed: false, proxyPort: 40000, entry: '/__codekin/enter?k=abc&to=%2F', snapshots: true }
+    const busy = render(api(state, [], { busy: true }))
+    expect(snapshotButton(busy).disabled).toBe(true)
+    expect(snapshotButton(busy).textContent).toContain('Taking')
+    act(() => root!.unmount()); root = null; container?.remove()
+    const failed = render(api(state, [], { busy: false, error: 'The page took longer than 15 seconds to load.' }))
+    expect(failed.textContent).toContain('took longer than 15 seconds')
   })
 })

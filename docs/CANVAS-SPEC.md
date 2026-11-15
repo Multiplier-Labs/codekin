@@ -1,6 +1,6 @@
 # Session Canvas
 
-**Status:** Slices 1–7 implemented: item model and store (#896), layout shell (#897), agent publishing (#898), renderers (#899), revisions (#900), selection → context (#901), the composer (#902), OpenCode tools (#903), the sandbox origin with charts and HTML items (#904), MCP Apps display (#905), live preview of local dev servers (#906), and tool calls from MCP Apps.
+**Status:** Slices 1–7 implemented: item model and store (#896), layout shell (#897), agent publishing (#898), renderers (#899), revisions (#900), selection → context (#901), the composer (#902), OpenCode tools (#903), the sandbox origin with charts and HTML items (#904), MCP Apps display (#905), live preview of local dev servers (#906), tool calls from MCP Apps, and preview snapshots.
 
 ## 1. Summary
 
@@ -78,7 +78,8 @@ Canvas uses the session WebSocket, like review comments, so it follows the sessi
 | `preview_launch { name }` | Start a launch configuration and show its preview item (created on first start) |
 | `preview_stop` / `preview_restart { itemId }` | Stop or restart a server Codekin started |
 | `preview_logs { itemId }` → `preview_log { lines, reset }` | The server output Codekin kept. New lines are broadcast as they come |
-| `preview_state { sessionId, preview }` | Broadcast on every change: `status` (`starting`, `running`, `stopped`, `crashed`), `targetPort`, `proxyPort` and `entry` (the proxy URL that admits the frame), `managed`, `config`, `command`, `exitCode`, `error`, `notice` |
+| `preview_state { sessionId, preview }` | Broadcast on every change: `status` (`starting`, `running`, `stopped`, `crashed`), `targetPort`, `proxyPort` and `entry` (the proxy URL that admits the frame), `managed`, `config`, `command`, `exitCode`, `error`, `notice`, and `snapshots` (this machine has a browser for snapshots) |
+| `preview_snapshot { itemId, path?, viewport? }` → `preview_snapshot_result { itemId, snapshotItemId? \| error? }` | Take a snapshot of the page at `path` (default: the item's) at `viewport` (`full`, `tablet` or `phone`). The reply goes to the asking client only |
 
 **Agent publishing.**
 
@@ -106,6 +107,7 @@ The session list carries `canvas: { items, pinnedBehind }` per session, so the s
 - Pin and delete are owner-only.
 - Tool calls from MCP Apps (`mcp_app_call`) are owner-only: they run tools on the owner's machine.
 - Previews are owner-only, both the `preview_*` requests and the `preview_*` frames. Their state carries the proxy's key, and server output can carry anything the dev server prints.
+- Snapshot items are owner-only too. A grantee sees them in the list, but not their image or console record (`canvas_item` with source `snapshot`).
 
 ## 4. Layout: canvas-forward
 
@@ -271,8 +273,23 @@ A `preview` item shows a dev server running on the machine Codekin runs on.
 **Where it works.** Previews work wherever the browser reaches Codekin's machine directly: localhost, the desktop app, or a LAN or tailnet address on which the proxy ports are reachable.
 
 - **Not over https.** A Codekin page served over https can't frame the http proxy. Canvas offers **Open in a new tab** instead.
-- **Not through the relay.** The hosted web app and relay sessions can't reach the proxy ports. Canvas says so, and the agent still sees the item.
+- **Not through the relay.** The hosted web app and relay sessions can't reach the proxy ports. Canvas says so and offers a snapshot instead (below), and the agent still sees the item.
 - **Tunnels.** If you reach Codekin through an SSH tunnel, forward the preview ports too.
+
+### Snapshots
+
+A snapshot loads a preview's page in a headless Chrome or Chromium on the machine and keeps a screenshot as an image item. It is how a preview is seen where the live page can't be: the hosted web app, a relay session, or a Codekin page served over https.
+
+- **Taking one.** **Snapshot** in the preview's toolbar (or **Take a snapshot** where the page can't be shown) loads the path the preview is on, at the chosen viewport: 1280×800, 820×1180, or a 390×844 phone (touch, 2x pixels). On a phone it is always the phone size.
+- **What it records.** The image (PNG, or JPEG when a PNG would pass the 2 MiB image limit), the path and title the page ended on, the viewport, and up to 50 console errors and warnings (console calls, uncaught errors, failed resources) seen while it loaded. Codekin waits for the load event and then for the network to be quiet for half a second (at most five more seconds), so a single-page app's first fetches land. The whole snapshot is limited to 30 seconds.
+- **Where it goes.** Each preview has one snapshot item, `Snapshot: <preview title>`, with source `{ type: 'snapshot', preview }`. Every snapshot is a new revision, so the revision bar steps through them and **Compare** shows two side by side. The item opens when the snapshot is ready. Its console record can be sent to the agent like the live console.
+- **The browser.** `CANVAS_SNAPSHOT_BROWSER` names it (a path, or `off`). Otherwise Codekin uses Chrome, Chromium or Edge on `PATH` or in `/Applications`, else the newest browser Playwright installed (`PLAYWRIGHT_BROWSERS_PATH`, or its default cache). Without one, the button explains what to install.
+- **Isolation.**
+  - Each snapshot runs a new browser with a new temporary profile: no cookies, storage or logins from anywhere, and the profile is deleted afterwards. A page behind a login shows its logged-out state.
+  - Codekin drives it over `--remote-debugging-pipe`, so no debugging port is opened.
+  - It loads `http://localhost:<port>` directly, not through the preview proxy, and only the item's port. Codekin's own ports are refused, as for previews.
+  - One snapshot at a time per session, and two at a time per machine.
+  - **Without Chrome's sandbox.** Where the sandbox can't start (Ubuntu 23.10 and later restrict the unprivileged user namespaces it needs, unless the browser ships an AppArmor profile), Codekin runs the browser without it. The page then reaches only this machine: every other request goes to a proxy that isn't there, and WebRTC can't send UDP. The snapshot says so and counts what was blocked, such as web fonts and CDN scripts.
 
 ## 9. Slices
 
@@ -284,7 +301,7 @@ A `preview` item shows a dev server running on the machine Codekin runs on.
 | 4 | Selection → context | Selection toolbar, attachments, composer redesign (section 6) |
 | 5 | Sandbox origin | Separate origin and CSP, then sandboxed charts and HTML artifacts (done) |
 | 6 | MCP Apps (display) | Adapter enrichment for Claude and Codex, `AppBridge` host (done) |
-| 7 | Live preview | Local dev servers: proxy, launch configurations, picker, console and server output (done). Previews through the relay are not supported |
+| 7 | Live preview | Local dev servers: proxy, launch configurations, picker, console and server output (done). Live previews through the relay are not supported; snapshots work everywhere (done) |
 | 8 | Interactive MCP Apps | Tool calls from apps through Claude Code `mcp_call` (session permission rules) and Codex `mcpServer/tool/call` (confirmed in Canvas) (done) |
 
 Relay-tunnelled previews are out of scope until there is a supported path and evidence they're needed.

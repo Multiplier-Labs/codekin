@@ -289,6 +289,9 @@ export function checkServerFrame(policy: ChannelPolicy, state: ChannelState, fra
   // Preview state carries the proxy's key, and server output can carry
   // anything the dev server prints: the owner's only.
   if (typeof msg?.type === 'string' && msg.type.startsWith('preview_')) return false
+  // A snapshot shows the owner's running app, and its console record can
+  // carry anything the app logs: the owner's only, like the preview.
+  if (msg?.type === 'canvas_item' && (msg as { item?: { source?: { type?: unknown } } }).item?.source?.type === 'snapshot') return false
   // Code, review comments and PR details are part of the diff: a grantee
   // without view_diff must not receive them, even as a broadcast.
   if (typeof msg?.type === 'string' && (DIFF_FRAME_TYPES.has(msg.type) || isFileCanvasItem(msg))) {
@@ -404,6 +407,7 @@ export function checkClientFrame(policy: ChannelPolicy, state: ChannelState, fra
     // Previews: the proxy is only reachable on the machine (or its network),
     // never through the relay. Starting, stopping and restarting run commands
     // and fall through to owner-only; a grantee may not even list them.
+    // Snapshots (preview_snapshot) run a browser on the machine: owner-only too.
 
     case 'input':
       return requirePermission(policy, state, 'send_prompt', 'Sending prompts is not granted')

@@ -17,7 +17,7 @@ import { createHash, randomUUID } from 'crypto'
 import { existsSync, readdirSync, readFileSync } from 'fs'
 import { promises as fs } from 'fs'
 import path from 'path'
-import type { CanvasItem, CanvasItemKind, CanvasItemMeta, CanvasItemSource, CanvasRevision } from './protocol.js'
+import type { CanvasItem, CanvasItemKind, CanvasItemMeta, CanvasItemSource, CanvasRevision, SnapshotMeta } from './protocol.js'
 
 export const CANVAS_LIMITS = {
   maxItems: 100,
@@ -131,8 +131,34 @@ function checkTitle(title: unknown): string {
   return trimmed
 }
 
+const SNAPSHOT_VIEWPORTS = new Set(['full', 'tablet', 'phone'])
+
+/** A preview snapshot's record (made by Codekin, checked like anything read back from disk). */
+function checkSnapshotMeta(meta: unknown): CanvasItemMeta {
+  const m = (typeof meta === 'object' && meta !== null ? meta : {}) as Record<string, unknown>
+  const bad = () => new CanvasError('Not a snapshot record.')
+  if (typeof m.path !== 'string' || m.path.length > 4000 || typeof m.title !== 'string' || m.title.length > 400) throw bad()
+  if (typeof m.port !== 'number' || !Number.isInteger(m.port) || typeof m.viewport !== 'string' || !SNAPSHOT_VIEWPORTS.has(m.viewport)) throw bad()
+  if (!Array.isArray(m.console) || m.console.length > 50) throw bad()
+  const console = m.console.map((e: unknown): SnapshotMeta['console'][number] => {
+    const c = (typeof e === 'object' && e !== null ? e : {}) as Record<string, unknown>
+    const level = c.level
+    if ((level !== 'error' && level !== 'warn') || typeof c.message !== 'string' || c.message.length > 2000 || typeof c.path !== 'string' || typeof c.at !== 'number') throw bad()
+    return { level, message: c.message, path: c.path.slice(0, 4000), at: c.at }
+  })
+  if (m.blocked !== undefined && (typeof m.blocked !== 'number' || !Number.isInteger(m.blocked) || m.blocked < 0)) throw bad()
+  return {
+    snapshot: {
+      path: m.path, title: m.title, port: m.port, viewport: m.viewport as 'full' | 'tablet' | 'phone', console,
+      ...(m.restricted === true ? { restricted: true as const } : {}),
+      ...(typeof m.blocked === 'number' && m.blocked > 0 ? { blocked: m.blocked } : {}),
+    },
+  }
+}
+
 function checkMeta(kind: CanvasItemKind, meta: unknown): CanvasItemMeta | undefined {
   if (meta === undefined || meta === null) return undefined
+  if (kind === 'image' && typeof meta === 'object' && 'snapshot' in meta) return checkSnapshotMeta((meta as { snapshot: unknown }).snapshot)
   if (kind !== 'diagram' || typeof meta !== 'object') throw new CanvasError(`A ${kind} item takes no extra data.`)
   const nodes = (meta as { nodes?: unknown }).nodes
   if (nodes === undefined) return undefined
