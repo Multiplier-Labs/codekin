@@ -207,5 +207,9 @@ describe.skipIf(!realBrowser)('takeSnapshot with a real browser', () => {
     } finally {
       await dev.close()
     }
-  }, 40_000)
+  // takeSnapshot bounds itself: 30s per attempt, and a second attempt without
+  // the sandbox when it can't start. A cold Chrome on a busy CI runner can take
+  // most of that, so outlast both attempts and let a slow run fail with the
+  // snapshot's own error rather than an unexplained test timeout.
+  }, 90_000)
 })
