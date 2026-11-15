@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- The sidebar lists repos by recent activity: the repo whose latest session most recently started or finished a turn comes first, and a repo with a turn in progress goes above the rest. Settings → Sessions → Sidebar → "Sort repos by" switches back to Name (alphabetical, Scratch first).
+
 ### Fixed
 - Starting a session no longer hangs for a second or more before the chat opens (longer with a worktree). Every save rewrote all sessions' output history into `sessions.json`, synchronously; each session's history now lives in its own file under `DATA_DIR/session-history/` and is rewritten only when it changes. Existing `sessions.json` files migrate on the first save.
 - New session worktrees start from the default branch as it is on `origin`, not from a local `main` that may be weeks behind. Codekin fetches the branch first (10 s limit; an offline remote falls back to the refs already fetched) and keeps the local branch only when it already contains the remote one. The new branch does not track `origin/main`. A caller-supplied base is used as is.
