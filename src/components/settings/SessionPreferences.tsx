@@ -88,6 +88,7 @@ export function SessionPreferences({ token, autoWorktree, onAutoWorktreeChange, 
         </Rows>
       </Block>
 
+      <SidebarPreferences />
       <NotificationPreferences />
       <CanvasPreferences />
 
@@ -171,6 +172,41 @@ export function SessionPreferences({ token, autoWorktree, onAutoWorktreeChange, 
         </Rows>
       </Block>
     </div>
+  )
+}
+
+const SIDEBAR_REPO_SORT = [
+  { value: 'activity', label: 'Recent activity', description: 'The repo you last worked in comes first.' },
+  { value: 'name', label: 'Name', description: 'Alphabetical, with Scratch first.' },
+] as const
+
+/** How the sidebar orders its repo and folder groups. */
+function SidebarPreferences() {
+  const sort = usePref('sidebarRepoSort') ?? 'activity'
+  return (
+    <Block title="Sidebar">
+      <fieldset>
+        <legend className="mb-2 text-body text-ink">Sort repos by</legend>
+        <div className="flex flex-col gap-2">
+          {SIDEBAR_REPO_SORT.map(o => (
+            <label key={o.value} className="flex cursor-pointer items-start gap-2.5">
+              <input
+                type="radio"
+                name="settings-sidebar-repo-sort"
+                value={o.value}
+                checked={sort === o.value}
+                onChange={() => { setPref('sidebarRepoSort', o.value === 'activity' ? undefined : o.value) }}
+                className={`${checkbox} mt-0.5`}
+              />
+              <span>
+                <span className="block text-body text-ink">{o.label}</span>
+                <span className="block text-meta text-ink-muted">{o.description}</span>
+              </span>
+            </label>
+          ))}
+        </div>
+      </fieldset>
+    </Block>
   )
 }
 
