@@ -26,6 +26,8 @@ import { SessionPersistence } from './session-persistence.js'
 import type { Session } from './types.js'
 
 const SESSIONS_FILE = join(TEST_DATA_DIR, 'sessions.json')
+const HISTORY_DIR = join(TEST_DATA_DIR, 'session-history')
+const historyFile = (id: string) => join(HISTORY_DIR, `${id}.json`)
 
 function makeSession(overrides: Partial<Session> = {}): Session {
   return {
@@ -53,6 +55,7 @@ function makeSession(overrides: Partial<Session> = {}): Session {
 afterEach(() => {
   if (existsSync(SESSIONS_FILE)) rmSync(SESSIONS_FILE)
   if (existsSync(SESSIONS_FILE + '.tmp')) rmSync(SESSIONS_FILE + '.tmp')
+  rmSync(HISTORY_DIR, { recursive: true, force: true })
 })
 
 afterEach(() => {
@@ -354,5 +357,109 @@ describe('SessionPersistence.restoreFromDisk', () => {
 
     expect(sessions.get('s1')!.source).toBe('manual')
     expect(sessions.get('s1')!.provider).toBe('claude')
+  })
+})
+
+describe('SessionPersistence output history files', () => {
+  const quiet = <T>(fn: () => T): T => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
+    try { return fn() } finally { logSpy.mockRestore() }
+  }
+  const readSessions = () => JSON.parse(readFileSync(SESSIONS_FILE, 'utf-8'))
+  const readHistory = (id: string) => JSON.parse(readFileSync(historyFile(id), 'utf-8'))
+
+  it('keeps history out of sessions.json and in a file per session', () => {
+    const sessions = new Map<string, Session>()
+    sessions.set('s1', makeSession({ id: 's1', outputHistory: [{ type: 'output', data: 'hi' }] as any }))
+    new SessionPersistence(sessions).persistToDisk()
+
+    expect(readSessions()[0].outputHistory).toBeUndefined()
+    expect(readHistory('s1')).toEqual([{ type: 'output', data: 'hi' }])
+  })
+
+  it('rewrites a history only when it changed', () => {
+    const sessions = new Map<string, Session>()
+    const s1 = makeSession({ id: 's1', outputHistory: [{ type: 'output', data: 'a' }] as any })
+    sessions.set('s1', s1)
+    sessions.set('s2', makeSession({ id: 's2', outputHistory: [{ type: 'user_echo', text: 'x' }] as any }))
+    const p = new SessionPersistence(sessions)
+    p.persistToDisk()
+    // Mark both files so a rewrite is detectable.
+    writeFileSync(historyFile('s1'), '"untouched"')
+    writeFileSync(historyFile('s2'), '"untouched"')
+
+    p.persistToDisk()
+    expect(readHistory('s1')).toBe('untouched')
+    expect(readHistory('s2')).toBe('untouched')
+
+    // The last output chunk grows in place as streamed text merges into it.
+    ;(s1.outputHistory[0] as any).data += 'b'
+    p.persistToDisk()
+    expect(readHistory('s1')).toEqual([{ type: 'output', data: 'ab' }])
+    expect(readHistory('s2')).toBe('untouched')
+
+    // Replacing the array (as stripping a turn's output does) also counts.
+    s1.outputHistory = []
+    p.persistToDisk()
+    expect(readHistory('s1')).toEqual([])
+  })
+
+  it('restores history from its file', () => {
+    const sessions = new Map<string, Session>()
+    sessions.set('s1', makeSession({ id: 's1', outputHistory: [{ type: 'user_echo', text: 'hello' }] as any }))
+    new SessionPersistence(sessions).persistToDisk()
+
+    const restored = new Map<string, Session>()
+    quiet(() => new SessionPersistence(restored).restoreFromDisk())
+    expect(restored.get('s1')!.outputHistory).toEqual([{ type: 'user_echo', text: 'hello' }])
+  })
+
+  it('does not rewrite restored histories that have not changed', () => {
+    const sessions = new Map<string, Session>()
+    sessions.set('s1', makeSession({ id: 's1', outputHistory: [{ type: 'output', data: 'a' }] as any }))
+    new SessionPersistence(sessions).persistToDisk()
+
+    const restored = new Map<string, Session>()
+    const p = new SessionPersistence(restored)
+    quiet(() => p.restoreFromDisk())
+    writeFileSync(historyFile('s1'), '"untouched"')
+    p.persistToDisk()
+    expect(readHistory('s1')).toBe('untouched')
+  })
+
+  it('migrates a history saved inline in sessions.json into its own file', () => {
+    writeFileSync(SESSIONS_FILE, JSON.stringify([{
+      id: 's1', name: 'Old', workingDir: '/repos/x', created: '2026-04-27T00:00:00Z',
+      claudeSessionId: null, outputHistory: [{ type: 'output', data: 'legacy' }],
+    }]))
+    const sessions = new Map<string, Session>()
+    const p = new SessionPersistence(sessions)
+    quiet(() => p.restoreFromDisk())
+    expect(sessions.get('s1')!.outputHistory).toEqual([{ type: 'output', data: 'legacy' }])
+
+    p.persistToDisk()
+    expect(readHistory('s1')).toEqual([{ type: 'output', data: 'legacy' }])
+    expect(readSessions()[0].outputHistory).toBeUndefined()
+  })
+
+  it('removes the history file of a session that is gone', () => {
+    const sessions = new Map<string, Session>()
+    sessions.set('s1', makeSession({ id: 's1', outputHistory: [{ type: 'output', data: 'a' }] as any }))
+    const p = new SessionPersistence(sessions)
+    p.persistToDisk()
+    expect(existsSync(historyFile('s1'))).toBe(true)
+
+    sessions.delete('s1')
+    p.persistToDisk()
+    expect(existsSync(historyFile('s1'))).toBe(false)
+  })
+
+  it('keeps the history inline for an id that is not safe as a file name', () => {
+    const sessions = new Map<string, Session>()
+    sessions.set('../x', makeSession({ id: '../x', outputHistory: [{ type: 'output', data: 'a' }] as any }))
+    new SessionPersistence(sessions).persistToDisk()
+
+    expect(readSessions()[0].outputHistory).toEqual([{ type: 'output', data: 'a' }])
+    expect(existsSync(join(TEST_DATA_DIR, 'x.json'))).toBe(false)
   })
 })
