@@ -7,13 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.2] - 2026-11-15
+
 ### Changed
-- The sidebar lists repos by recent activity: the repo whose latest session most recently started or finished a turn comes first, and a repo with a turn in progress goes above the rest. Settings → Sessions → Sidebar → "Sort repos by" switches back to Name (alphabetical, Scratch first).
+- **One header line across the app.** The sidebar, chat, Canvas and Changes headers share one height (40px, 48px on touch) and end on the same line. Canvas and Changes moved from floating over the transcript into the chat header's right end. Canvas is the main action: the only filled button, shown even before the session has items, with a count once it has some. The place name is plain text, the worktree branch is faint mono, Attach is icon-only and Changes is a ghost button; folders without git show a muted "No git" button. Sessions without a header (Joe, automations) keep the floating corner group (#931, #934).
+- The sidebar lists repos by recent activity: the repo whose latest session most recently started or finished a turn comes first, and a repo with a turn in progress goes above the rest. Settings → Sessions → Sidebar → "Sort repos by" switches back to Name (alphabetical, Scratch first) (#933).
 
 ### Fixed
-- Starting a session no longer hangs for a second or more before the chat opens (longer with a worktree). Every save rewrote all sessions' output history into `sessions.json`, synchronously; each session's history now lives in its own file under `DATA_DIR/session-history/` and is rewritten only when it changes. Existing `sessions.json` files migrate on the first save.
-- New session worktrees start from the default branch as it is on `origin`, not from a local `main` that may be weeks behind. Codekin fetches the branch first (10 s limit; an offline remote falls back to the refs already fetched) and keeps the local branch only when it already contains the remote one. The new branch does not track `origin/main`. A caller-supplied base is used as is.
-- The chat opens as soon as a worktree session is created; the worktree is made after, and a first message sent meanwhile is held until it is ready. The transcript notes where the worktree branched from.
+- Starting a session no longer hangs for a second or more before the chat opens (longer with a worktree). Every save rewrote all sessions' output history into `sessions.json`, synchronously; each session's history now lives in its own file under `DATA_DIR/session-history/` and is rewritten only when it changes. Existing `sessions.json` files migrate on the first save (#928).
+- New session worktrees start from the default branch as it is on `origin`, not from a local `main` that may be weeks behind. Codekin fetches the branch first (10 s limit; an offline remote falls back to the refs already fetched) and keeps the local branch only when it already contains the remote one. The new branch does not track `origin/main`. A caller-supplied base is used as is (#929).
+- The chat opens as soon as a worktree session is created; the worktree is made after, and a first message sent meanwhile is held until it is ready. The transcript notes where the worktree branched from (#929).
+- A fenced code block without a language tag renders as a code block (scrolling, with a copy button) instead of as a run of inline code that overflowed the chat column (#927).
 
 ## [0.12.1] - 2026-11-15
 
