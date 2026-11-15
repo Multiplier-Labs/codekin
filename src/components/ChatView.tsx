@@ -555,7 +555,6 @@ export function ChatView({ messages, fontSize, disabled, planningMode, activityL
   const contentRef = useRef<HTMLDivElement>(null)
   const [showScrollButton, setShowScrollButton] = useState(false)
   const isNearBottomRef = useRef(true)
-  const lastScrollTopRef = useRef(0)
   /** performance.now() until which the reader counts as scrolling (wheel, trackpad momentum, touch). */
   const userScrollingUntilRef = useRef(0)
   const pinRetryRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -565,6 +564,8 @@ export function ChatView({ messages, fontSize, disabled, planningMode, activityL
   /** performance.now() until which a just-opened transcript holds to the bottom. */
   const settleUntilRef = useRef(0)
   const prevSessionIdRef = useRef(sessionId)
+  /** A transcript opened while the page was hidden: hold it to the bottom again once shown. */
+  const settleOnShowRef = useRef(false)
 
   // Put the view at the very bottom, unless the reader is mid-scroll.
   // WebKit (Safari, the desktop app) scrolls on a separate thread: a scrollTop
@@ -601,21 +602,20 @@ export function ChatView({ messages, fontSize, disabled, planningMode, activityL
       return
     }
     isNearBottomRef.current = nearBottom
-    lastScrollTopRef.current = el.scrollTop
     setShowScrollButton(!nearBottom)
   }, [pinToBottom])
 
-  // Opening a transcript — first mount, another session, or an empty one
-  // filling in — always starts at the bottom, whatever the reader did in the
-  // previous one. Without this the "at bottom" flag carried over from the last
-  // session, and a stale false left the new one at the top, where the browser
-  // had clamped the scroll position while the transcript was empty.
+  // Opening a transcript — first mount, another session, an empty one filling
+  // in, or a rejoin rebuilding it — always starts at the bottom, whatever the
+  // reader did before. Without this the "at bottom" flag carried over from the
+  // last session, and a stale false left the new one at the top, where the
+  // browser had clamped the scroll position while the transcript was empty.
   //
-  // Otherwise, a rejoin rebuilds the transcript with new keys, so React
-  // replaces every node; the container shrinks for a moment and the browser
-  // clamps the scroll position. Put a reader who had scrolled up back where
-  // they were, before paint. (A trim keeps the newest messages, so it doesn't
-  // count as a rebuild.)
+  // A rejoin (the connection came back, e.g. after the laptop slept) rebuilds
+  // the transcript with new keys. The position recorded before the drop isn't
+  // worth restoring: WebKit can report 0 while the app is asleep, so restoring
+  // it opened the session at its first message. (A trim keeps the newest
+  // messages, so it doesn't count as a rebuild.)
   useLayoutEffect(() => {
     if (prevSessionIdRef.current !== sessionId) {
       prevSessionIdRef.current = sessionId
@@ -629,18 +629,31 @@ export function ChatView({ messages, fontSize, disabled, planningMode, activityL
       openPendingRef.current = true
       return
     }
-    if (openPendingRef.current) {
+    const rebuilt = !!prevLastKey && !messages.some(m => m.key === prevLastKey)
+    if (openPendingRef.current || rebuilt) {
       openPendingRef.current = false
       isNearBottomRef.current = true
       settleUntilRef.current = performance.now() + OPEN_SETTLE_MS
+      // Hidden (asleep, minimised), WebKit doesn't lay the page out, so the
+      // settle window would run out before anyone sees it. Hold again on show.
+      settleOnShowRef.current = typeof document !== 'undefined' && document.hidden
       setShowScrollButton(false)
       el.scrollTop = el.scrollHeight - el.clientHeight
-      return
     }
-    if (!prevLastKey || isNearBottomRef.current) return
-    if (messages.some(m => m.key === prevLastKey)) return
-    el.scrollTop = lastScrollTopRef.current
   }, [messages, sessionId])
+
+  useEffect(() => {
+    const onShow = () => {
+      if (document.hidden || !settleOnShowRef.current) return
+      settleOnShowRef.current = false
+      isNearBottomRef.current = true
+      settleUntilRef.current = performance.now() + OPEN_SETTLE_MS
+      setShowScrollButton(false)
+      pinToBottom()
+    }
+    document.addEventListener('visibilitychange', onShow)
+    return () => { document.removeEventListener('visibilitychange', onShow) }
+  }, [pinToBottom])
 
   useEffect(() => {
     const el = containerRef.current

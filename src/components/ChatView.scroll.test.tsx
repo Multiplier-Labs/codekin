@@ -1,4 +1,4 @@
-/** ChatView keeps a reader's scroll position when a rejoin rebuilds the transcript. */
+/** ChatView scroll behaviour: opening, rejoining, following output and the reader's own scrolling. */
 // @vitest-environment jsdom
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
@@ -47,7 +47,7 @@ function readerScrollsTo(scroller: HTMLElement, state: { top: number }, top: num
 }
 
 describe('ChatView scroll on transcript rebuild', () => {
-  it('restores the offset of a reader who scrolled up', () => {
+  it('opens at the bottom after a rejoin, even if the reader had scrolled up', () => {
     container = document.createElement('div')
     document.body.appendChild(container)
     root = createRoot(container)
@@ -57,10 +57,36 @@ describe('ChatView scroll on transcript rebuild', () => {
     const state = fakeScroller(scroller)
     readerScrollsTo(scroller, state, 600)
 
-    // The browser clamps the position while the nodes are replaced.
+    // Asleep, WebKit reports the top; the connection comes back and the transcript is rebuilt.
     state.top = 0
+    act(() => { scroller.dispatchEvent(new Event('scroll')) })
     render(transcript('b'))
-    expect(state.top).toBe(600)
+    expect(state.top).toBe(1500)
+  })
+
+  it('holds a transcript rebuilt while hidden at the bottom once the window is shown', () => {
+    let now = 10_000
+    vi.spyOn(performance, 'now').mockImplementation(() => now)
+    let hidden = true
+    vi.spyOn(document, 'hidden', 'get').mockImplementation(() => hidden)
+    container = document.createElement('div')
+    document.body.appendChild(container)
+    root = createRoot(container)
+    render(transcript('a'))
+    const scroller = container.querySelector('.chat-scroll') as HTMLElement
+    const state = fakeScroller(scroller)
+
+    render(transcript('b'))
+    // Long after the settle window, the window comes back and the layout reports the top.
+    now += 60_000
+    hidden = false
+    state.top = 0
+    act(() => { document.dispatchEvent(new Event('visibilitychange')) })
+    expect(state.top).toBe(1500)
+    state.top = 0
+    act(() => { scroller.dispatchEvent(new Event('scroll')) })
+    expect(state.top).toBe(1500)
+    vi.restoreAllMocks()
   })
 
   it('leaves a new message alone when the transcript only grows', () => {
