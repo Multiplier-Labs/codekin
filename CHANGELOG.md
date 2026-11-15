@@ -7,16 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.1] - 2026-11-15
+
+Relays that serve a hosted web app with a Canvas sandbox should set `RELAY_CANVAS_SANDBOX_ORIGIN` to the web app's `VITE_CANVAS_SANDBOX_ORIGIN`, so the desktop app can show charts (#922).
+
 ### Added
-- **Preview snapshots.** **Snapshot** in a Canvas preview loads the page in a headless Chrome or Chromium on the machine Codekin runs on and keeps a screenshot, with the console errors and warnings seen while it loaded. Pick a desktop, tablet or phone size. Snapshots of a preview are revisions of one item, so you can step through them or compare two. This is how the hosted web app and relay sessions see a preview, since they can't reach the live page. Set the browser with `CANVAS_SNAPSHOT_BROWSER` (a path, or `off`); otherwise Codekin finds Chrome, Chromium, Edge or a Playwright-installed browser. Starting a launch configuration from a preview now works in the hosted web app too.
+- **Session Canvas.** A panel beside the chat for output worth reading or keeping: Markdown documents, tables, Mermaid diagrams and images. Items are kept per session under `DATA_DIR/canvas/`, never in the repository, and are deleted with the session. Agents publish to it with the `codekin_canvas` tools (`canvas_show`, `canvas_update`, `canvas_list`); Claude, Codex and Grok get them as an MCP server, OpenCode as a custom tool. A card in the chat opens each item. Spec: `docs/CANVAS-SPEC.md` (#895–#898, #903).
+- Tables sort, filter and select rows. Diagrams render, and a node that names a file opens it (#899).
+- **Revisions.** Every update is a new revision. Step through them, pin one, or compare two side by side. With six or more items, the switcher groups them (Pinned, Agent, You, one group per MCP server) (#900).
+- **Ask about part of the Canvas.** Select text, table rows, a diagram node or a chart selection and choose **Ask about this** or **Add to prompt**. The selection goes to the agent as context with your next message (#901).
+- **Charts and HTML pages.** Vega-Lite charts and self-contained HTML pages render in a sandbox page on a separate origin with no network access, never on Codekin's own origin. Codekin serves the sandbox on its port + 1 (`CANVAS_SANDBOX_PORT`), or set `CANVAS_SANDBOX_ORIGIN`; the hosted web app is built with `VITE_CANVAS_SANDBOX_ORIGIN` (#904, #921).
+- **MCP Apps.** A tool that declares a UI resource is shown as an interactive view in Canvas. It can call tools on its own server, which the agent's CLI runs under the session's permission rules without a model turn (#905, #907).
+- **Live preview.** A dev server running on the machine shows live in Canvas. The agent starts it and calls `canvas_preview`, or you start one of the repository's `.claude/launch.json` configurations (#906).
+- **Preview snapshots.** **Snapshot** in a Canvas preview loads the page in a headless Chrome or Chromium on the machine Codekin runs on and keeps a screenshot, with the console errors and warnings seen while it loaded. Pick a desktop, tablet or phone size. Snapshots of a preview are revisions of one item, so you can step through them or compare two. This is how the hosted web app and relay sessions see a preview, since they can't reach the live page. Set the browser with `CANVAS_SNAPSHOT_BROWSER` (a path, or `off`); otherwise Codekin finds Chrome, Chromium, Edge or a Playwright-installed browser. Starting a launch configuration from a preview now works in the hosted web app too (#919).
+- **A session composer with three controls:** `+` (attach files, add from Canvas, skills), the session chip (agent, model, permission mode) and Send (#902).
+- The start view's composer opens five lines tall, and the agent menu shows the agents as one row so the model list has room (#894).
 
 ### Changed
-- **Snapshots keep Chrome's sandbox.** Where the sandbox can't start (Ubuntu 23.10 and later, unless the browser ships an AppArmor profile), a snapshot used to run without it silently. It now fails and says how to fix it. Set `CANVAS_SNAPSHOT_NO_SANDBOX=1` to allow snapshots without the sandbox; as before, the page then loads only from this machine.
+- **Snapshots keep Chrome's sandbox.** Where the sandbox can't start (Ubuntu 23.10 and later, unless the browser ships an AppArmor profile), a snapshot used to run without it silently. It now fails and says how to fix it. Set `CANVAS_SNAPSHOT_NO_SANDBOX=1` to allow snapshots without the sandbox; as before, the page then loads only from this machine (#924).
+- In a Claude session, a file write outside the session's folders now asks first, even in accept-edits mode. Symlinks are resolved before deciding (#911, #916).
+- Canvas content can't restyle Codekin or act unseen: Markdown drops styles, forms and inline SVG, and previews and apps get a stricter frame (#912).
 
 ### Fixed
-- **Preview storage across apps.** When a preview port moved to a different app, only the first browser to open it had the old app's storage cleared; other browsers (another device, a second window profile) kept it, and the new app could read it. Each browser now gets the clear on its own first entry.
-- **Large comparisons.** Comparing two revisions of a big table, file or document no longer draws every row at once. Long runs of unchanged rows fold into a "N unchanged rows" line you can open, and rows are drawn 500 at a time, as in the table view.
-- **Canvas charts and HTML items in the desktop app.** They stopped at "The sandbox … did not answer", and the sandbox page sometimes opened in the browser. The app only let its windows load the server's own address, and on macOS that rule applies to frames as well. The window for This Mac now also allows the local server's sandbox. A hosted location's window allows the sandbox its relay names in `GET /api/relay/info`. Relays set it with `RELAY_CANVAS_SANDBOX_ORIGIN`, the same origin the web app was built with as `VITE_CANVAS_SANDBOX_ORIGIN`. Older desktop builds, and relays that don't name their sandbox, no longer get the frame at all. They show the item's source with a note instead of opening empty `…/index.html` tabs in the browser.
+- **Canvas charts and HTML items in the desktop app.** They stopped at "The sandbox … did not answer", and the sandbox page sometimes opened in the browser. The app only let its windows load the server's own address, and on macOS that rule applies to frames as well. The window for This Mac now also allows the local server's sandbox. A hosted location's window allows the sandbox its relay names in `GET /api/relay/info`. Relays set it with `RELAY_CANVAS_SANDBOX_ORIGIN`, the same origin the web app was built with as `VITE_CANVAS_SANDBOX_ORIGIN`. Older desktop builds, and relays that don't name their sandbox, no longer get the frame at all. They show the item's source with a note instead of opening empty `…/index.html` tabs in the browser (#922).
+- **Approval prompts for MCP and other tools in Claude sessions.** Tools Codekin's hook doesn't cover were denied outright instead of asking (#908).
+- **Bypass permissions** accepts every tool in Claude sessions, as its label says; Bash and other tools still asked before (#910).
+- A Codekin server started from inside a Codekin session no longer passes that session's `CODEKIN_*` variables (including `CODEKIN_SKIP_PERMISSIONS`) on to the sessions it spawns (#909).
+- Canvas recovers after a reconnect or a Codekin restart: unanswered content requests are sent again, previews reattach, and a failed item has **Try again** (#915).
+- Live previews: what runs is the configuration you saw, plus fixes to the proxy and the preview manager (#913).
+- Smaller Canvas fixes: route auth before body parsing, size limits, table performance and file gating (#914).
+- **Preview storage across apps.** When a preview port moved to a different app, only the first browser to open it had the old app's storage cleared; other browsers (another device, a second window profile) kept it, and the new app could read it. Each browser now gets the clear on its own first entry. (#923)
+- **Large comparisons.** Comparing two revisions of a big table, file or document no longer draws every row at once. Long runs of unchanged rows fold into a "N unchanged rows" line you can open, and rows are drawn 500 at a time, as in the table view. (#923)
+- The Canvas and Changes buttons in the session's top corner share one size (#918).
 
 ## [0.12.0] - 2026-11-14
 
