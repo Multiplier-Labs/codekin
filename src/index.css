@@ -568,6 +568,11 @@
   --row-pad: 10px;
   --icon-size: 20px;
   --tap-min: 32px;
+  /* Pane headers (sidebar, chat, Canvas, Changes) share one height so their
+     bottom borders meet in one line; text controls inside sit at
+     --pane-control-h. */
+  --pane-header-h: 40px;
+  --pane-control-h: 28px;
 }
 
 [data-density="touch"] {
@@ -575,6 +580,8 @@
   --row-pad: 12px;
   --icon-size: 24px;
   --tap-min: 48px;
+  --pane-header-h: 48px;
+  --pane-control-h: 40px;
 }
 
 @media (pointer: coarse) {
@@ -583,6 +590,8 @@
     --row-pad: 12px;
     --icon-size: 24px;
     --tap-min: 48px;
+    --pane-header-h: 48px;
+    --pane-control-h: 40px;
   }
 }
 

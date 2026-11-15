@@ -14,7 +14,7 @@ import { PromptButtons } from './PromptButtons'
 import { TentativeBanner } from './TentativeBanner'
 import { WorktreeRecoveryBanner } from './WorktreeRecoveryBanner'
 import { changesButtonState } from '../lib/changesButton'
-import { PANE_HEADER } from '../lib/paneHeader'
+import { PANE_CONTROL, PANE_HEADER } from '../lib/paneHeader'
 import { InputBar, type InputBarHandle } from './InputBar'
 import { IconEye, IconFolder, IconLayoutSidebarRight, IconPencil, IconRobotFace } from '@tabler/icons-react'
 import type { JoeChatContext } from './JoeChatMessage'
@@ -32,46 +32,50 @@ function contextPlaceholder(attachments: CanvasAttachment[] | undefined): string
 
 /**
  * Canvas, Changes and "no git" as one group. In a session with a header they
- * sit at its right end as 32px header buttons; otherwise they float in the
- * transcript's top-right corner. Canvas takes priority: it is the filled
- * button, sits on the right edge (next to where it opens) and never shrinks.
- * Changes is outlined and, when space is short (compact), drops its label.
+ * sit at its right end as pane-header buttons; otherwise they float in the
+ * transcript's top-right corner. Canvas is the header's main action: the only
+ * filled button, on the right edge (next to where it opens), never shrinks,
+ * and in the header it shows even before the session has Canvas items.
+ * Changes is a quiet ghost button and, when space is short (compact), drops
+ * its label.
  */
 function SessionActions({ size, compact, canvasCount, onOpenCanvas, noGit, changes, onOpenDiffPanel }: {
   size: 'header' | 'corner'
   compact: boolean
-  canvasCount: number
+  /** Canvas items; null hides the Canvas button. */
+  canvasCount: number | null
   onOpenCanvas?: () => void
   noGit: { label: string; title: string; scratch: boolean } | null
   changes: { count: number; detail?: string } | null
   onOpenDiffPanel: () => void
 }) {
-  const showCanvas = canvasCount > 0 && !!onOpenCanvas
-  // The border is always there (transparent on the filled button) so heights match.
-  const base = size === 'header'
-    ? 'flex h-8 items-center gap-1.5 rounded-control border px-2.5 text-meta font-medium transition-colors'
+  const showCanvas = canvasCount !== null && !!onOpenCanvas
+  const header = size === 'header'
+  // The border is always there (transparent when unboxed) so heights match.
+  const base = header
+    ? `flex ${PANE_CONTROL} items-center gap-1.5 rounded-control border border-transparent px-2 text-meta font-medium transition-colors`
     : 'flex items-center gap-1.5 rounded-control border px-3 py-1.5 text-body font-medium transition-colors'
-  // Floating over the transcript, the quiet buttons need a solid ground.
-  const quiet = size === 'header' ? 'bg-transparent hover:bg-surface-raised' : 'bg-surface backdrop-blur-sm hover:bg-surface-raised'
-  const icon = size === 'header' ? 14 : 15
+  // In the header the quiet buttons are unboxed; floating over the transcript they need a solid ground.
+  const quiet = header ? 'hover:bg-surface-raised' : 'border-edge-strong bg-surface backdrop-blur-sm hover:bg-surface-raised'
+  const icon = header ? 14 : 15
   const count = 'rounded-control px-1.5 text-micro font-bold tabular-nums'
   return (
     <>
       {noGit && (
         <button
-          className={`${base} ${quiet} min-w-0 border-edge-strong text-ink-muted hover:text-ink`}
+          className={`${base} ${quiet} min-w-0 text-ink-muted hover:text-ink`}
           onClick={onOpenDiffPanel}
           title={noGit.title}
         >
           {noGit.scratch ? <IconPencil size={icon} stroke={2} className="shrink-0" /> : <IconFolder size={icon} stroke={2} className="shrink-0" />}
           {/* The header already names the folder. */}
-          {size === 'corner' && <span className="truncate font-mono">{noGit.label}</span>}
-          <span className="shrink-0">{size === 'corner' ? '· no git' : 'No git'}</span>
+          {!header && <span className="truncate font-mono">{noGit.label}</span>}
+          <span className="shrink-0">{header ? 'No git' : '· no git'}</span>
         </button>
       )}
       {changes && (
         <button
-          className={`${base} ${quiet} shrink-0 border-edge-strong text-ink`}
+          className={`${base} ${quiet} shrink-0 text-ink`}
           onClick={onOpenDiffPanel}
           title={`Review this session's changes${changes.detail ? ` — ${changes.detail}` : ''} (Ctrl+Shift+D)`}
           aria-label={`Changes${changes.count > 0 ? ` (${changes.count})` : ''}`}
@@ -83,13 +87,14 @@ function SessionActions({ size, compact, canvasCount, onOpenCanvas, noGit, chang
       )}
       {showCanvas && (
         <button
-          className={`${base} shrink-0 border-transparent bg-primary-8 text-on-primary hover:bg-primary-7`}
+          className={`${base} shrink-0 border-transparent bg-primary-8 font-semibold text-on-primary hover:bg-primary-7`}
           onClick={onOpenCanvas}
           title={'Open Canvas (⌘\\)'}
+          aria-label={`Canvas${canvasCount > 0 ? ` (${canvasCount})` : ''}`}
         >
           <IconLayoutSidebarRight size={icon} stroke={1.75} className="shrink-0" />
           Canvas
-          <span className={`${count} bg-on-primary/20`}>{canvasCount}</span>
+          {canvasCount > 0 && <span className={`${count} bg-on-primary/20`}>{canvasCount}</span>}
         </button>
       )}
     </>
@@ -274,12 +279,13 @@ export function SessionContent({
   const placeLabel = placePath
     ? (place?.kind === 'scratch' ? `scratch/${placePath.replace(/\/+$/, '').split('/').pop() ?? ''}` : placePath.replace(/\/+$/, '').split('/').pop() ?? placePath)
     : activeRepoName
-  // Canvas once the session has items and while Canvas is closed; Changes
-  // (or "no git") until the Changes panel or strip is showing.
-  const actionCanvasCount = canvasOpen || !onOpenCanvas ? 0 : canvasCount
+  // Canvas while it is closed: always in the header (it is the header's main
+  // action), in the floating corner group only once the session has items.
+  // Changes (or "no git") until the Changes panel or strip is showing.
+  const actionCanvasCount = canvasOpen || !onOpenCanvas || (!contextBar && canvasCount === 0) ? null : canvasCount
   const noGit = notRepo && !diffPanelOpen ? { label: placeLabel, title: `${placePath ?? 'This folder'} is not a git repository — open Changes to initialize git`, scratch: place?.kind === 'scratch' } : null
   const changes = showChangesButton && !notRepo && !diffPanelOpen ? { count: changesCount, detail: changesDetail } : null
-  const sessionActions = actionCanvasCount > 0 || noGit || changes ? (
+  const sessionActions = actionCanvasCount !== null || noGit || changes ? (
     <SessionActions
       size={contextBar ? 'header' : 'corner'}
       compact={isMobile}
@@ -294,9 +300,9 @@ export function SessionContent({
     <div className="flex flex-1 flex-col overflow-hidden min-h-0">
       {contextBar && (
         /* The session header: where the session works on the left, Changes and
-           Canvas on the right. Same height and surface as the Canvas and
-           Changes headers, so the three line up side by side. */
-        <div className={`${PANE_HEADER} gap-1.5 pr-3`}>
+           Canvas on the right. The shared pane header, so it lines up with the
+           sidebar, Canvas and Changes headers beside it. */
+        <div className={`${PANE_HEADER} gap-1 pr-2`}>
           <div className="min-w-0 flex-1">{contextBar}</div>
           {sessionActions && <div className="flex shrink-0 items-center gap-1.5">{sessionActions}</div>}
         </div>
