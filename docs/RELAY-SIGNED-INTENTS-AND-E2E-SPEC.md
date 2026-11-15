@@ -1,6 +1,6 @@
 # Relay trust: device-signed intents and end-to-end encryption
 
-**Status:** Spec, decisions D1–D7 settled (§13). Built: slice 1 (relay audit events, §7.1), slice 2 (machine identity and trust store), slice 3 (enrolment ceremony, §5.2–5.5), slice 4 (intent signing and verification, §6.1–6.5, §7.2) slice 5 (passkeys: enrolment, `device_certify`, step-up, remote `device_revoke`, §5.4, §5.6, §6.6) slice 6 (signed share grants and grantee intents, §6.7) and slice 7 (enforcement, §6.8): L1 is complete. L2 (slices 8–12) is not built; §8 was revised on 2026-11-15 and its new decisions D8–D13 are proposed, not settled (§13).
+**Status:** Spec, decisions D1–D13 settled (§13). Built: slice 1 (relay audit events, §7.1), slice 2 (machine identity and trust store), slice 3 (enrolment ceremony, §5.2–5.5), slice 4 (intent signing and verification, §6.1–6.5, §7.2) slice 5 (passkeys: enrolment, `device_certify`, step-up, remote `device_revoke`, §5.4, §5.6, §6.6) slice 6 (signed share grants and grantee intents, §6.7) and slice 7 (enforcement, §6.8): L1 is complete. L2 (slices 8–12) is not built; §8 was revised on 2026-11-15 and its decisions D8–D13 were settled the same day (§13).
 **Date:** 2026-11-08; L2 sections (§8–§11, §13) revised 2026-11-15
 **Context:** a hosted relay is trusted to say who the machine owner is (§3). This spec removes that trust in two levels: **L1 device-signed intents** and **L2 end-to-end content encryption**. It also adds the relay audit events that are declared but never emitted.
 **Basis:** `origin/main` at v0.10.5 (`a93f6e3`). All `path:line` references point there. The L2 sections are based on `origin/main` at v0.12.1 (`04d5e4b`) and name files without line numbers.
@@ -544,7 +544,7 @@ Asking for the passkey on every privileged session action got in the way. Owners
   - The browser pins `kM` **on first use** (`via: "passkey"` on the pin), because no code was typed. Signed intents don't depend on this pin, since the machine is what checks.
     - Such a pin doesn't vouch for the machine's clock.
     - A later code-confirmed enrolment replaces it.
-    - For L2, §8.6 proposes to encrypt with such a pin and label it "Accepted on first use" (D8). The first draft asked for the confirmation code first.
+    - L2 encrypts with such a pin and labels it "Accepted on first use" (§8.6, D8). The first draft asked for the confirmation code first.
 - **`device_revoke`** (the `enrol_revoke` frame) removes one of the signer's own credentials. Machines → "Remove this browser" uses it.
 - **Step-up** (§6.2). Privileged actions are:
   - `prompt_response` answers of `always_allow` or `approve_pattern`, including through `POST /api/orchestrator/sessions/:id/respond`;
@@ -716,7 +716,7 @@ The relay's audit is only as honest as the relay. That is fine for team accounta
 
 ## 8. End-to-end content encryption (L2)
 
-**Revision 2 (2026-11-15), not built.** Re-based on `main` at v0.12.1 (`04d5e4b`), after L1 shipped and the app gained the trust token (§5.2b), passkey windows (§6.6b), Canvas, places and webhooks. Changes from the first draft, each recorded as a proposed decision in §13:
+**Revision 2 (2026-11-15), not built.** Re-based on `main` at v0.12.1 (`04d5e4b`), after L1 shipped and the app gained the trust token (§5.2b), passkey windows (§6.6b), Canvas, places and webhooks. Changes from the first draft, each recorded as a decision in §13:
 
 - Two handshake messages instead of three (D9).
 - Intents are bound to the encrypted session, so a relay can't unwrap them and replay them in clear (§8.5).
@@ -849,7 +849,7 @@ The handshake is only as good as the browser's copy of `kM`. Three cases exist t
 | Owner, added by passkey (§5.4) | From the relay, on first use | **First use** (`via: 'passkey'`) |
 | Grantee | From the relay, on first use | **First use** |
 
-**Proposed (D8): first-use pins get encryption at once, with no prompt.**
+**Decided (D8): first-use pins get encryption at once, with no prompt.**
 
 - The first draft, and the as-built note in §6.6a, said a first-use pin must be confirmed with a code on the machine before L2 trusts it. That sends the most convenient path (a phone added with one Face ID) back to the computer, and it gives grantees no path at all.
 - What a relay can do against a first-use pin is narrow. It can answer that browser's **first** connection as the machine, and keep doing so. It then sees what that browser sends to the fake. It can't reach the real machine's sessions or content: the real machine encrypts only to the `eB` the browser signed, and intents made for the fake are refused (§8.5). The user sees a computer with none of their sessions.
@@ -862,7 +862,7 @@ The handshake is only as good as the browser's copy of `kM`. Three cases exist t
 - Later: bind the pin to the passkey itself, with no user step (§8.15).
 - Later: the transparency log of L3 (§12).
 
-**Grantees.** D6 put an owner-signed `kM` fingerprint in the grant. A grantee's browser has no trusted copy of the owner's key to check that signature with, so the fingerprint adds nothing against a relay. Proposed: drop it. A grantee pins on first use and refuses a changed key until they confirm it, as D6 already said.
+**Grantees.** D6 put an owner-signed `kM` fingerprint in the grant. A grantee's browser has no trusted copy of the owner's key to check that signature with, so the fingerprint adds nothing against a relay. It is dropped (D8). A grantee pins on first use and refuses a changed key until they confirm it, as D6 already said.
 
 **Re-pairing** creates a new machine identity (§4.1). Every pin breaks, every browser confirms again, and grants are re-signed. This is L1 behaviour and stays as it is.
 
@@ -1072,7 +1072,6 @@ Each slice is one PR with its own tests, behind capability flags until slice 7.
 Slice 1 doesn't depend on anything else and can merge right away.
 
 **L2 gates.**
-- **Before slice 8:** settle D8–D13 (§13).
 - **Before slice 11 turns it on by default:** the L2 suite of §11 passes on staging with two tenants, and an independent review of slices 8–10 is done, as was done for L1 (#824).
 - **Before the claim in §8.12 is published** (slice 12): the default has been on for a release without a protocol fix.
 
@@ -1141,21 +1140,21 @@ This level targets a malicious operator and targeted key injection.
 
 ## 13. Decisions
 
-D1–D7 were decided 2026-11-08. Each decision is written into the section it changes. D8–D13 are **proposed** in the 2026-11-15 revision of §8 and wait for a decision.
+D1–D7 were decided 2026-11-08. Each decision is written into the section it changes. D8–D13 came with the 2026-11-15 revision of §8 and were decided that day.
 
 | # | Decision | Decided |
 | --- | --- | --- |
 | D1 | Sign reads too, or control frames only? | **Sign everything** except `ping` and `resize` (§2.2). Unsigned reads would let a compromised relay pull files and sessions itself. Codekin frames are chat-sized, so signing each costs under a millisecond |
 | D2 | Step-up when the owner has no passkey enrolled on the machine | **Accept the browser key**, offer passkey enrolment at pairing, add an opt-in workspace setting "Privileged actions need a passkey", and log which kind of step-up each action had (§6.6). Not required by default, because the desktop web view can't use passkeys |
 | D3 | Grant lifetime | **At most 30 days and never past the share's expiry**, re-signed silently while the owner is online. Changed key sets always need the owner. **Grants die when their signing key is revoked** (§6.7) |
-| D4 | Under L2, may the relay see per-message action labels and session ids for audit? | **Yes**, with a per-workspace "Connection-level audit only" opt-out. The label's content tag is an **HMAC under a machine-held key**, not a plain hash, so short content can't be recovered by guessing (§8.9) *D10 proposes to replace the HMAC tag with the intent nonce.* |
+| D4 | Under L2, may the relay see per-message action labels and session ids for audit? | **Yes**, with a per-workspace "Connection-level audit only" opt-out. The label's content tag is an **HMAC under a machine-held key**, not a plain hash, so short content can't be recovered by guessing (§8.9) *Amended by D10: the intent nonce replaces the HMAC tag.* |
 | D5 | Allow passkey certification of new browsers (trusting the passkey provider's sync)? | **Yes**, with user verification required, "added by passkey" shown on the machine and announced to the owner's other devices, and a machine-local "Only allow devices confirmed on this computer" switch (§5.4) |
-| D6 | Grantee machine-key pin | An **owner-signed `kM` fingerprint in the grant**, plus **pin on first use** in the grantee's browser, which refuses a changed key until the grantee confirms it (§8.6) *D8 proposes to drop the fingerprint and keep the first-use pin.* |
+| D6 | Grantee machine-key pin | An **owner-signed `kM` fingerprint in the grant**, plus **pin on first use** in the grantee's browser, which refuses a changed key until the grantee confirms it (§8.6) *Amended by D8: the fingerprint is dropped, the first-use pin stays.* |
 | D7 | Existing machines | **`required` for new pairings and on first enrolment.** The connector reports its policy; a workspace setting "Require confirmed devices" refuses other machines through the version-floor mechanism, with an optional grace period (§6.8) |
-| D8 | Browsers that learned the machine key from the relay (added by passkey, and grantees): confirm on the machine before encrypting? | **Proposed: no.** Encrypt at once with a first-use pin, say so in the detail sheet, offer Verify (§8.6). Amends §6.6a and drops D6's fingerprint in the grant, which a grantee can't check. Alternative: require the code first, which sends passkey-added phones back to the computer and leaves grantees without encryption |
-| D9 | Handshake shape | **Proposed: two messages.** The signed `e2e:init` intent authenticates the browser; the first sealed frame confirms the keys (§8.3). No in-place rekey: the browser reopens its socket after 24 hours (§8.8) |
-| D10 | What the audit label carries | **Proposed: the intent nonce, no content-derived tag.** Removes `kAudit`. The label is authenticated and the machine checks it against the intent (§8.9). Amends D4, whose opt-out stays |
-| D11 | Falling back to clear text | **Proposed: never silently.** A machine moves to `required` after its first encrypted connection and can be lowered only locally; the browser remembers too (§8.7) |
-| D12 | Wire format | **Proposed: sealed payloads in the existing envelope kinds, base64 in JSON.** Bindings use the browser's channel id and the request's `seq`, not ids the hub rewrites (§8.4). Binary frames later |
-| D13 | Defaults | **Proposed: on automatically** wherever all three parts support it, with no user setting. Workspace "Require end-to-end encryption" starts off by default (§8.12) |
+| D8 | Browsers that learned the machine key from the relay (added by passkey, and grantees): confirm on the machine before encrypting? | **No.** Encrypt at once with a first-use pin, say so in the detail sheet, offer Verify (§8.6). Amends §6.6a and drops D6's fingerprint in the grant, which a grantee can't check. Rejected: requiring the code first, which sends passkey-added phones back to the computer and leaves grantees without encryption |
+| D9 | Handshake shape | **Two messages.** The signed `e2e:init` intent authenticates the browser; the first sealed frame confirms the keys (§8.3). No in-place rekey: the browser reopens its socket after 24 hours (§8.8) |
+| D10 | What the audit label carries | **The intent nonce, no content-derived tag.** Removes `kAudit`. The label is authenticated and the machine checks it against the intent (§8.9). Amends D4, whose opt-out stays |
+| D11 | Falling back to clear text | **Never silently.** A machine moves to `required` after its first encrypted connection and can be lowered only locally; the browser remembers too (§8.7) |
+| D12 | Wire format | **Sealed payloads in the existing envelope kinds, base64 in JSON.** Bindings use the browser's channel id and the request's `seq`, not ids the hub rewrites (§8.4). Binary frames later |
+| D13 | Defaults | **On automatically** wherever all three parts support it, with no user setting. Workspace "Require end-to-end encryption" starts off by default (§8.12) |
 
