@@ -244,8 +244,13 @@ function markdownComponents(fontSize: number): Components {
     components = {
       code({ className, children, ...props }) {
         const match = /language-(\w+)/.exec(className || '')
-        const codeString = String(children).replace(/\n$/, '')
-        if (match) {
+        const raw = String(children)
+        const codeString = raw.replace(/\n$/, '')
+        // A fenced block always ends in a newline; inline code never contains
+        // one. Without this, a block with no language tag fell through to the
+        // inline style: a pill per line and no scroller, so long lines ran out
+        // of the chat.
+        if (match || raw.includes('\n')) {
           return (
             <div className="group/codeblock relative">
               <div
@@ -257,7 +262,7 @@ function markdownComponents(fontSize: number): Components {
                   padding: '1em',
                   overflowX: 'auto',
                 }}
-                dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(highlightCode(codeString, match[1])) }}
+                dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(highlightCode(codeString, match?.[1] ?? '')) }}
               />
               <CodeCopyButton code={codeString} />
             </div>
