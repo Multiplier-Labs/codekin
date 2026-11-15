@@ -1,6 +1,6 @@
 # Relay trust: device-signed intents and end-to-end encryption
 
-**Status:** Spec, decisions D1–D16 settled (§13). Built: slice 1 (relay audit events, §7.1), slice 2 (machine identity and trust store), slice 3 (enrolment ceremony, §5.2–5.5), slice 4 (intent signing and verification, §6.1–6.5, §7.2) slice 5 (passkeys: enrolment, `device_certify`, step-up, remote `device_revoke`, §5.4, §5.6, §6.6) slice 6 (signed share grants and grantee intents, §6.7) and slice 7 (enforcement, §6.8): L1 is complete. L2 (slices 8–12) is not built. Revision 3 incorporates the 2026-11-15 spec audit; implementation remains paused until separately authorized.
+**Status:** Spec, decisions D1–D17 settled (§13). Built: slice 1 (relay audit events, §7.1), slice 2 (machine identity and trust store), slice 3 (enrolment ceremony, §5.2–5.5), slice 4 (intent signing and verification, §6.1–6.5, §7.2), slice 5 (passkeys: enrolment, `device_certify`, step-up, remote `device_revoke`, §5.4, §5.6, §6.6), slice 6 (signed share grants and grantee intents, §6.7) and slice 7 (enforcement, §6.8): L1 is complete. L2 (slices 8–12) is not built. Revision 4 incorporates both 2026-11-15 spec audits; implementation remains paused until separately authorized.
 **Date:** 2026-11-08; L2 sections (§8–§11, §13) revised 2026-11-15
 **Context:** §3 records the original pre-L1 trust boundary. Device-signed intents and relay audit events have shipped; **L2 end-to-end content encryption** remains planned. The as-built notes describe current L1 behavior; §8–§11 describe the remaining implementation.
 **Basis:** `origin/main` at v0.10.5 (`a93f6e3`). All `path:line` references point there. The L2 sections are based on `origin/main` at v0.12.1 (`04d5e4b`) and name files without line numbers.
@@ -393,6 +393,7 @@ interface ConnectorHello {
   capabilities: { /* … */ features?: Array<'intents' | 'e2e' | 'credentialClass'> }
   identityKey?: string        // SPKI, §4.1
   intentPolicy?: 'off' | 'warn' | 'required'
+  e2ePolicy?: 'auto' | 'required' | 'off'   // L2, §8.7 (planned)
 }
 ```
 
@@ -546,8 +547,8 @@ Asking for the passkey on every privileged session action got in the way. Owners
   - It is refused when "Only allow devices confirmed on this computer" (`localConfirmationOnly`) is set. That switch is available in Settings, `codekin relay devices passkey-adds on|off`, and `PUT /api/relay/devices/settings`.
   - Only a passkey certifies: a browser key, even one added by passkey, can't.
   - The browser pins `kM` **on first use** (`via: "passkey"` on the pin), because no code was typed. Signed intents don't depend on this pin, since the machine is what checks.
-    - Such a pin doesn't vouch for the machine's clock.
-    - A later code-confirmed enrolment replaces it.
+    - Such a pin doesn't vouch for the machine's clock for version-1 traffic (D17 allows it for version 2, §8.3).
+    - A later code-confirmed enrolment replaces it; under L2, so does fingerprint verification (§8.6).
     - L2 encrypts with such a pin and labels it "Accepted on first use" (§8.6, D8). The first draft asked for the confirmation code first.
 - **`device_revoke`** (the `enrol_revoke` frame) removes one of the signer's own credentials. Machines → "Remove this browser" uses it.
 - **Step-up** (§6.2). Privileged actions are:
@@ -645,7 +646,7 @@ Browser storage uses atomic IndexedDB read/write transactions for key creation, 
 - Only local surfaces can set `policy` back to `off`. A remote `policy` intent may only **raise** it.
 - **The connector reports its policy** in `ConnectorHello` (`intentPolicy: off | warn | required`) and on change. The relay uses it for UI and for a workspace setting, **"Require confirmed devices"**, which refuses machines not in `required` with `connector_update_required` (reason "confirm a device on this computer"), the same way capability floors do. This report comes from the machine's own connector, so a forged one only weakens that owner's own machine.
 - **Grace period.** A relay may give existing workspaces a grace period (for example 30 days) during which "Require confirmed devices" only warns (D7).
-- In `warn` and `off` modes, the hosted UI says plainly, in the machine header, that the relay can control the machine.
+- In `warn` and `off` modes, the hosted UI says plainly that the relay can control the machine (as built: on the machine's row in Settings → Machines, §6.8a).
 
 ### 6.8a As built (slice 7)
 
@@ -720,7 +721,7 @@ The relay's audit is only as honest as the relay. That is fine for team accounta
 
 ## 8. End-to-end content encryption (L2)
 
-**Revision 3 (2026-11-15), not built.** Revision 2 was re-based on `main` at v0.12.1 (`04d5e4b`), after L1 shipped and the app gained the trust token (§5.2b), passkey windows (§6.6b), Canvas, places and webhooks. Revision 3 closes the audit findings against the existing transport and verifier; D14–D16 record the versioning, retry and release-gate changes. The design keeps these decisions from revision 2:
+**Revision 3 (2026-11-15), not built.** Revision 2 was re-based on `main` at v0.12.1 (`04d5e4b`), after L1 shipped and the app gained the trust token (§5.2b), passkey windows (§6.6b), Canvas, places and webhooks. Revision 3 closes the audit findings against the existing transport and verifier; D14–D16 record the versioning, retry and release-gate changes. Revision 4 (same day, final pre-implementation pass) closes gaps found against the browser trust code and the hub: clock correction on first-use pins (D17), the existing "forget the old key" path, grantee pin creation, fingerprint provenance, the workspace encryption requirement, early handshakes on older relays and hub ordering. The design keeps these decisions from revision 2:
 
 - Two handshake messages instead of three (D9).
 - Intents are bound to the encrypted session, so a relay can't unwrap them and replay them in clear (§8.5).
@@ -794,7 +795,7 @@ Both: ikm = ECDH(e_self, e_peer)
   - A replayed `e2e_init` is refused by the nonce store. If one were accepted, it would create a session nobody can use.
   - The machine sends nothing under the new keys until it has opened a valid sealed frame from the browser. That frame is the key confirmation.
   - No separate confirmation round trip is needed; the first normal sealed request confirms the keys. A healthy resumed socket keeps its keys (§8.8).
-- **Clock.** A stale `e2e:init` gets the existing `intent_stale` answer with the machine's signed time (§6.5), and the browser retries once.
+- **Clock (D17).** A stale `e2e:init` gets the existing `intent_stale` answer with the machine's signed time (§6.5), and the browser retries once. Today the browser accepts that time only from a code-confirmed pin (`verifyMachineTime` in `intentSigner.ts` refuses `via: 'passkey'`), which would leave every grantee and every passkey-added browser with a skewed clock unable to connect. For version-2 intents only, the browser accepts the signed time from any pin, including a first-use pin, and keeps that offset separate from the one used for version-1 traffic. This is safe because a version-2 intent is useful only inside the encrypted session it names (§8.5): a relay posing as the machine can shift the clock of a session it already controls, and nothing more. A first-use time never feeds version-1 signing, grant issue times or the clock probe of §6.7a, which keep requiring a verified pin.
 - **Only a browser key signs `e2e:init`.** Passkeys don't, so opening a connection never shows a passkey prompt.
 - **One implementation.** The exchange, key derivation and sealing live in one WebCrypto-only module that the connector (Node ≥ 22.14) and the browser both import, as `intent-actions.ts` is today. Test vectors pin it.
 
@@ -813,6 +814,7 @@ interface Sealed {
 
 - **Cipher.** AES-256-GCM with a 128-bit tag. The 96-bit nonce is four zero bytes and `seq` as a big-endian uint64. Each direction has its own key, so the two directions never share a nonce. On the wire, `seq` must be an integer in `0..2³²−1`; no wrapping or resetting with the same key. Retire the session before the next frame would exceed that range.
 - **Order.** `seq` must be greater than the last one accepted for that `sid` and direction. A gap is allowed: a relay can drop traffic. A repeat or a step back ends the encrypted session. Existing slow-client backpressure still closes the affected channel.
+  - Because REST and stream traffic share one counter per direction, an honest hub must forward each socket's frames in arrival order. It does today: `browser-hub.ts` hands requests to the connector hub without awaiting anything first, stream frames are forwarded synchronously, and replies go out in the order the connector hub receives them. Any later asynchronous gate on this path (a quota lookup, for example) must preserve per-socket order. A hub test sends interleaved sealed requests and stream frames in both directions and asserts arrival order.
   - Both endpoints have one seal/send queue and one open/dispatch queue per encrypted session. Allocate each sequence once, send ciphertext in that order, and advance the receive counter only after authentication. Dispatch may start concurrent REST work; seal replies in completion order, without serializing the REST work itself. Bound queued bytes and discard work belonging to retired sessions.
 - **Additional authenticated data:** `T("ck-e2e-aad-v1", sid, kind, ref, labelBytes)`.
   - `kind` is the envelope kind.
@@ -841,7 +843,7 @@ interface Sealed {
 
 - Keep the existing account-scoped, durable replay store, independent of `sid`. A retry keeps the payload, target, nonce and original signed timestamp; the existing authenticated clock-correction retry may adjust the timestamp within its bounded lifetime. Never convert a version-2 operation to version 1.
 - Retry at most once and within 60 seconds of the original attempt. `intent_replayed` means the operation was consumed, not that it completed successfully. A consumed nonce is not re-executed and does not imply a cached successful response.
-- Reads and reconnect subscriptions can be re-established safely. A queued operation known never to have been sent can be signed for the new session. For a sent mutation with no authenticated outcome, preserve the draft and reconcile observable state; if the outcome remains unknown, show the existing action error with “The connection was lost; check whether this action completed before trying again.” Do not automatically submit it under a fresh nonce.
+- Reads and reconnect subscriptions can be re-established safely. A queued operation known never to have been sent can be signed for the new session. If it was passkey-signed, the new signature needs a fresh assertion, because the `e2e` binding changed: the browser key may re-sign it inside a passkey window that covers the action (§6.6b); otherwise the passkey prompt appears again, and only for an operation the user is still waiting on. For a sent mutation with no authenticated outcome, preserve the draft and reconcile observable state; if the outcome remains unknown, show the existing action error with “The connection was lost; check whether this action completed before trying again.” Do not automatically submit it under a fresh nonce.
 - Connector restart, timeouts, lost replies and forged clear errors follow the same rule. Reopening a stream does not replay its pending prompts, approvals or creation actions. Close old channels and create fresh channel tokens; do not transplant old per-channel intent sequences to a new channel. This preserves at-most-once execution within the replay window; it does not promise exactly-once delivery.
 
 ### 8.5 Binding intents to the encrypted session
@@ -860,13 +862,13 @@ An optional field alone is insufficient. Existing L1 connectors accept version-1
 
 ### 8.6 Which machine key a browser trusts
 
-The handshake is only as good as the browser's copy of `kM`. Three cases exist today:
+The handshake is only as good as the browser's copy of `kM`. There are three cases. The first two exist today; grantees sign without any pin today (§6.7a), so L2 creates theirs:
 
 | Browser | How it learned `kM` | Pin |
 | --- | --- | --- |
 | Owner, confirmed with the pasted command or the codes (§5.2, §5.2b) | A machine-local action authenticated the key: the secret trust token or the completed code ceremony | **Verified** (`via: 'code'`) |
 | Owner, added by passkey (§5.4) | From the relay, on first use | **First use** (`via: 'passkey'`) |
-| Grantee | From the relay, on first use | **First use** |
+| Grantee | From the relay, on first use: the machine's `identityKey` in the machine listing, pinned by the first verified `e2e_accept` | **First use** (new: keyed by the grantee's user id and machine id, like owner pins) |
 
 **Decided (D8): first-use pins get encryption at once, with no prompt.**
 
@@ -875,11 +877,11 @@ The handshake is only as good as the browser's copy of `kM`. Three cases exist t
 - A relay that is honest at first use can never substitute the key later. A changed key is refused (§8.12).
 - The claim stays honest: the detail sheet says "Accepted on first use" and offers **Verify** (§8.12).
 
-**Pin migration and writes.** Current passkey certification permits replacing a `via: 'passkey'` pin; L2 must change that path, not just the handshake. Preserve existing pins (including first-use pins) on upgrade. Pin creation uses an IndexedDB read/write transaction: concurrent first connections must agree on one key or fail with an identity-change error. Every writer—certification, enrolment, step-up hints, verification and credential removal—preserves the encryption-required bit and verification provenance. Removing a browser credential retains the machine's identity/encryption record so later re-enrolment cannot silently downgrade it. Same-key updates never demote a verified pin. A different key is installed only after the explicit authenticated replacement flow below; passkey recertification alone cannot replace it. The encryption-required bit survives a verified replacement.
+**Pin migration and writes.** Current passkey certification permits replacing a `via: 'passkey'` pin; L2 must change that path, not just the handshake. Preserve existing pins (including first-use pins) on upgrade. Pin creation uses an IndexedDB read/write transaction: concurrent first connections must agree on one key or fail with an identity-change error. Every writer—certification, enrolment, step-up hints, verification and credential removal—preserves the encryption-required bit and verification provenance. Removing a browser credential retains the machine's identity/encryption record so later re-enrolment cannot silently downgrade it; `removeFromMachine` in `deviceTrust.ts` currently deletes the pin after a confirmed removal and must instead mark it removed. The trust sheet's **Forget the old key and start again** (`TrustSheet.tsx`), and the enrolment error that tells the user to forget the old key, are removed for any pin that carries the encryption-required bit, and replaced by **Confirm replacement**. Otherwise one click turns a changed key back into a first use that passkey certification could fill with the relay's key. No in-app action deletes that record; only clearing site data does. Same-key updates never demote a verified pin. A different key is installed only after the explicit authenticated replacement flow below; passkey recertification alone cannot replace it. The encryption-required bit survives a verified replacement.
 
 **Upgrading a first-use pin to verified.** Each is optional:
 - Paste the trust command or type the code on the machine (§5.2b). This exists today.
-- Compare the full SHA-256 SPKI fingerprint in the detail sheet with the one `codekin relay devices list` or local Settings shows. Record verification only after the user confirms that independent comparison.
+- Compare the full SHA-256 SPKI fingerprint in the detail sheet with the one `codekin relay devices list` or local Settings shows. As with the enrolment codes (§5.2), the user types rather than clicking "they match": the computer shows (or its owner reads out) a 16-character verification code, the first 80 bits of `SHA-256(T("ck-machine-fpr-v1", SPKI(kM)))` in base32 as four groups, and the browser compares it with its own pin. The fingerprint is static and has no commitment, so it needs those 80 bits to resist a relay grinding keys offline; the 40-bit enrolment code is safe only because of its commitment. A pin verified this way is stored as `via: 'fingerprint'` and counts as verified everywhere `via: 'code'` does (signed removal and policy acknowledgements, clock probes, grant signing). Only `via: 'passkey'` remains first use.
 - Later: bind the pin to the passkey itself, with no user step (§8.15).
 - Later: the transparency log of L3 (§12).
 
@@ -902,6 +904,8 @@ Without this, a relay could strip the `e2e` capability from what it tells each s
 - **Browser.** After verifying the handshake, atomically persist the machine pin and its encryption-required bit before sending content. Until then, hold outgoing content. A storage failure refuses this attempt with an actionable storage error, not a cleartext fallback. Every tab rechecks the committed pin before its first content send and reacts to pin changes; a changed pin ends affected sessions. A remembered requirement overrides relay capability hints and machine-list metadata.
 - **Exceptions.** The cleartext barrier covers content requests, responses and streams. Enrolment, signed clock/policy operations, heartbeat and the narrowly scoped HMAC-authenticated GitHub webhook route remain available under their existing checks. They must not become a general cleartext proxy.
 - **Relay capability.** The hub says in `hello_ack` whether it carries sealed payloads (an older self-hosted relay closes the socket on unknown frames). A connector in `auto` under such a relay stays in clear and says so. A connector in `required` refuses traffic, and the UI names the fix (§8.12).
+  - A browser that remembers the requirement sends `e2e_init` without waiting for `hello_ack` (§8.8). An older hub processes `hello` first, answers `hello_ack` without the sealed-carriage flag, then rejects `e2e_init` in `parseHubEnvelope` and closes with 1008 "invalid relay frame". The browser treats a `hello_ack` lacking the flag as the relay-version failure of §8.12 (stop automatic retries, show the relay message) and attributes the close that follows to it, rather than entering the transient-reconnect backoff.
+- **Policy report.** The connector reports its L2 mode (`e2ePolicy: 'auto' | 'required' | 'off'`) in `ConnectorHello` and in an `e2e_policy` frame within 5 seconds of a change, sent only to a hub whose `hello_ack` advertises sealed carriage, as `intent_policy` does (§6.8a). Like that report it comes from the machine's own connector and feeds UI and the workspace requirement in §8.12; neither endpoint trusts it.
 - **What remains.** A relay can hold a machine in clear until its first encrypted connection. The lock is absent for that time, so the UI never claims more than is true.
 - **Needs L1 enforcement.** Encryption applies to an owner key the machine trusts or a grantee key in a verified grant, with L1 policy `required` (§8.3). Existing `off`/`warn` machines retain the existing confirmation/raise-policy flow and warning. New pairings confirm a browser as part of pairing (§5.3), so they encrypt from the first connection.
 
@@ -1011,7 +1015,10 @@ No banner, badge or nag for the second state, unless the workspace requires encr
 A transient handshake failure uses the connection's existing backoff and reconnect state. Identity, storage and version failures stop automatic retries until their prerequisite changes. Do not reopen or re-enrol a healthy connection just to show the lock.
 
 **Settings.**
-- Workspace → Security: **"Require end-to-end encryption"**. Machines that can't are refused, through the same mechanism as "Require confirmed devices" (§6.8), with the same optional grace period. Off by default at first; on by default for new workspaces once most connectors have updated.
+- Workspace → Security: **"Require end-to-end encryption"**, through the same mechanism as "Require confirmed devices" (§6.8a), with the same optional grace period. Off by default at first; on by default for new workspaces once most connectors have updated.
+  - A machine passes only if its connector has the `e2e` capability at or above the floor, reports L1 `required`, and reports `e2ePolicy` other than `off`. Others get `e2e_unavailable` with the unmet prerequisite named, as in the Not encrypted row above.
+  - For passing machines the hub also refuses clear content envelopes (`request`, `stream_open` and `stream_data` without `sid`) from that workspace's browsers, owners and grantees alike, so a cached old page or a downgraded browser is refused even while the machine is still in `auto`. Enrolment and the other §8.7 exceptions pass.
+  - It is an honest-relay control, like "Require confirmed devices": it stops mistakes and old clients, not a malicious relay. The machine's own `required` mode (§8.7) is the boundary.
 - Workspace → Security: **"Connection-level audit only"** (§8.9).
 - Local Settings → Remote access: one row showing the machine's state (`auto`, `required`, `off`).
 
@@ -1112,9 +1119,9 @@ Slices 1–7 describe completed L1 work. Each L2 slice is a documentation-planne
 | 6 | **Signed grants + grantee intents** | `grant` / `grant_revoke`; `signedGrants` in principal; intersection on the connector; grants dropped when their signing key is revoked; share-dialog device list; "new device" re-sign prompt; silent renewal capped by share expiry |
 | 7 | **Enforce** | `required` for new pairings and on first enrolment; `intentPolicy` in `ConnectorHello`; "Require confirmed devices" workspace setting with optional grace; migration prompts; minimum connector version per capability; forged-principal negative suite on staging (§11) |
 | 8 | **Protocol, crypto core, relay carriage** | Shared WebCrypto module and exact encodings/vectors (§8.3–8.4); handshake, sealed and label schemas; signed intent version 2 and unconditional binding checks (§8.5); legacy-verifier negative fixture. Hub carriage parses envelopes, never ciphertext. Nothing uses it yet |
-| 9 | **Handshake + sealed streams** | Strict session identity/authorization; connector session table; ordered queues at both ends; atomic pin migration across every writer; first-use/grantee pins; healthy-resume preservation; recovery without replaying pending mutations. Flagged staging use only. Measure §8.13 |
+| 9 | **Handshake + sealed streams** | Strict session identity/authorization; connector session table; ordered queues at both ends; atomic pin migration across every writer, with the forget-key action and pin deletion on removal replaced (§8.6); first-use/grantee pins and fingerprint verification; version-2 clock correction from any pin (D17); healthy-resume preservation; recovery without replaying pending mutations. Flagged staging use only. Measure §8.13 |
 | 10 | **Sealed REST** | Requests/responses and uploads; response binding, bounded queues and headers; nonce-preserving retries and unknown-outcome reconciliation; revocation during pending REST. Same flag |
-| 11 | **Enforcement, audit + recovery UX** | Canonical audit labels, creation receipts, coalescing-aware `audit verify --against`; all four hub content paths adapted; durable `e2e` policy and teardown of clear traffic; signed raise-only policy operation; revocation; capability floor. Lock/detail sheet in Settings → Machines, owner/grantee Verify, actionable failures, local CLI/settings and workspace controls. Flag stays on; no default enablement |
+| 11 | **Enforcement, audit + recovery UX** | Canonical audit labels, creation receipts, coalescing-aware `audit verify --against`; all four hub content paths adapted; durable `e2e` policy and teardown of clear traffic; signed raise-only policy operation; `e2ePolicy` report and the workspace requirement's clear-envelope refusal; older-relay detection for early handshakes; revocation; capability floor. Lock/detail sheet in Settings → Machines, owner/grantee Verify, actionable failures, local CLI/settings and workspace controls. Flag stays on; no default enablement |
 | 12 | **Default rollout + claims** | Enable automatically only after the pre-default gate below, with compatibility handling already deployed. Remove the flag, re-base byte quotas, publish operational recovery docs. Publish security claims only after the post-default release gate; implementation and claims need not ship in the same release |
 
 Slices 8–11 can merge independently behind the flag; public claims must continue to describe the released behavior.
@@ -1168,9 +1175,10 @@ Normal users see no L2 behavior change until slice 12; flagged staging users exe
   - unsigned, replayed or wrong-machine policy-raise acknowledgements
   - more encrypted sessions than the limits allow
 - **Retries.** Execute a mutation, withhold its response, and inject `e2e_unknown`, `e2e_failed`, timeout and step-up errors. It must execute at most once across fresh handshakes, signer changes and connector restart. Cover same-nonce replay refusal, expired retry windows, unsent operations and unresolved outcomes. No reconnect replays a prompt, approval or create action as a new operation.
-- **Pins.** Concurrent first-use connections with different keys; passkey recertification attempting replacement; same-key writes preserving verification and the required bit; storage failure before first content; another tab updating a pin; authenticated owner/grantee replacement. No reset-by-re-enrolment or silent fallback.
+- **Clock.** A first-use pin's signed time corrects a stale `e2e:init` and version-2 traffic, and never version-1 signing, grant issue times or the clock probe; an unsigned or wrong-key time is ignored.
+- **Pins.** Concurrent first-use connections with different keys; passkey recertification attempting replacement; the forget-key action unavailable on a pin with the encryption-required bit, and remote removal retaining the record; a wrong or partial verification code refused, and `via: 'fingerprint'` accepted where `via: 'code'` is; same-key writes preserving verification and the required bit; storage failure before first content; another tab updating a pin; authenticated owner/grantee replacement. No reset-by-re-enrolment or silent fallback.
 - **Audit.** Fixed canonical encodings; reordered envelope properties; invalid/missing/extraneous labels; false `detail`; conflicting mode hints; stream creation markers versus real ids across two channels; failed creation; missing receipts; coalescing, retries, retention and disabled labels producing honest comparison coverage.
-- **Hub.** No ciphertext decoding/parsing; valid sealed streams pass with malformed-content abuse rules enabled, including disconnect actions. Malformed envelopes and byte/rate limits still work.
+- **Hub.** No ciphertext decoding/parsing; per-socket arrival order preserved for interleaved sealed requests, replies and stream frames; with "Require end-to-end encryption", clear content envelopes refused for owners and grantees while enrolment passes; an older hub's `hello_ack` plus 1008 close classified as a relay-version failure without a reconnect loop; valid sealed streams pass with malformed-content abuse rules enabled, including disconnect actions. Malformed envelopes and byte/rate limits still work.
 - **Lifecycle.** Connector restart mid-session, reconnect, healthy and dead phone resume, two tabs, queued crypto completing after retirement, revocation while streaming or awaiting REST, 24-hour refresh during a mutation, sequence exhaustion and boundary-sized uploads.
 - **Budget.** Connect time and bytes on the wire against §8.13, recorded in the slice 9 PR.
 - **Compatibility.** Every row of §9 with and without a remembered browser requirement; local L1/L2 overrides; cached pre-L2 pages; relay rollback; local lowering with the browser pin retained. Confirm the error gives a usable recovery action without bypassing encryption.
@@ -1196,7 +1204,7 @@ This level targets a malicious operator and targeted key injection.
 
 ## 13. Decisions
 
-D1–D7 were decided 2026-11-08. Each decision is written into the section it changes. D8–D13 came with revision 2 on 2026-11-15. D14–D16 and the implementation clarifications in revision 3 were accepted following the same day's spec audit. No decision authorizes implementation yet.
+D1–D7 were decided 2026-11-08. Each decision is written into the section it changes. D8–D13 came with revision 2 on 2026-11-15. D14–D16 and the implementation clarifications in revision 3 were accepted following the same day's spec audit; D17 and the revision 4 clarifications followed the final pre-implementation pass. No decision authorizes implementation yet.
 
 | # | Decision | Decided |
 | --- | --- | --- |
@@ -1216,3 +1224,4 @@ D1–D7 were decided 2026-11-08. Each decision is written into the section it ch
 | D14 | Can an optional version-1 `e2e` field stop unwrapping to legacy connectors? | **No. Use signed intent version 2** for L2 handshake/content, with mandatory session binding for content and strict rejection outside that session. Old L1 `required` verifiers reject the version; relay capability claims are not security evidence (§8.5) |
 | D15 | Retry mutations after an encrypted connection fails? | **Never as a fresh operation automatically.** Preserve the operation nonce and bounded retry lifetime across handshakes. Reconcile unknown outcomes, preserve drafts, and do not equate replay refusal with success (§8.4) |
 | D16 | Enable encryption before recovery UX and review of enforcement? | **No.** Slice 11 completes enforcement, audit and UX behind the flag. Slice 12 enables the default after integrated review/testing of slices 8–11. Claims wait a further release without a protocol fix (§10) |
+| D17 | May a first-use pin's signed machine time correct the browser's clock? | **Yes, for version-2 intents only** (§8.3). A version-2 intent is useless outside its encrypted session, so a relay posing as the machine gains nothing it doesn't already have. Without it, grantees and passkey-added browsers with a skewed clock can't connect at all. Version-1 signing, grant issue times and the clock probe keep requiring a verified pin (amends §6.6a) |
