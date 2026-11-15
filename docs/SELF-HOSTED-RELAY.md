@@ -5,12 +5,13 @@ your own on any server you control, so your team reaches its computers through y
 under your GitHub sign-in, with your data in your database. Nothing in the web app or the
 connector is tied to codekin.ai.
 
-An instance is three pieces:
+An instance is four pieces:
 
 | Piece | What it is | Where it runs |
 |---|---|---|
 | Relay / control plane | `server/dist/relay/relay-server.js`: GitHub sign-in, workspaces, invitations, 2FA, and the WebSocket hub between browsers and computers | your server, `127.0.0.1:32360`, behind a reverse proxy |
 | Web app | the static bundle from `npm run build:hosted` | your server, served by the reverse proxy |
+| Canvas sandbox page | the static page in `dist/sandbox`, on a **second hostname**. Canvas charts, HTML items and MCP Apps run there, never on the web app's origin | your server, served by the reverse proxy |
 | Connector | outbound WebSocket from each developer computer to your relay | each computer; installed and paired from your web app |
 
 Computers only ever connect **outbound** to your relay, so they need no open ports.
@@ -18,7 +19,11 @@ Computers only ever connect **outbound** to your relay, so they need no open por
 ## 1. Prerequisites
 
 - A Linux server with Node.js 22.14+ (24 LTS recommended) and a domain name for the web app, e.g. `codekin.example.com`.
-- TLS for that domain. Use HTTPS in production: session cookies are only marked `Secure` when
+- A second hostname for the Canvas sandbox page, e.g. `sandbox.example.net`
+  ([Canvas](#canvas-the-sandbox-page)). Prefer a different registrable domain from the web app's,
+  so browsers don't treat the two as the same site. A subdomain of the app's domain works, but is
+  weaker isolation.
+- TLS for both hostnames. Use HTTPS in production: session cookies are only marked `Secure` when
   `PUBLIC_URL` is `https://`, and passkeys require a secure origin.
 - A reverse proxy that handles WebSocket upgrades. The nginx example below is the configuration
   app.codekin.ai runs.
@@ -45,12 +50,18 @@ relay and connectors are in step:
 git clone https://github.com/Multiplier-Labs/codekin.git && cd codekin
 git checkout v0.9.0                      # or the latest release tag
 npm ci && (cd server && npm ci)
-npm run build:hosted                     # web app → dist-hosted/
+VITE_CANVAS_SANDBOX_ORIGIN=https://sandbox.example.net \
+  npm run build:hosted                   # web app → dist-hosted/, sandbox page → dist/sandbox/
 (cd server && npm run build)             # relay → server/dist/relay/
 ```
 
 On a machine that exports `NODE_ENV=production`, install with `NODE_ENV=development npm ci
 --include=dev`. The builds need dev dependencies.
+
+`VITE_CANVAS_SANDBOX_ORIGIN` is baked into the web app at build time, so pass it on every
+`build:hosted`. Set it on the command, not in a `.env` file: a `.env` value also ends up in the
+local `npm run build`, whose sandbox would then be one that only allows your web app to frame it.
+Built without it, the web app shows Canvas charts and HTML items as source, with a note.
 
 ## 4. Configure the relay
 
@@ -99,13 +110,26 @@ pm2 start server/dist/relay/relay-server.js --name codekin-relay
 pm2 save
 ```
 
-Copy the web app to the web root (`rsync -a --delete dist-hosted/ /var/www/codekin-app/`).
-Install the security-header snippet, replacing `YOUR_DOMAIN` with your relay's domain:
+Copy the web app and the sandbox page to their web roots:
+
+```bash
+rsync -a --delete dist-hosted/ /var/www/codekin-app/
+rsync -a --delete dist/sandbox/ /var/www/codekin-sandbox/
+```
+
+Install the two header snippets. `YOUR_DOMAIN` is the web app's hostname, and `SANDBOX_DOMAIN`
+is the sandbox's:
 
 ```bash
 sudo cp nginx/snippets/codekin-security-headers.conf.example /etc/nginx/snippets/codekin-security-headers.conf
-sudo sed -i 's/YOUR_DOMAIN/codekin.example.com/' /etc/nginx/snippets/codekin-security-headers.conf
+sudo sed -i 's/YOUR_DOMAIN/codekin.example.com/; s/SANDBOX_DOMAIN/sandbox.example.net/' /etc/nginx/snippets/codekin-security-headers.conf
+sudo cp nginx/snippets/codekin-sandbox-headers.conf.example /etc/nginx/snippets/codekin-sandbox-headers.conf
+sudo sed -i 's/YOUR_DOMAIN/codekin.example.com/' /etc/nginx/snippets/codekin-sandbox-headers.conf
 ```
+
+The first sets the web app's policy, whose `frame-src` admits only the sandbox. The second sets
+the sandbox page's, whose `frame-ancestors` admits only your web app and whose `connect-src
+'none'` keeps everything rendered there off the network.
 
 Then serve both behind the reverse proxy (also in `nginx/relay.example`):
 
@@ -155,19 +179,56 @@ server {
 }
 ```
 
+Serve the sandbox page from its own `server` block. `nginx/sandbox.example` is a complete one:
+static files only, no API, no cookies, and nothing proxied to the relay.
+
+```bash
+sudo cp nginx/sandbox.example /etc/nginx/sites-available/codekin-sandbox
+sudo sed -i 's/SANDBOX_DOMAIN/sandbox.example.net/g; s/YOUR_DOMAIN/codekin.example.com/g' /etc/nginx/sites-available/codekin-sandbox
+sudo ln -s /etc/nginx/sites-available/codekin-sandbox /etc/nginx/sites-enabled/
+sudo nginx -t && sudo systemctl reload nginx
+```
+
 The relay trusts exactly **one** proxy hop for client addresses (used for rate limits and the
 audit log). If another proxy or CDN sits in front of nginx, adjust `trust proxy` in
 `relay-server.ts`.
 
-Check it: `curl https://codekin.example.com/api/health/ready` should return `{"ok":true}`, and
-`curl -sI https://codekin.example.com/` should list `content-security-policy` and
-`strict-transport-security`.
+Check it:
+
+- `curl https://codekin.example.com/api/health/ready` returns `{"ok":true}`.
+- `curl -sI https://codekin.example.com/` lists `content-security-policy` (with
+  `frame-src https://sandbox.example.net`) and `strict-transport-security`.
+- `curl -sI https://sandbox.example.net/` lists a `content-security-policy` with
+  `frame-ancestors https://codekin.example.com`.
 
 The snippet has to be included in **every** location that serves the web app. nginx drops
 server-level `add_header` directives in any location that sets its own (both set `Cache-Control`).
 It sets a strict Content Security Policy, HSTS (so serve the relay over HTTPS only), and
 anti-framing headers. Images in agent output are limited to `data:` URLs and GitHub avatars, so
 viewing a transcript never makes the browser contact other hosts.
+
+### Canvas: the sandbox page
+
+Canvas shows rich output beside a session's chat ([CANVAS-SPEC.md](CANVAS-SPEC.md)). Through
+your relay:
+
+| Item | Needs |
+|---|---|
+| Documents, tables, diagrams, images | Nothing extra. They render in the web app itself, through its sanitizers |
+| Charts, HTML pages, MCP Apps | The sandbox page above. They run code an agent or tool wrote, so they render only on its separate origin, where they can reach nothing: not the web app's credentials, not the network. Without a sandbox, the web app shows charts and HTML as source, and MCP Apps as their text result |
+| Live previews of dev servers | Not available. The dev server and Codekin's preview proxy are on the developer's computer, which the browser can't reach through the relay. Canvas offers a **snapshot** instead |
+| Preview snapshots | Chrome, Chromium or Edge on each **developer computer** (not the relay server). See below |
+
+**Snapshots.** A snapshot loads the preview's page in a headless browser on the developer's
+computer and sends the screenshot and its console errors back as an image item. Codekin finds
+Chrome, Chromium or Edge on `PATH` or in `/Applications`, or a browser Playwright installed. Set
+`CANVAS_SNAPSHOT_BROWSER` on that computer to name one, or `off` to disable snapshots. On Linux
+hosts where Chrome's sandbox can't start (Ubuntu 23.10 and later, unless the browser ships an
+AppArmor profile), snapshots run without it and the page can then load only from that
+computer. Each snapshot says so.
+
+None of this changes the relay or the connector: they carry Canvas items like any other session
+traffic. Only the session's owner can open previews or see snapshots; people a session is shared with can't.
 
 ## 6. First sign-in and inviting people
 
