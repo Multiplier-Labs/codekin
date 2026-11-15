@@ -14,6 +14,7 @@ import { DiagramView } from './DiagramView'
 import { TableView } from './TableView'
 import { SandboxFrame } from './SandboxFrame'
 import { PreviewView } from './PreviewView'
+import { SnapshotView } from './SnapshotView'
 
 // ext-apps and the MCP protocol code load only when an MCP App is shown.
 const McpAppView = lazy(() => import('./McpAppView'))
@@ -68,6 +69,9 @@ export function CanvasItemView({ view, onAttach, onOpenFile, toc, sandboxOrigin,
   }
   if (item.kind === 'markdown') return <MarkdownItem content={content.content} toc={!!toc} />
   if (item.kind === 'image') {
+    if (content.meta?.snapshot) {
+      return <SnapshotView item={item} revision={view.revision} src={`data:${content.mediaType};base64,${content.content}`} meta={content.meta.snapshot} onAttach={onAttach} />
+    }
     return (
       <div className="flex flex-1 items-start justify-center p-8">
         <img

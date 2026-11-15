@@ -43,6 +43,7 @@ export function sourceLabel(item: CanvasItem): string {
     case 'file': return 'You'
     case 'mcp': return item.source.server
     case 'launch': return 'You'
+    case 'snapshot': return 'You'
   }
 }
 

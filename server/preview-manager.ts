@@ -24,7 +24,8 @@ import { CanvasError } from './canvas-store.js'
 import { buildHarnessEnv } from './harness-env.js'
 import { launchDigest, publicConfig, readLaunchConfigs, type ResolvedLaunchConfig } from './preview-config.js'
 import { createPreviewProxy, PREVIEW_ENTRY_PATH } from './preview-proxy.js'
-import type { CanvasItem, CanvasItemSource, PreviewState, PreviewStatus, PreviewTarget, Session, WsServerMessage } from './types.js'
+import { findSnapshotBrowser, SnapshotError, takeSnapshot } from './preview-snapshot.js'
+import type { CanvasItem, CanvasItemSource, PreviewState, PreviewStatus, PreviewTarget, Session, SnapshotMeta, SnapshotViewport, WsServerMessage } from './types.js'
 
 export interface PreviewSettings {
   /** Ports Codekin may run preview proxies on; empty turns previews off. */
@@ -140,7 +141,23 @@ export interface PreviewManagerDeps {
   target: (sessionId: string, itemId: string) => Promise<PreviewTarget | null>
   /** Create or revise the preview item for a port or launch configuration. */
   publish: (sessionId: string, input: { port: number; path?: string }, source: CanvasItemSource) => Promise<CanvasItem>
+  /** Keep a snapshot of a preview as an image item (revising that preview's snapshot item). */
+  publishSnapshot?: (sessionId: string, previewItemId: string, image: { content: Buffer; mediaType: string }, meta: SnapshotMeta) => Promise<CanvasItem>
+  /** Finding and running the snapshot browser (replaced in tests). */
+  snapshotBrowser?: () => string | null
+  takeSnapshot?: typeof takeSnapshot
 }
+
+/** Viewport sizes for snapshots, in CSS pixels. */
+export const SNAPSHOT_VIEWPORTS: Record<SnapshotViewport, { width: number; height: number; mobile?: boolean }> = {
+  full: { width: 1280, height: 800 },
+  tablet: { width: 820, height: 1180 },
+  phone: { width: 390, height: 844, mobile: true },
+}
+/** Snapshot browsers running at once, across sessions. */
+const MAX_SNAPSHOT_BROWSERS = 2
+/** How long the found (or missing) snapshot browser is remembered. */
+const BROWSER_CHECK_MS = 60_000
 
 /** A failure whose message is meant for the user (or the agent). */
 export class PreviewError extends Error {}
@@ -163,7 +180,64 @@ export class PreviewManager {
     return run
   }
 
+  /** Sessions with a snapshot being taken (one at a time per session). */
+  private snapshotting = new Set<string>()
+  private browsersRunning = 0
+  private browserCheck: { path: string | null; at: number } | null = null
+
   constructor(private readonly deps: PreviewManagerDeps) {}
+
+  /** The browser snapshots run in, or null when this machine has none. */
+  snapshotBrowser(): string | null {
+    const now = Date.now()
+    if (!this.browserCheck || now - this.browserCheck.at > BROWSER_CHECK_MS) {
+      this.browserCheck = { path: (this.deps.snapshotBrowser ?? findSnapshotBrowser)(), at: now }
+    }
+    return this.browserCheck.path
+  }
+
+  /**
+   * Load a preview's page in a headless browser on this machine and keep a
+   * screenshot, with the console errors seen while it loaded, as an image
+   * item. Works wherever Canvas does, including through a relay.
+   */
+  async snapshot(sessionId: string, itemId: string, opts: { path?: unknown; viewport?: unknown } = {}): Promise<{ snapshotItemId: string } | { error: string }> {
+    if (!this.deps.publishSnapshot) return { error: 'Snapshots are not available.' }
+    const browser = this.snapshotBrowser()
+    if (!browser) {
+      return { error: process.env.CANVAS_SNAPSHOT_BROWSER?.trim() === 'off'
+        ? 'Snapshots are turned off on this Codekin (CANVAS_SNAPSHOT_BROWSER=off).'
+        : 'Snapshots need Chrome or Chromium on the computer Codekin runs on. Install one, or set CANVAS_SNAPSHOT_BROWSER to its path.' }
+    }
+    if (this.snapshotting.has(sessionId)) return { error: 'A snapshot is already being taken in this session.' }
+    if (this.browsersRunning >= MAX_SNAPSHOT_BROWSERS) return { error: 'Codekin is busy taking other snapshots. Try again in a moment.' }
+    const viewport: SnapshotViewport = typeof opts.viewport === 'string' && opts.viewport in SNAPSHOT_VIEWPORTS ? opts.viewport as SnapshotViewport : 'full'
+    this.snapshotting.add(sessionId)
+    this.browsersRunning++
+    try {
+      const target = await this.deps.target(sessionId, itemId)
+      if (!target) return { error: 'That item is not a preview.' }
+      const port = this.entries.get(key(sessionId, itemId))?.targetPort ?? target.port
+      const denied = this.checkTarget(port)
+      if (denied) return { error: denied }
+      const raw = opts.path
+      const path = typeof raw === 'string' && raw.startsWith('/') && !raw.startsWith('//') && raw.length <= 2000 && !/[\s\\]/.test(raw) ? raw : target.path
+      if (!await probePort(port)) return { error: `Nothing is listening on port ${port}. Start the dev server, then take the snapshot again.` }
+      const shot = await (this.deps.takeSnapshot ?? takeSnapshot)(browser, { port, path, ...SNAPSHOT_VIEWPORTS[viewport] })
+      const item = await this.deps.publishSnapshot(sessionId, itemId, { content: shot.image, mediaType: shot.mediaType }, {
+        path: shot.finalPath, title: shot.title, port, viewport, console: shot.console,
+        ...(shot.restricted ? { restricted: true as const } : {}),
+        ...(shot.blocked ? { blocked: shot.blocked } : {}),
+      })
+      return { snapshotItemId: item.id }
+    } catch (err) {
+      if (err instanceof SnapshotError) return { error: err.message }
+      return { error: this.message(err) }
+    } finally {
+      this.snapshotting.delete(sessionId)
+      this.browsersRunning--
+    }
+  }
 
   configure(settings: PreviewSettings): void {
     this.settings = settings
@@ -374,6 +448,7 @@ export class PreviewManager {
       ...(e.exitCode !== undefined ? { exitCode: e.exitCode } : {}),
       ...(e.error ? { error: e.error } : {}),
       ...(e.notice ? { notice: e.notice } : {}),
+      snapshots: this.snapshotBrowser() !== null,
     }
   }
 

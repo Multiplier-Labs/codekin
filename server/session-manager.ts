@@ -202,6 +202,7 @@ export class SessionManager {
       broadcast: (session, msg) => this.broadcast(session, msg),
       target: (sessionId, itemId) => this.canvas.previewTarget(sessionId, itemId),
       publish: (sessionId, input, source) => this.canvas.publishPreview(sessionId, input, source),
+      publishSnapshot: (sessionId, previewItemId, image, meta) => this.canvas.publishSnapshot(sessionId, previewItemId, image, meta),
     })
     this.appToolCalls = new AppToolCalls({
       appServer: (sessionId, itemId) => this.canvas.mcpAppServer(sessionId, itemId),

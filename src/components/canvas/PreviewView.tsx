@@ -6,11 +6,15 @@
  * element picker and the console; servers Codekin started also have their
  * output and Stop/Restart. When the server isn't answering, the frame is
  * replaced by its status, so a stopped server never shows a stale page.
+ *
+ * Snapshot loads the page in a headless browser on the machine and opens
+ * the screenshot as an image item. That is how the hosted web app (which
+ * can't reach the preview proxy) shows a preview at all.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  IconAlertTriangle, IconArrowLeft, IconArrowRight, IconClick, IconDeviceDesktop, IconDeviceMobile, IconDeviceTablet,
+  IconAlertTriangle, IconArrowLeft, IconArrowRight, IconCamera, IconClick, IconDeviceDesktop, IconDeviceMobile, IconDeviceTablet,
   IconExternalLink, IconInfoCircle, IconLoader2, IconPlayerPlay, IconPlayerStop, IconRefresh, IconRotateClockwise, IconSend, IconTerminal2, IconX,
 } from '@tabler/icons-react'
 import type { PreviewApi } from '../../hooks/useCanvas'
@@ -184,7 +188,15 @@ export function PreviewView({ item, content, preview, onAttach, isMobile }: Prop
   const shownPath = pathDraft ?? current?.path ?? loadPath
   const logs = preview.logs(item.id)
   const width = VIEWPORTS[viewport]
-  const note = state?.notice
+  const snap = preview.snapshotStatus(item.id)
+  const canSnapshot = running && !!state?.snapshots && !snap.busy
+  const takeSnapshot = () => { preview.snapshot(item.id, current?.path ?? loadPath, isMobile ? 'phone' : viewport) }
+  const snapshotTitle = !state?.snapshots
+    ? 'Snapshots need Chrome or Chromium on the computer Codekin runs on'
+    : !running ? 'Snapshots need the dev server to be running'
+    : `Load this page in a browser on the computer Codekin runs on, and keep a screenshot (${isMobile ? 'phone' : viewport} size)`
+  const note = snap.error
+    || state?.notice
     || (running ? state.error : undefined)
     || (showFrame && loadedUnconnected
       ? 'This page didn\'t connect to Codekin (it may block added scripts), so the picker, console and back/forward are off. If it stays blank, this browser may not reach the preview port.'
@@ -225,6 +237,10 @@ export function PreviewView({ item, content, preview, onAttach, isMobile }: Prop
           title={connected ? 'Pick an element to point the agent at (Esc cancels)' : 'The picker needs the page to be connected'}
           className={`flex h-8 shrink-0 items-center gap-1.5 rounded-control px-2 text-meta disabled:opacity-40 ${picking ? 'bg-primary-fill text-on-primary-fill' : 'text-ink hover:bg-surface-raised'}`}>
           <IconClick size={16} /> {picking ? 'Picking…' : 'Pick'}
+        </button>
+        <button type="button" onClick={takeSnapshot} disabled={!canSnapshot} title={snapshotTitle} aria-label="Take a snapshot"
+          className="flex h-8 shrink-0 items-center gap-1.5 rounded-control px-2 text-meta text-ink hover:bg-surface-raised disabled:opacity-40 disabled:hover:bg-transparent">
+          {snap.busy ? <IconLoader2 size={16} className="animate-spin" aria-hidden /> : <IconCamera size={16} aria-hidden />} {snap.busy ? 'Taking…' : 'Snapshot'}
         </button>
         <button type="button" onClick={() => { setDrawer(d => (d === 'console' ? null : 'console')) }} aria-pressed={drawer === 'console'}
           title="Console" aria-label={`Console: ${errors} errors, ${warnings} warnings`}
@@ -285,7 +301,9 @@ export function PreviewView({ item, content, preview, onAttach, isMobile }: Prop
             logs={logs}
             onStart={config && !state?.managed && startable ? start : undefined}
             launchConfig={launchConfig}
-            onOpenTab={origin && state?.entry ? openInTab : undefined}
+            onOpenTab={origin && state?.entry && !HOSTED ? openInTab : undefined}
+            onSnapshot={canSnapshot ? takeSnapshot : undefined}
+            snapshotBusy={snap.busy}
           />
         )}
       </div>
@@ -338,7 +356,7 @@ function StatusPill({ state }: { state: PreviewState | undefined }) {
   )
 }
 
-function PreviewStatus({ state, target, mixed, logs, onStart, onOpenTab, launchConfig }: {
+function PreviewStatus({ state, target, mixed, logs, onStart, onOpenTab, onSnapshot, snapshotBusy, launchConfig }: {
   launchConfig?: PreviewLaunchConfig
   state: PreviewState | undefined
   target: PreviewTarget
@@ -346,14 +364,18 @@ function PreviewStatus({ state, target, mixed, logs, onStart, onOpenTab, launchC
   logs: string[]
   onStart?: () => void
   onOpenTab?: () => void
+  onSnapshot?: () => void
+  snapshotBusy?: boolean
 }) {
   const port = state?.targetPort ?? target.port
   const tail = logs.slice(-8)
   let title: string
   let body: string
-  if (HOSTED) {
-    title = 'Previews open on the computer running Codekin'
-    body = `The dev server (localhost:${port}) runs on that computer, and the hosted web app can't reach it. Open Codekin on that computer, or in the desktop app, to see it here.`
+  if (HOSTED && state?.status === 'running') {
+    title = 'Live previews show on the computer running Codekin'
+    body = state.snapshots
+      ? `The hosted web app can't reach localhost:${port} on that computer. Take a snapshot to see the page here: Codekin loads it in a browser there.`
+      : `The hosted web app can't reach localhost:${port} on that computer. Snapshots would show it here, but they need Chrome or Chromium installed there.`
   } else if (!state) {
     title = 'Connecting…'
     body = ''
@@ -378,18 +400,23 @@ function PreviewStatus({ state, target, mixed, logs, onStart, onOpenTab, launchC
   return (
     <div className="m-auto w-full max-w-[560px] px-8 py-10">
       <div className="flex items-center gap-2 text-title font-bold text-ink">
-        {(!state || state.status === 'starting') && !HOSTED && <IconLoader2 size={20} className="animate-spin text-warning-5" aria-hidden />}
+        {(!state || state.status === 'starting') && <IconLoader2 size={20} className="animate-spin text-warning-5" aria-hidden />}
         {title}
       </div>
       {body && <p className="mt-1 text-body text-ink-muted">{body}</p>}
-      {onStart && launchConfig && !HOSTED && state?.status !== 'starting' && (
+      {onStart && launchConfig && state?.status !== 'starting' && (
         <div className="mt-4 rounded-control border border-edge bg-surface px-3 py-2">
           <div className="mb-1 text-micro font-bold uppercase tracking-wide text-ink-muted">Start runs</div>
           <LaunchCommand config={launchConfig} />
         </div>
       )}
-      {(onStart || (onOpenTab && mixed)) && !HOSTED && (
+      {(onStart || (onOpenTab && mixed) || onSnapshot || snapshotBusy) && (
         <div className="mt-4 flex gap-2">
+          {(onSnapshot || snapshotBusy) && (
+            <button type="button" onClick={onSnapshot} disabled={!onSnapshot} className="flex items-center gap-1.5 rounded-control bg-primary-fill px-3 py-1.5 text-meta font-medium text-on-primary-fill hover:opacity-90 disabled:opacity-60">
+              {snapshotBusy ? <IconLoader2 size={15} className="animate-spin" aria-hidden /> : <IconCamera size={15} aria-hidden />} {snapshotBusy ? 'Taking a snapshot…' : 'Take a snapshot'}
+            </button>
+          )}
           {onStart && state?.status !== 'starting' && (
             <button type="button" onClick={onStart} className="flex items-center gap-1.5 rounded-control bg-primary-fill px-3 py-1.5 text-meta font-medium text-on-primary-fill hover:opacity-90">
               <IconPlayerPlay size={15} /> {state?.status === 'crashed' ? 'Start again' : 'Start'}

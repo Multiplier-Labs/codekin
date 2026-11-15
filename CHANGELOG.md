@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Preview snapshots.** **Snapshot** in a Canvas preview loads the page in a headless Chrome or Chromium on the machine Codekin runs on and keeps a screenshot, with the console errors and warnings seen while it loaded. Pick a desktop, tablet or phone size. Snapshots of a preview are revisions of one item, so you can step through them or compare two. This is how the hosted web app and relay sessions see a preview, since they can't reach the live page. Set the browser with `CANVAS_SNAPSHOT_BROWSER` (a path, or `off`); otherwise Codekin finds Chrome, Chromium, Edge or a Playwright-installed browser. Starting a launch configuration from a preview now works in the hosted web app too.
+
 ## [0.12.0] - 2026-11-14
 
 Update the relay and machines together: automation changes made through the relay now need a passkey (#856).

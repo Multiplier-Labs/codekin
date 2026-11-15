@@ -346,13 +346,19 @@ describe('canvas', () => {
     for (const msg of [
       { type: 'preview_configs' }, { type: 'preview_open', itemId: 'x' }, { type: 'preview_launch', name: 'web' },
       { type: 'preview_stop', itemId: 'x' }, { type: 'preview_restart', itemId: 'x' }, { type: 'preview_logs', itemId: 'x' },
+      { type: 'preview_snapshot', itemId: 'x', path: '/', viewport: 'phone' },
     ]) {
       expect(checkClientFrame(editor, joined(editor), frame(msg)).allowed).toBe(false)
       expect(checkClientFrame(owner, joined(owner), frame(msg)).allowed).toBe(true)
     }
-    for (const type of ['preview_state', 'preview_log', 'preview_configs']) {
+    for (const type of ['preview_state', 'preview_log', 'preview_configs', 'preview_snapshot_result']) {
       expect(checkServerFrame(editor, joined(editor), frame({ type, sessionId: 's1' }))).toBe(false)
       expect(checkServerFrame(owner, joined(owner), frame({ type, sessionId: 's1' }))).toBe(true)
     }
+    // A snapshot's image and console record are the owner's, like the preview; its list entry isn't content.
+    const snapshot = frame({ type: 'canvas_item', sessionId: 's1', revision: 1, item: { kind: 'image', source: { type: 'snapshot', preview: 'x' }, revisions: [{ n: 1 }] }, content: 'iVBOR', meta: { snapshot: { console: [] } } })
+    expect(checkServerFrame(viewer, joined(viewer), snapshot)).toBe(false)
+    expect(checkServerFrame(editor, joined(editor), snapshot)).toBe(false)
+    expect(checkServerFrame(owner, joined(owner), snapshot)).toBe(true)
   })
 })

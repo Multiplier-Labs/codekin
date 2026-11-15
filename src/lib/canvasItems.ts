@@ -13,7 +13,7 @@ export function groupItems(items: CanvasItem[]): Array<{ label: string; items: C
   for (const item of items) if (item.pinnedRevision !== undefined) add('Pinned', item)
   for (const item of items) {
     if (item.pinnedRevision !== undefined) continue
-    add(item.source.type === 'agent' ? 'Agent' : item.source.type === 'file' || item.source.type === 'launch' ? 'You' : item.source.server, item)
+    add(item.source.type === 'agent' ? 'Agent' : item.source.type === 'mcp' ? item.source.server : 'You', item)
   }
   const order = ['Pinned', 'Agent', 'You']
   return [...groups].sort(([a], [b]) => {

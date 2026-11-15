@@ -106,6 +106,8 @@ export type WsClientMessage =
   | { type: 'preview_restart'; itemId: string }
   /** The server output Codekin kept for a preview it started. */
   | { type: 'preview_logs'; itemId: string }
+  /** Load the preview's page in a headless browser on the machine and keep a screenshot as an image item. */
+  | { type: 'preview_snapshot'; itemId: string; path?: string; viewport?: SnapshotViewport }
   | { type: 'move_to_worktree' }
   | { type: 'retry_worktree' }
   | { type: 'use_existing_checkout' }
@@ -202,6 +204,8 @@ export type WsServerMessage =
   | { type: 'preview_configs'; sessionId: string; file: string; configs: PreviewLaunchConfig[]; error?: string }
   /** Server output lines; `reset` replaces what the client holds (a reply to preview_logs, or a restart). */
   | { type: 'preview_log'; sessionId: string; itemId: string; lines: string[]; reset?: boolean }
+  /** Reply to preview_snapshot (to the asking client only): the snapshot item it made or revised, or why it failed. */
+  | { type: 'preview_snapshot_result'; sessionId: string; itemId: string; snapshotItemId?: string; error?: string }
 
 /** Task milestones Joe posts back into the conversation a task came from. */
 export type JoeMilestone = 'accepted' | 'decision' | 'blocked' | 'review'
@@ -298,6 +302,28 @@ export interface PreviewState {
   error?: string
   /** Something worth knowing that isn't a failure, e.g. the port was already in use. */
   notice?: string
+  /** This machine has a browser for snapshots (preview_snapshot). */
+  snapshots?: boolean
+}
+
+/** Viewport a snapshot is taken at: 1280×800, 820×1180, or a 390×844 phone. */
+export type SnapshotViewport = 'full' | 'tablet' | 'phone'
+
+/** What a snapshot revision records besides its image. */
+export interface SnapshotMeta {
+  /** Page path (with query and hash) the page ended on. */
+  path: string
+  /** The page's title. */
+  title: string
+  /** Dev server port it was taken from. */
+  port: number
+  viewport: SnapshotViewport
+  /** Console errors and warnings seen while the page loaded (at most 50). */
+  console: Array<{ level: 'error' | 'warn'; message: string; path: string; at: number }>
+  /** The browser ran without its sandbox, so it reached only this machine. */
+  restricted?: true
+  /** Requests blocked for leaving the machine (restricted only). */
+  blocked?: number
 }
 
 /** A launch configuration as the user sees it before starting it. */
@@ -324,6 +350,8 @@ export type CanvasItemSource =
   | { type: 'mcp'; server: string }
   /** A preview the user started from a launch configuration. */
   | { type: 'launch'; config: string }
+  /** Snapshots of a preview item (`preview` is its id). */
+  | { type: 'snapshot'; preview: string }
 
 /** One stored revision of a Canvas item. */
 export interface CanvasRevision {
@@ -341,6 +369,8 @@ export interface CanvasRevision {
 export interface CanvasItemMeta {
   /** Diagram node id → what the node refers to. */
   nodes?: Record<string, { file?: string; line?: number; description?: string }>
+  /** Image items made by snapshotting a preview. */
+  snapshot?: SnapshotMeta
 }
 
 /** A Canvas item: a named, revisioned output beside a session's chat. */
