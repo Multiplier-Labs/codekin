@@ -17,6 +17,7 @@ import type { AttachedPlace, SessionPlace } from '../types'
 import { sessionPlaceLabel, type DraftPlace } from '../lib/places'
 import { browseDirs } from '../lib/ccApi'
 import { PlacePicker } from './PlacePicker'
+import { PANE_CONTROL } from '../lib/paneHeader'
 
 interface Props {
   token?: string
@@ -45,8 +46,8 @@ function KindIcon({ place }: { place: SessionPlace }) {
   return place.git ? <IconGitBranch {...props} /> : <IconFolder {...props} />
 }
 
-/** Header-sized controls (32px), the same size as the Canvas and Changes header buttons. */
-const CHIP = 'flex h-8 shrink-0 items-center gap-1.5 rounded-control border border-edge-strong px-2 text-meta text-ink-muted'
+/** Pane-header controls: unboxed at rest, the same height as the header's other buttons. */
+const CHIP = `flex ${PANE_CONTROL} shrink-0 items-center gap-1.5 rounded-control px-1.5 text-meta text-ink-muted`
 
 export function ContextBar({
   token, path, place, attached, home, groups, recent, isMobile = false, disabled = false, onAttach, onDetach, worktree, onMoveToWorktree,
@@ -111,14 +112,13 @@ export function ContextBar({
 
   return (
     <div ref={wrapRef} className="relative min-w-0">
-      <div className="flex items-center gap-1.5 overflow-x-auto px-3" role="toolbar" aria-label="Where this session works">
-        <span className={CHIP} title={path}>
+      <div className="flex items-center gap-1 overflow-x-auto px-2" role="toolbar" aria-label="Where this session works">
+        <span className={`${CHIP} text-ink`} title={path}>
           <KindIcon place={place} />
           <span className={place.kind === 'folder' || place.kind === 'scratch' ? 'font-mono' : ''}>{placeLabel(path, place)}</span>
         </span>
         {worktree ? (
-          <span className={`${CHIP} border-transparent text-primary-5`} title={`In a worktree: ${worktree.path}`}>
-            <IconGitBranch size={14} stroke={2} className="shrink-0" />
+          <span className={`${CHIP} text-ink-faint`} title={`In a worktree: ${worktree.path}`}>
             <span className="max-w-[220px] truncate font-mono">{worktree.branch ?? worktree.path.split('/').pop()}</span>
           </span>
         ) : onMoveToWorktree && (
@@ -126,7 +126,7 @@ export function ContextBar({
             type="button"
             onClick={onMoveToWorktree}
             disabled={disabled || busy}
-            className={`${CHIP} border-transparent hover:text-ink disabled:opacity-50`}
+            className={`${CHIP} hover:bg-surface-raised hover:text-ink disabled:opacity-50`}
             title="This session works in the repository's own checkout — move it into a git worktree"
           >
             <IconGitBranchDeleted size={14} stroke={2} className="shrink-0" />
@@ -134,7 +134,7 @@ export function ContextBar({
           </button>
         )}
         {attached.map(a => (
-          <span key={a.path} className={`${CHIP} pr-1`} title={a.path}>
+          <span key={a.path} className={`${CHIP} border border-edge pr-1`} title={a.path}>
             <KindIcon place={a.place} />
             <span className={a.place.kind === 'folder' ? 'font-mono' : ''}>{placeLabel(a.path, a.place)}</span>
             <button
@@ -157,10 +157,11 @@ export function ContextBar({
           aria-expanded={pickerOpen}
           aria-label="Attach folder, repo or org"
           title="Attach a folder, repo or org to this session"
-          className={`${CHIP} border-transparent hover:bg-surface-raised hover:text-ink disabled:opacity-50`}
+          className={`${CHIP} ${progress ? '' : 'w-(--pane-control-h) justify-center px-0'} hover:bg-surface-raised hover:text-ink disabled:opacity-50`}
         >
           <IconPlus size={14} stroke={2} className="shrink-0" />
-          {progress ?? 'Attach'}
+          {/* Icon only at rest; the name is in the tooltip and aria-label. */}
+          {progress}
         </button>
         {error && <span className="shrink-0 text-meta text-error-4" role="alert">{error}</span>}
       </div>

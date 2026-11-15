@@ -72,6 +72,8 @@ export interface Prefs {
   canvasChatWidth: number
   /** When an agent's new Canvas item opens Canvas (unset = the first item in a session). */
   canvasAutoOpen: 'first' | 'every' | 'never'
+  /** How the sidebar orders repo groups (unset = most recent activity first). */
+  sidebarRepoSort: 'activity' | 'name'
 }
 
 export type PrefKey = keyof Prefs

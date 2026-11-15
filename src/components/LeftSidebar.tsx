@@ -17,13 +17,14 @@ import {
 import type { Session, Module, Repo, MobileProps, ConnectionState } from '../types'
 import AppIcon from './AppIcon'
 import { NewSessionButton } from './NewSessionButton'
+import { PANE_HEADER } from '../lib/paneHeader'
 import { RepoSection } from './RepoSection'
 import type { RepoDrawerTab } from './RepoDrawer'
 import { ModuleBrowser } from './ModuleBrowser'
 import { ConnectionPopup } from './ConnectionPopup'
 import { ThemeMenu } from './ThemeMenu'
 import type { ThemeId } from '../themes/registry'
-import { getPref, setPref } from '../lib/prefs'
+import { getPref, setPref, usePref } from '../lib/prefs'
 import { NEW_SCRATCH, placeFromSession, type DraftPlace } from '../lib/places'
 import { buildRepoNodes, SCRATCH_GROUP } from '../lib/sidebarGroups'
 
@@ -247,7 +248,8 @@ export function LeftSidebar({
     document.addEventListener('mouseup', onMouseUp)
   }, [width])
 
-  const repoNodes = buildRepoNodes(sessions, waitingSessions, tentativeQueues)
+  const repoSort = usePref('sidebarRepoSort') ?? 'activity'
+  const repoNodes = buildRepoNodes(sessions, waitingSessions, tentativeQueues, repoSort)
   const connDotColor = connState === 'connected' ? 'bg-success-7' : connState === 'connecting' ? 'bg-warning-6' : 'bg-error-7'
 
   const hasModules = globalModules.length > 0 || (activeRepo && activeRepo.modules.length > 0)
@@ -348,7 +350,7 @@ export function LeftSidebar({
       )}
 
       {/* Header: logo + title + collapse + new session */}
-      <div className="group/header flex items-center gap-2 px-3 py-2.5 border-b border-edge flex-shrink-0">
+      <div className={`group/header ${PANE_HEADER} gap-2 px-3`}>
         <div className="app-logo-circle flex items-center justify-center rounded-full flex-shrink-0" style={{ width: 26, height: 26 }}>
           <AppIcon size={24} className="text-ink" />
         </div>
