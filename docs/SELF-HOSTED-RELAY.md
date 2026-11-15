@@ -224,8 +224,9 @@ computer and sends the screenshot and its console errors back as an image item. 
 Chrome, Chromium or Edge on `PATH` or in `/Applications`, or a browser Playwright installed. Set
 `CANVAS_SNAPSHOT_BROWSER` on that computer to name one, or `off` to disable snapshots. On Linux
 hosts where Chrome's sandbox can't start (Ubuntu 23.10 and later, unless the browser ships an
-AppArmor profile), snapshots run without it and the page can then load only from that
-computer. Each snapshot says so.
+AppArmor profile), snapshots fail with that explanation. Set `CANVAS_SNAPSHOT_NO_SANDBOX=1` on
+that computer to take them without the sandbox; the page can then load only from that computer,
+and each snapshot says so.
 
 None of this changes the relay or the connector: they carry Canvas items like any other session
 traffic. Only the session's owner can open previews or see snapshots; people a session is shared with can't.

@@ -1,13 +1,14 @@
 /** Tests for preview snapshots: finding a browser, its flags, PreviewManager.snapshot, the stored record, and (with a browser) a real capture. */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
+import { mkdtemp, readFile, rm, writeFile } from 'fs/promises'
 import http from 'http'
 import type { AddressInfo } from 'net'
 import { tmpdir } from 'os'
 import path from 'path'
 import { CanvasStore } from './canvas-store.js'
 import { PreviewManager, SNAPSHOT_VIEWPORTS } from './preview-manager.js'
-import { browserArgs, findSnapshotBrowser, SnapshotError, takeSnapshot, type SnapshotOptions, type SnapshotResult } from './preview-snapshot.js'
+import { browserArgs, findSnapshotBrowser, NO_SANDBOX_MESSAGE, noSandboxAllowed, SnapshotError, takeSnapshot, type SnapshotOptions, type SnapshotResult } from './preview-snapshot.js'
 import type { CanvasItem, PreviewTarget, Session, SnapshotMeta, WsServerMessage } from './types.js'
 
 let dir: string
@@ -185,6 +186,51 @@ describe('snapshot items in the Canvas store', () => {
   })
 })
 
+describe('a browser whose sandbox cannot start', () => {
+  /** A stand-in browser: logs its flags, says it has no usable sandbox, and dies. */
+  async function fakeBrowser() {
+    const dir = await mkdtemp(path.join(tmpdir(), 'codekin-fake-browser-'))
+    const log = path.join(dir, 'calls.log')
+    const bin = path.join(dir, 'chrome')
+    await writeFile(bin, `#!/bin/sh\necho "$*" >> '${log}'\necho 'FATAL: No usable sandbox!' >&2\nexit 1\n`, { mode: 0o755 })
+    const calls = async () => (await readFile(log, 'utf-8').catch(() => '')).split('\n').filter(Boolean)
+    return { bin, calls, cleanup: () => rm(dir, { recursive: true, force: true }) }
+  }
+  const opts = { port: 1, path: '/', width: 400, height: 300 }
+
+  it('fails with setup guidance and never retries without the sandbox, unless allowed', async () => {
+    const fake = await fakeBrowser()
+    try {
+      await expect(takeSnapshot(fake.bin, opts, false)).rejects.toThrow(NO_SANDBOX_MESSAGE)
+      const calls = await fake.calls()
+      expect(calls).toHaveLength(1)
+      expect(calls[0]).not.toContain('--no-sandbox')
+    } finally {
+      await fake.cleanup()
+    }
+  }, 15_000)
+
+  it('retries without the sandbox, kept to this machine, when the owner allows it', async () => {
+    const fake = await fakeBrowser()
+    try {
+      await expect(takeSnapshot(fake.bin, opts, true)).rejects.toBeInstanceOf(SnapshotError)
+      const calls = await fake.calls()
+      expect(calls).toHaveLength(2)
+      expect(calls[1]).toContain('--no-sandbox')
+      expect(calls[1]).toContain('--proxy-server=socks5://127.0.0.1:9')
+    } finally {
+      await fake.cleanup()
+    }
+  }, 15_000)
+
+  it('is allowed only by CANVAS_SNAPSHOT_NO_SANDBOX', () => {
+    expect(noSandboxAllowed({})).toBe(false)
+    expect(noSandboxAllowed({ CANVAS_SNAPSHOT_NO_SANDBOX: '0' })).toBe(false)
+    expect(noSandboxAllowed({ CANVAS_SNAPSHOT_NO_SANDBOX: '1' })).toBe(true)
+    expect(noSandboxAllowed({ CANVAS_SNAPSHOT_NO_SANDBOX: 'true' })).toBe(true)
+  })
+})
+
 const realBrowser = findSnapshotBrowser()
 
 describe.skipIf(!realBrowser)('takeSnapshot with a real browser', () => {
@@ -198,7 +244,8 @@ describe.skipIf(!realBrowser)('takeSnapshot with a real browser', () => {
       </script>`)
     })
     try {
-      const shot = await takeSnapshot(realBrowser!, { port: dev.port, path: '/start', width: 400, height: 300 })
+      // Allowed without the sandbox, so this runs on hosts where it can't start too.
+      const shot = await takeSnapshot(realBrowser!, { port: dev.port, path: '/start', width: 400, height: 300 }, true)
       expect(shot.mediaType).toBe('image/png')
       expect(shot.image.subarray(0, 4).toString('hex')).toBe('89504e47')
       expect(shot.title).toBe('Fixture')

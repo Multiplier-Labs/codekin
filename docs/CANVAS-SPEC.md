@@ -289,7 +289,7 @@ A snapshot loads a preview's page in a headless Chrome or Chromium on the machin
   - Codekin drives it over `--remote-debugging-pipe`, so no debugging port is opened.
   - It loads `http://localhost:<port>` directly, not through the preview proxy, and only the item's port. Codekin's own ports are refused, as for previews.
   - One snapshot at a time per session, and two at a time per machine.
-  - **Without Chrome's sandbox.** Where the sandbox can't start (Ubuntu 23.10 and later restrict the unprivileged user namespaces it needs, unless the browser ships an AppArmor profile), Codekin runs the browser without it. The page then reaches only this machine: every other request goes to a proxy that isn't there, and WebRTC can't send UDP. The snapshot says so and counts what was blocked, such as web fonts and CDN scripts.
+  - **Without Chrome's sandbox.** Where the sandbox can't start (Ubuntu 23.10 and later restrict the unprivileged user namespaces it needs, unless the browser ships an AppArmor profile), the snapshot fails and says how to fix it. Codekin never drops the sandbox on its own: the machine's owner opts in with `CANVAS_SNAPSHOT_NO_SANDBOX=1`, and then Codekin runs the browser without it. The page then reaches only this machine: every other request goes to a proxy that isn't there, and WebRTC can't send UDP. The snapshot says so and counts what was blocked, such as web fonts and CDN scripts.
 
 ## 9. Slices
 
