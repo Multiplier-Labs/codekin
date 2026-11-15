@@ -33,10 +33,10 @@ function contextPlaceholder(attachments: CanvasAttachment[] | undefined): string
 /**
  * Canvas, Changes and "no git" as one group. In a session with a header they
  * sit at its right end as pane-header buttons; otherwise they float in the
- * transcript's top-right corner. Canvas is the header's main action: the only
- * primary-tinted button (a tint and outline, not a fill, so it doesn't outshout
- * the transcript), on the right edge (next to where it opens), never shrinks,
- * and in the header it shows even before the session has Canvas items.
+ * transcript's top-right corner. Canvas is the header's main action: styled
+ * like the sidebar's "New" button (a raised grey fill, the only filled button
+ * here), on the right edge (next to where it opens), never shrinks, and in the
+ * header it shows even before the session has Canvas items.
  * Changes is a quiet ghost button and, when space is short (compact), drops
  * its label.
  */
@@ -60,10 +60,8 @@ function SessionActions({ size, compact, canvasCount, onOpenCanvas, noGit, chang
   const quiet = header ? 'border-transparent hover:bg-surface-raised' : 'border-edge-strong bg-surface backdrop-blur-sm hover:bg-surface-raised'
   const icon = header ? 14 : 15
   const count = 'rounded-control px-1.5 text-micro font-bold tabular-nums'
-  // Canvas: tinted and outlined in primary. Floating over the transcript it needs a solid ground.
-  const canvasTone = header
-    ? 'border-primary-7/60 bg-primary-8/20 hover:bg-primary-8/30'
-    : 'border-primary-7/60 bg-surface hover:bg-surface-raised'
+  // Canvas: the sidebar "New" button's raised fill. Floating over the transcript it keeps an edge.
+  const canvasTone = header ? 'border-transparent' : 'border-edge-strong'
   return (
     <>
       {noGit && (
@@ -92,14 +90,14 @@ function SessionActions({ size, compact, canvasCount, onOpenCanvas, noGit, chang
       )}
       {showCanvas && (
         <button
-          className={`${base} ${canvasTone} shrink-0 font-semibold text-primary-4`}
+          className={`${base} ${canvasTone} shrink-0 bg-surface-raised text-ink hover:bg-edge`}
           onClick={onOpenCanvas}
           title={'Open Canvas (⌘\\)'}
           aria-label={`Canvas${canvasCount > 0 ? ` (${canvasCount})` : ''}`}
         >
           <IconLayoutSidebarRight size={icon} stroke={1.75} className="shrink-0" />
           Canvas
-          {canvasCount > 0 && <span className={`${count} bg-primary-8/30`}>{canvasCount}</span>}
+          {canvasCount > 0 && <span className={`${count} bg-edge text-ink`}>{canvasCount}</span>}
         </button>
       )}
     </>
