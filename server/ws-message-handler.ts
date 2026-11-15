@@ -136,23 +136,26 @@ export function handleWsMessage(msg: WsClientMessage, ctx: WsHandlerContext): vo
       // Trigger background CLI probe to discover latest model IDs (once per day)
       triggerCliProbeIfNeeded()
 
+      // Confirm at once so the client opens the chat; a worktree is made after.
+      send({
+        type: 'session_created',
+        sessionId: session.id,
+        sessionName: session.name,
+        workingDir: session.workingDir,
+        provider: session.provider ?? 'claude',
+        model: session.model,
+        ...(session.effort ? { effort: session.effort } : {}),
+      })
       if (useWorktree) {
-        // Create the worktree, then start Claude in it. An isolated session
-        // never falls back to the shared checkout: on failure it stays
-        // stopped (input is held) until the user retries or switches.
+        // Create the worktree (fetching the default branch can take seconds),
+        // then start the agent in it. Input sent meanwhile is held. An
+        // isolated session never falls back to the shared checkout: on
+        // failure it stays stopped (input is held) until the user retries or
+        // switches.
         void sessions.prepareSessionWorktree(session.id, resolvedDir).then((result) => {
           if (sessions.get(session.id) !== session) return  // deleted meanwhile
-          send({
-            type: 'session_created',
-            sessionId: session.id,
-            sessionName: session.name,
-            workingDir: session.workingDir,
-            provider: session.provider ?? 'claude',
-            model: session.model,
-            ...(session.effort ? { effort: session.effort } : {}),
-          })
           if (result.ok) {
-            sessions.startClaude(session.id)
+            sessions.startPreparedSession(session.id, result)
           } else {
             send({
               type: 'system_message',
@@ -162,15 +165,6 @@ export function handleWsMessage(msg: WsClientMessage, ctx: WsHandlerContext): vo
           }
         })
       } else {
-        send({
-          type: 'session_created',
-          sessionId: session.id,
-          sessionName: session.name,
-          workingDir: session.workingDir,
-          provider: session.provider ?? 'claude',
-          model: session.model,
-          ...(session.effort ? { effort: session.effort } : {}),
-        })
         sessions.startClaude(session.id)
       }
       break

@@ -3599,6 +3599,43 @@ describe('SessionManager', () => {
       expect(s._heldInputs).toBeUndefined()
     })
 
+    it('holds input sent while a new worktree is prepared, then delivers it once ready', async () => {
+      const s = sm.create('iso-new', '/repos/myproject', { useWorktree: true })
+      let finish!: (r: unknown) => void
+      mockPrepareWorktree.mockReturnValue(new Promise(r => { finish = r }))
+      const ws = fakeWs()
+      sm.join(s.id, ws)
+
+      const preparing = sm.prepareSessionWorktree(s.id, '/repos/myproject')
+      sm.sendInput(s.id, 'first message')
+      expect(s._heldInputs).toEqual(['first message'])
+      // Still preparing: no "worktree unavailable" error.
+      expect(ws.send.mock.calls.map((c: any) => JSON.parse(c[0])).filter((m: any) => m.subtype === 'error')).toHaveLength(0)
+
+      finish({ ...created('/repos/myproject-wt-1'), baseRef: 'origin/main' })
+      const result = await preparing
+      const sendSpy = vi.spyOn(sm, 'sendInput').mockImplementation(() => {})
+      const startSpy = vi.spyOn(sm, 'startClaude').mockReturnValue(true)
+      sm.startPreparedSession(s.id, result as any)
+
+      expect(sendSpy).toHaveBeenCalledWith(s.id, 'first message')
+      expect(startSpy).not.toHaveBeenCalled()
+      expect(s._heldInputs).toBeUndefined()
+      const notices = ws.send.mock.calls.map((c: any) => JSON.parse(c[0])).filter((m: any) => m.subtype === 'notification')
+      expect(notices.at(-1).text).toBe('Worktree ready: /repos/myproject-wt-1 (branched from origin/main)')
+    })
+
+    it('starts a prepared session with nothing held right away', async () => {
+      const s = sm.create('iso-empty', '/repos/myproject', { useWorktree: true })
+      mockPrepareWorktree.mockResolvedValue(created('/repos/myproject-wt-2'))
+      const result = await sm.prepareSessionWorktree(s.id, '/repos/myproject')
+      const startSpy = vi.spyOn(sm, 'startClaude').mockReturnValue(true)
+
+      sm.startPreparedSession(s.id, result as any)
+
+      expect(startSpy).toHaveBeenCalledWith(s.id)
+    })
+
     it('switches to the shared checkout only on explicit request', () => {
       const s = sm.create('iso-switch', '/repos/myproject-wt-1', { useWorktree: true, groupDir: '/repos/myproject' })
       s.worktreePath = '/repos/myproject-wt-1'
