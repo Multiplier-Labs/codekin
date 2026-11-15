@@ -13,6 +13,7 @@ import type { CanvasSelectionKind } from '../../lib/canvasContext'
 import { DiagramView } from './DiagramView'
 import { TableView } from './TableView'
 import { SandboxFrame } from './SandboxFrame'
+import { isDesktopWebView } from '../../lib/desktopLinks'
 import { PreviewView } from './PreviewView'
 import { SnapshotView } from './SnapshotView'
 
@@ -110,7 +111,9 @@ export function CanvasItemView({ view, onAttach, onOpenFile, toc, sandboxOrigin,
         {sandboxOrigin === null && (
           <p className="mb-4 flex items-start gap-2 rounded-control border border-edge bg-surface px-3 py-2 text-meta text-ink-muted" role="note">
             <IconShieldLock size={16} className="mt-0.5 shrink-0" aria-hidden />
-            {item.kind === 'chart' ? 'Interactive charts' : 'Interactive pages'} run in a sandbox on a separate web address, and this Codekin has none set up, so its source is shown instead. See CANVAS_SANDBOX_ORIGIN in the Canvas docs.
+            {isDesktopWebView()
+              ? `${item.kind === 'chart' ? 'Interactive charts' : 'Interactive pages'} run in a sandbox on a separate web address, which this version of the desktop app, or this relay, doesn't allow yet, so its source is shown instead. Update the app, or open Codekin in a browser to see it.`
+              : `${item.kind === 'chart' ? 'Interactive charts' : 'Interactive pages'} run in a sandbox on a separate web address, and this Codekin has none set up, so its source is shown instead. See CANVAS_SANDBOX_ORIGIN in the Canvas docs.`}
           </p>
         )}
         <pre className="font-mono text-meta text-ink whitespace-pre-wrap break-words">{content.content}</pre>

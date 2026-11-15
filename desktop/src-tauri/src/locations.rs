@@ -174,14 +174,16 @@ pub fn location_navigation_allowed(url: &url::Url, origin: &str, sandbox: Option
 /// The location window's user agent: Safari's, so the hosted UI treats it as
 /// the WebKit it is, plus `CodekinDesktop/<version>`, which is how the hosted
 /// UI knows to hand sign-in to the shell instead of starting GitHub OAuth in
-/// the webview.
+/// the webview. `CodekinFrames/1` says the navigation guard lets the Canvas
+/// sandbox frame load; without it the UI doesn't create one, since older
+/// builds refuse it and open it in the default browser.
 pub fn user_agent(app_version: &str) -> String {
     #[cfg(target_os = "macos")]
     let platform = "Macintosh; Intel Mac OS X 10_15_7";
     #[cfg(not(target_os = "macos"))]
     let platform = "X11; Linux x86_64";
     format!(
-        "Mozilla/5.0 ({platform}) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15 CodekinDesktop/{app_version}"
+        "Mozilla/5.0 ({platform}) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15 CodekinFrames/1 CodekinDesktop/{app_version}"
     )
 }
 
@@ -703,6 +705,7 @@ mod tests {
         assert!(ua.starts_with("Mozilla/5.0 ("));
         assert!(ua.contains("AppleWebKit/605.1.15"));
         assert!(ua.ends_with(" CodekinDesktop/0.10.0"));
+        assert!(ua.contains(" CodekinFrames/1 "));
     }
 
     #[test]
