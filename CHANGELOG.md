@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Starting a session no longer hangs for a second or more before the chat opens (longer with a worktree). Every save rewrote all sessions' output history into `sessions.json`, synchronously; each session's history now lives in its own file under `DATA_DIR/session-history/` and is rewritten only when it changes. Existing `sessions.json` files migrate on the first save.
+
 ## [0.12.1] - 2026-11-15
 
 Relays that serve a hosted web app with a Canvas sandbox should set `RELAY_CANVAS_SANDBOX_ORIGIN` to the web app's `VITE_CANVAS_SANDBOX_ORIGIN`, so the desktop app can show charts (#922).

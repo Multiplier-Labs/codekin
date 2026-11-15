@@ -1399,7 +1399,10 @@ describe('SessionManager', () => {
       const persisted = writtenData.find((p: any) => p.name === 'test-persist')
       expect(persisted).toBeDefined()
       expect(persisted.workingDir).toBe('/tmp/persist')
-      expect(persisted.outputHistory.length).toBeGreaterThan(0)
+      // The history goes to its own file, not into sessions.json.
+      expect(persisted.outputHistory).toBeUndefined()
+      const historyCall = mockedWriteFileSync.mock.calls.findLast(c => String(c[0]).includes(`session-history/${s.id}.json`))
+      expect(JSON.parse(historyCall![1] as string)).toEqual([{ type: 'output', data: 'hello' }])
     })
 
     it('persists repo approvals separately from sessions', () => {
@@ -1435,13 +1438,13 @@ describe('SessionManager', () => {
 
       sm.persistToDisk()
 
-      // Capture what was written
-      const lastCall = mockedWriteFileSync.mock.calls[mockedWriteFileSync.mock.calls.length - 1]
-      const writtenJson = lastCall[1] as string
+      // Capture what was written, by path
+      const written = new Map<string, string>()
+      for (const [file, content] of mockedWriteFileSync.mock.calls) written.set(String(file).replace(/\.tmp$/, ''), content as string)
 
       // Now create a new SessionManager that restores from disk
-      mockedExistsSync.mockImplementation((p) => String(p).includes('sessions.json') ? true : false)
-      mockedReadFileSync.mockReturnValue(writtenJson)
+      mockedExistsSync.mockImplementation((p) => written.has(String(p)))
+      mockedReadFileSync.mockImplementation(((p: string) => written.get(String(p)) ?? '[]') as any)
 
       const sm2 = new SessionManager()
       const restored = sm2.get(s.id)
@@ -1457,6 +1460,7 @@ describe('SessionManager', () => {
 
       // Reset fs mocks for other tests
       mockedExistsSync.mockImplementation((p) => String(p).includes('sessions.json') ? false : true)
+      mockedReadFileSync.mockReset()
       mockedReadFileSync.mockReturnValue('[]')
     })
   })
@@ -1539,13 +1543,14 @@ describe('SessionManager', () => {
       sm.addToHistory(s, { type: 'system_message', subtype: 'init', text: 'c' } as any)
 
       // No persist yet (debounced)
-      const callsAfterImmediate = mockedWriteFileSync.mock.calls.length
+      const sessionWrites = () => mockedWriteFileSync.mock.calls.filter(c => String(c[0]).includes('sessions.json')).length
+      const callsAfterImmediate = sessionWrites()
       // The calls during create() already happened, but the debounced ones haven't
       // Advance past debounce time (2000ms)
       vi.advanceTimersByTime(2500)
 
       // Should have persisted exactly once more from the debounced call
-      expect(mockedWriteFileSync.mock.calls.length).toBe(callsAfterImmediate + 1)
+      expect(sessionWrites()).toBe(callsAfterImmediate + 1)
     })
   })
 
