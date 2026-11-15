@@ -43,7 +43,7 @@ describe('preview proxy helpers', () => {
     const out = downstreamHeaders({
       'x-frame-options': 'DENY',
       'content-security-policy': "default-src 'self'; frame-ancestors 'none'",
-      'set-cookie': ['sid=1; Domain=localhost; Path=/'],
+      'set-cookie': ['sid=1; Domain=localhost; Path=/', 'codekin_preview_4000_holder=forged; Path=/'],
       connection: 'keep-alive',
     }, 5173)
     expect(out['x-frame-options']).toBeUndefined()
@@ -83,11 +83,11 @@ describe('createPreviewProxy', () => {
       socket.on('data', (d) => { socket.write(`echo:${d.toString()}`) })
     })
     upstreamPort = await listen(upstream)
-    proxy = createPreviewProxy({ targetPort: upstreamPort, key, cookieName: 'placeholder', targetHosts: ['127.0.0.1'] })
+    proxy = createPreviewProxy({ targetPort: upstreamPort, key, cookieName: 'placeholder', holder: 'h1', targetHosts: ['127.0.0.1'] })
     proxyPort = await listen(proxy)
     // The cookie is per proxy port; rebuild now that the port is known.
     proxy.close()
-    proxy = createPreviewProxy({ targetPort: upstreamPort, key, cookieName: `codekin_preview_${proxyPort}`, targetHosts: ['127.0.0.1'] })
+    proxy = createPreviewProxy({ targetPort: upstreamPort, key, cookieName: `codekin_preview_${proxyPort}`, holder: 'h1', targetHosts: ['127.0.0.1'] })
     await new Promise<void>((resolve) => proxy.listen(proxyPort, '127.0.0.1', resolve))
   })
 
@@ -244,19 +244,36 @@ describe('createPreviewProxy', () => {
 })
 
 describe('createPreviewProxy host fallback and site data', () => {
-  it('tries the next host for each request, and clears site data once for a new holder', async () => {
+  it('tries the next host for each request', async () => {
     const up = http.createServer((_q, r) => { r.writeHead(200, { 'Content-Type': 'text/plain' }); r.end('v4') })
     const upPort = await listen(up)
     const k = 'k'.repeat(32)
     // The first host refuses: every request still reaches the second.
-    const proxy = createPreviewProxy({ targetPort: upPort, key: k, cookieName: 'c', targetHosts: ['127.0.0.2', '127.0.0.1'], clearSiteData: true })
+    const proxy = createPreviewProxy({ targetPort: upPort, key: k, cookieName: 'c', holder: 'h1', targetHosts: ['127.0.0.2', '127.0.0.1'] })
     const port = await listen(proxy)
     try {
-      const entry1 = await request(port, `${PREVIEW_ENTRY_PATH}?k=${k}&to=/`)
-      expect(entry1.headers['clear-site-data']).toBe('"storage"')
-      const entry2 = await request(port, `${PREVIEW_ENTRY_PATH}?k=${k}&to=/`)
-      expect(entry2.headers['clear-site-data']).toBeUndefined()
       for (let i = 0; i < 3; i++) expect((await request(port, '/', { cookie: `c=${k}` })).body).toBe('v4')
+    } finally {
+      proxy.closeAllConnections(); proxy.close(); up.closeAllConnections(); up.close()
+    }
+  })
+
+  it('clears site data for each browser that last entered another holder, and only for those', async () => {
+    const up = http.createServer((_q, r) => { r.writeHead(200); r.end() })
+    const upPort = await listen(up)
+    const k = 'k'.repeat(32)
+    const proxy = createPreviewProxy({ targetPort: upPort, key: k, cookieName: 'c', holder: 'app-y', targetHosts: ['127.0.0.1'] })
+    const port = await listen(proxy)
+    const enter = (cookie?: string) => request(port, `${PREVIEW_ENTRY_PATH}?k=${k}&to=/`, cookie ? { cookie } : {})
+    try {
+      // A browser new to this origin starts clean, and is told who holds it.
+      const fresh = await enter()
+      expect(fresh.headers['clear-site-data']).toBe('"storage"')
+      expect(fresh.headers['set-cookie']?.[1]).toMatch(/^c_holder=app-y; Path=\/; HttpOnly; SameSite=Lax; Max-Age=\d+/)
+      // A second browser that last held app X here is cleared too, though the first already entered.
+      expect((await enter('c_holder=app-x')).headers['clear-site-data']).toBe('"storage"')
+      // A browser that already entered this holder keeps the app's storage.
+      expect((await enter('c_holder=app-y')).headers['clear-site-data']).toBeUndefined()
     } finally {
       proxy.closeAllConnections(); proxy.close(); up.closeAllConnections(); up.close()
     }

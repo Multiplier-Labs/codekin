@@ -6,11 +6,11 @@
  * colour is never the only signal.
  */
 
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { IconLoader2 } from '@tabler/icons-react'
 import type { CanvasItem } from '../../types'
 import type { CanvasContent } from '../../hooks/useCanvas'
-import { diffSequences, type DiffOp } from '../../lib/diffSeq'
+import { diffSequences, foldUnchanged, type DiffOp, type DiffRow } from '../../lib/diffSeq'
 import { parseTable } from '../../lib/canvasTable'
 import { markdownBlocks } from '../../lib/canvasItems'
 import { MarkdownRenderer } from '../MarkdownRenderer'
@@ -27,8 +27,23 @@ interface Props {
   source: boolean
 }
 
+/** Rows drawn at a time, as in the table view: a big comparison must not build every row at once. */
+const PAGE = 500
+
 const ADD = 'border-l-2 border-success-5 bg-success-11'
 const DEL = 'border-l-2 border-error-5 bg-error-11 line-through decoration-error-5/60'
+
+function plural(n: number, unit: string): string {
+  return `${n.toLocaleString()} unchanged ${unit}${n === 1 ? '' : 's'}`
+}
+
+function GapButton({ count, unit, onOpen }: { count: number; unit: string; onOpen: () => void }) {
+  return (
+    <button type="button" onClick={onOpen} className="w-full rounded-control px-2 py-1 text-left text-meta text-ink-muted hover:bg-surface hover:text-ink">
+      ⋯ {plural(count, unit)} · show
+    </button>
+  )
+}
 
 function Mark({ op }: { op: DiffOp<unknown>['op'] }) {
   if (op === 'same') return <span className="w-4 shrink-0" />
@@ -52,6 +67,21 @@ export function CompareView({ item, from, to, a, b, source }: Props) {
     }
     return { kind: 'lines' as const, ops: diffSequences(ca.content.split('\n'), cb.content.split('\n')) }
   }, [ready, a, b, item.kind, source])
+
+  // Which folded runs are open and how many rows are drawn; both start over for a new comparison.
+  const [view, setView] = useState({ ops, expanded: new Set<number>() as ReadonlySet<number>, shown: PAGE })
+  if (view.ops !== ops) setView({ ops, expanded: new Set(), shown: PAGE })
+  const rows = useMemo(() => (ops ? foldUnchanged<unknown>(ops.ops, 3, view.expanded) : []), [ops, view.expanded])
+  const visible = rows.slice(0, view.shown)
+  const open = (start: number) => { setView(v => ({ ...v, expanded: new Set([...v.expanded, start]) })) }
+  const more = rows.length > view.shown && (
+    <div className="flex items-center gap-3 py-3 text-meta text-ink-muted">
+      Showing {view.shown.toLocaleString()} of {rows.length.toLocaleString()} rows
+      <button type="button" onClick={() => { setView(v => ({ ...v, shown: v.shown + PAGE })) }} className="font-medium text-primary-5 hover:underline">
+        Show {Math.min(PAGE, rows.length - view.shown).toLocaleString()} more
+      </button>
+    </div>
+  )
 
   if (!ready) {
     const err = [a, b].find((x): x is { error: string } => typeof x === 'object' && 'error' in x)
@@ -91,13 +121,16 @@ export function CompareView({ item, from, to, a, b, source }: Props) {
       <div className="mx-auto w-full max-w-[720px] px-8 py-6">
         {heading}
         <div className="flex flex-col gap-1">
-          {ops.ops.map((o, i) => (
-            <div key={i} className={`flex gap-2 rounded-control px-2 ${o.op === 'add' ? ADD : o.op === 'del' ? DEL : ''}`}>
-              <Mark op={o.op} />
-              <div className="min-w-0 flex-1"><MarkdownRenderer content={o.value} /></div>
-            </div>
-          ))}
+          {(visible as DiffRow<string>[]).map(r => r.kind === 'gap'
+            ? <GapButton key={`g${r.key}`} count={r.count} unit="block" onOpen={() => { open(r.key) }} />
+            : (
+              <div key={`o${r.key}`} className={`flex gap-2 rounded-control px-2 ${r.op.op === 'add' ? ADD : r.op.op === 'del' ? DEL : ''}`}>
+                <Mark op={r.op.op} />
+                <div className="min-w-0 flex-1"><MarkdownRenderer content={r.op.value} /></div>
+              </div>
+            ))}
         </div>
+        {more}
       </div>
     )
   }
@@ -111,14 +144,17 @@ export function CompareView({ item, from, to, a, b, source }: Props) {
             <tr><th className="w-6 border-b border-edge-strong bg-surface" />{ops.columns.map((c, i) => <th key={i} className="border-b border-edge-strong bg-surface px-3 py-2 text-left font-bold text-ink">{c}</th>)}</tr>
           </thead>
           <tbody>
-            {ops.ops.map((o, i) => (
-              <tr key={i} className={o.op === 'add' ? 'bg-success-11' : o.op === 'del' ? 'bg-error-11 line-through decoration-error-5/60' : ''}>
-                <td className="border-b border-edge px-1 text-center"><Mark op={o.op} /></td>
-                {o.value.map((v, ci) => <td key={ci} className="border-b border-edge px-3 py-1.5 text-ink">{v}</td>)}
-              </tr>
-            ))}
+            {(visible as DiffRow<string[]>[]).map(r => r.kind === 'gap'
+              ? <tr key={`g${r.key}`}><td colSpan={ops.columns.length + 1} className="border-b border-edge"><GapButton count={r.count} unit="row" onOpen={() => { open(r.key) }} /></td></tr>
+              : (
+                <tr key={`o${r.key}`} className={r.op.op === 'add' ? 'bg-success-11' : r.op.op === 'del' ? 'bg-error-11 line-through decoration-error-5/60' : ''}>
+                  <td className="border-b border-edge px-1 text-center"><Mark op={r.op.op} /></td>
+                  {r.op.value.map((v, ci) => <td key={ci} className="border-b border-edge px-3 py-1.5 text-ink">{v}</td>)}
+                </tr>
+              ))}
           </tbody>
         </table>
+        {more}
       </div>
     )
   }
@@ -127,13 +163,16 @@ export function CompareView({ item, from, to, a, b, source }: Props) {
     <div className="px-6 py-6">
       {heading}
       <pre className="font-mono text-meta text-ink">
-        {ops.ops.map((o, i) => (
-          <div key={i} className={`flex gap-2 px-2 ${o.op === 'add' ? ADD : o.op === 'del' ? DEL : ''}`}>
-            <Mark op={o.op} />
-            <span className="min-w-0 flex-1 whitespace-pre-wrap break-words">{o.value || ' '}</span>
-          </div>
-        ))}
+        {(visible as DiffRow<string>[]).map(r => r.kind === 'gap'
+          ? <GapButton key={`g${r.key}`} count={r.count} unit="line" onOpen={() => { open(r.key) }} />
+          : (
+            <div key={`o${r.key}`} className={`flex gap-2 px-2 ${r.op.op === 'add' ? ADD : r.op.op === 'del' ? DEL : ''}`}>
+              <Mark op={r.op.op} />
+              <span className="min-w-0 flex-1 whitespace-pre-wrap break-words">{r.op.value || ' '}</span>
+            </div>
+          ))}
       </pre>
+      {more}
     </div>
   )
 }

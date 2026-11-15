@@ -47,3 +47,36 @@ export function diffSequences<T>(a: T[], b: T[], key: (v: T) => string = String,
   while (j < m) mid.push({ op: 'add', value: midB[j++] })
   return [...head, ...mid, ...tail]
 }
+
+/** One row of a compare view: a diff op, or a run of unchanged entries folded away. */
+export type DiffRow<T> =
+  | { kind: 'op'; key: number; op: DiffOp<T> }
+  | { kind: 'gap'; key: number; count: number }
+
+/**
+ * Fold long runs of unchanged entries, keeping `context` entries next to each
+ * change, so a big revision with a small edit shows the edit, not every row.
+ * A run whose start index is in `expanded` stays open. Runs too short to
+ * save anything are never folded.
+ */
+export function foldUnchanged<T>(ops: DiffOp<T>[], context = 3, expanded: ReadonlySet<number> = new Set()): DiffRow<T>[] {
+  const rows: DiffRow<T>[] = []
+  let i = 0
+  while (i < ops.length) {
+    if (ops[i].op !== 'same') { rows.push({ kind: 'op', key: i, op: ops[i] }); i++; continue }
+    let end = i
+    while (end < ops.length && ops[end].op === 'same') end++
+    const keepHead = i === 0 ? 0 : context
+    const keepTail = end === ops.length ? 0 : context
+    const folded = end - i - keepHead - keepTail
+    if (folded > 1 && !expanded.has(i)) {
+      for (let k = i; k < i + keepHead; k++) rows.push({ kind: 'op', key: k, op: ops[k] })
+      rows.push({ kind: 'gap', key: i, count: folded })
+      for (let k = end - keepTail; k < end; k++) rows.push({ kind: 'op', key: k, op: ops[k] })
+    } else {
+      for (let k = i; k < end; k++) rows.push({ kind: 'op', key: k, op: ops[k] })
+    }
+    i = end
+  }
+  return rows
+}

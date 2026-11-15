@@ -24,6 +24,8 @@ import { pipeline } from 'stream'
 
 export const PREVIEW_ENTRY_PATH = '/__codekin/enter'
 export const PREVIEW_SCRIPT_PATH = '/__codekin/preview.js'
+/** Every cookie Codekin sets on a preview origin starts with this. */
+export const PREVIEW_COOKIE_PREFIX = 'codekin_preview_'
 
 /** The largest HTML page the proxy rewrites; larger ones pass through without the script. */
 const MAX_HTML_BYTES = 8 * 1024 * 1024
@@ -38,8 +40,12 @@ export interface PreviewProxyOptions {
   cookieName: string
   /** Hosts to try for the target, in order (dev servers bind IPv4, IPv6 or both). */
   targetHosts?: string[]
-  /** This origin was another preview's (or an earlier Codekin's): clear its storage on entry. */
-  clearSiteData?: boolean
+  /**
+   * Which preview holds this origin now. Each browser keeps the holder it last
+   * entered in a cookie; a browser that last saw another holder (or none) gets
+   * the origin's storage cleared on entry, so no app reads another's storage.
+   */
+  holder: string
   /** Codekin's port(s): the only parent page the injected script answers. */
   hostPorts?: number[]
 }
@@ -60,7 +66,7 @@ function cookies(header: string | undefined): Array<[string, string]> {
 
 /** Codekin's own preview cookies never reach the app. */
 function appCookies(header: string | undefined): string | undefined {
-  const kept = cookies(header).filter(([name]) => !name.startsWith('codekin_preview_'))
+  const kept = cookies(header).filter(([name]) => !name.startsWith(PREVIEW_COOKIE_PREFIX))
   return kept.length ? kept.map(([k, v]) => `${k}=${v}`).join('; ') : undefined
 }
 
@@ -146,7 +152,9 @@ export function downstreamHeaders(headers: http.IncomingHttpHeaders, targetPort:
     if (k === 'location' && typeof v === 'string') { out[k] = rewriteLocation(v, targetPort); continue }
     if (k === 'set-cookie' && Array.isArray(v)) {
       // A Domain attribute names the dev server's host, which the browser may not be on.
-      out[k] = v.map(c => c.replace(/;\s*domain=[^;]*/i, ''))
+      // The app never sets Codekin's own cookies (the key, or the holder marker).
+      const kept = v.filter(c => !c.trimStart().startsWith(PREVIEW_COOKIE_PREFIX)).map(c => c.replace(/;\s*domain=[^;]*/i, ''))
+      if (kept.length) out[k] = kept
       continue
     }
     out[k] = v
@@ -179,7 +187,6 @@ export function createPreviewProxy(opts: PreviewProxyOptions): http.Server {
   let preferred = 0
   const order = () => hosts.map((_, i) => hosts[(preferred + i) % hosts.length])
   const worked = (host: string) => { preferred = Math.max(0, hosts.indexOf(host)) }
-  let clearSiteData = opts.clearSiteData === true
 
   const forward = (req: http.IncomingMessage, res: http.ServerResponse, tries: string[]) => {
     const host = tries[0]
@@ -249,15 +256,22 @@ export function createPreviewProxy(opts: PreviewProxyOptions): http.Server {
     if (url.pathname === PREVIEW_ENTRY_PATH) {
       const key = url.searchParams.get('k')
       if (!key || !sameKey(key, opts.key)) { plainPage(res, 403, 'Preview', 'This preview link has expired. Open the preview from Codekin again.'); return }
+      // Decided per browser: another browser may still hold an earlier app's storage here.
+      const holderCookie = `${opts.cookieName}_holder`
+      const lastHolder = cookies(req.headers.cookie).find(([name]) => name === holderCookie)?.[1]
+      const clearSiteData = lastHolder === undefined || !sameKey(lastHolder, opts.holder)
       res.writeHead(302, {
-        'Set-Cookie': `${opts.cookieName}=${opts.key}; Path=/; HttpOnly; SameSite=Lax`,
+        'Set-Cookie': [
+          `${opts.cookieName}=${opts.key}; Path=/; HttpOnly; SameSite=Lax`,
+          // Outlives the browser session, like the storage it vouches for.
+          `${holderCookie}=${opts.holder}; Path=/; HttpOnly; SameSite=Lax; Max-Age=31536000`,
+        ],
         Location: safePath(url.searchParams.get('to')),
         'Cache-Control': 'no-store',
         'Referrer-Policy': 'no-referrer',
         // A new holder of this origin starts clean: no storage or service worker from another app.
         ...(clearSiteData ? { 'Clear-Site-Data': '"storage"' } : {}),
       })
-      clearSiteData = false
       res.end()
       return
     }
