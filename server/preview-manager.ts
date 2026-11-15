@@ -23,7 +23,7 @@ import type { CanvasPublishInput } from './canvas-sessions.js'
 import { CanvasError } from './canvas-store.js'
 import { buildHarnessEnv } from './harness-env.js'
 import { launchDigest, publicConfig, readLaunchConfigs, type ResolvedLaunchConfig } from './preview-config.js'
-import { createPreviewProxy, PREVIEW_ENTRY_PATH } from './preview-proxy.js'
+import { createPreviewProxy, PREVIEW_COOKIE_PREFIX, PREVIEW_ENTRY_PATH } from './preview-proxy.js'
 import { findSnapshotBrowser, SnapshotError, takeSnapshot } from './preview-snapshot.js'
 import type { CanvasItem, CanvasItemSource, PreviewState, PreviewStatus, PreviewTarget, Session, SnapshotMeta, SnapshotViewport, WsServerMessage } from './types.js'
 
@@ -167,8 +167,8 @@ export class PreviewManager {
   private entries = new Map<string, Entry>()
   /** Proxy port each preview had last, so its origin (and the app's storage there) stays the same. */
   private sticky = new Map<string, number>()
-  /** Which preview last held each proxy port: a new holder starts with that origin's storage cleared. */
-  private portHolder = new Map<number, string>()
+  /** An opaque id per preview, marking which preview a browser last entered on a proxy port. */
+  private holderIds = new Map<string, string>()
   /** One operation at a time per session (open, launch, stop, restart): no two starts of one server. */
   private queues = new Map<string, Promise<unknown>>()
 
@@ -397,6 +397,7 @@ export class PreviewManager {
     if (!entry) return
     this.entries.delete(key(sessionId, itemId))
     this.sticky.delete(key(sessionId, itemId))
+    this.holderIds.delete(key(sessionId, itemId))
     this.teardown(entry)
   }
 
@@ -473,19 +474,20 @@ export class PreviewManager {
       const used = new Set([...this.entries.values()].flatMap(e => (e.proxy ? [e.proxy.port] : [])))
       const preferred = this.sticky.get(k)
       const order = [...(preferred !== undefined ? [preferred] : []), ...this.settings.ports].filter((p, i, a) => !used.has(p) && a.indexOf(p) === i)
+      // An origin another preview used (or an earlier Codekin) may hold its
+      // storage and service workers: each browser that last entered another
+      // holder there starts with them cleared (the proxy decides per browser).
+      let holder = this.holderIds.get(k)
+      if (!holder) { holder = randomBytes(16).toString('base64url'); this.holderIds.set(k, holder) }
       for (const port of order) {
         const proxyKey = randomBytes(24).toString('base64url')
-        // An origin another preview used (or an earlier Codekin) may hold its
-        // storage and service workers: the new holder starts with them cleared.
-        const clearSiteData = this.portHolder.get(port) !== k
         const server = createPreviewProxy({
-          targetPort: entry.targetPort, key: proxyKey, cookieName: `codekin_preview_${port}`, clearSiteData,
+          targetPort: entry.targetPort, key: proxyKey, cookieName: `${PREVIEW_COOKIE_PREFIX}${port}`, holder,
           ...(this.settings.codekinPort ? { hostPorts: [this.settings.codekinPort] } : {}),
         })
         if (await listen(server, port, this.settings.host)) {
           entry.proxy = { server, port, key: proxyKey }
           this.sticky.set(k, port)
-          this.portHolder.set(port, k)
           if (entry.error?.startsWith('No preview port')) entry.error = undefined
           return
         }
