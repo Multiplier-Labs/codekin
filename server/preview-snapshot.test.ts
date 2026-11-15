@@ -245,7 +245,10 @@ describe.skipIf(!realBrowser)('takeSnapshot with a real browser', () => {
     })
     try {
       // Allowed without the sandbox, so this runs on hosts where it can't start too.
-      const shot = await takeSnapshot(realBrowser!, { port: dev.port, path: '/start', width: 400, height: 300 }, true)
+      // Chrome's cold start on a CI runner busy with the rest of the suite can
+      // eat most of the 30s product limit (this file has taken 3.5s to 48s
+      // there, against under 1s on an idle machine), so give each launch more.
+      const shot = await takeSnapshot(realBrowser!, { port: dev.port, path: '/start', width: 400, height: 300 }, true, 75_000)
       expect(shot.mediaType).toBe('image/png')
       expect(shot.image.subarray(0, 4).toString('hex')).toBe('89504e47')
       expect(shot.title).toBe('Fixture')
@@ -254,8 +257,7 @@ describe.skipIf(!realBrowser)('takeSnapshot with a real browser', () => {
     } finally {
       await dev.close()
     }
-    // takeSnapshot bounds each attempt at 30s, and on a host without a usable
-    // sandbox (CI runners) it launches Chrome twice. Under a loaded parallel
-    // run that legitimately takes past 40s, so let its own limits decide.
-  }, 90_000)
+    // On a host without a usable sandbox (CI runners) takeSnapshot launches
+    // Chrome twice, each launch bounded at 75s above; let those limits decide.
+  }, 180_000)
 })

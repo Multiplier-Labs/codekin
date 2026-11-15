@@ -438,13 +438,21 @@ async function capture(cdp: Cdp, opts: SnapshotOptions, restricted: boolean): Pr
   }
 }
 
-/** Run one snapshot in a fresh browser; the browser and its profile are gone afterwards. */
-export async function takeSnapshot(executable: string, opts: SnapshotOptions, allowNoSandbox = noSandboxAllowed()): Promise<SnapshotResult> {
+/**
+ * Run one snapshot in a fresh browser; the browser and its profile are gone afterwards.
+ * Each browser launch, Chrome's start-up included, is limited to `timeoutMs`.
+ */
+export async function takeSnapshot(
+  executable: string,
+  opts: SnapshotOptions,
+  allowNoSandbox = noSandboxAllowed(),
+  timeoutMs = TOTAL_TIMEOUT_MS,
+): Promise<SnapshotResult> {
   const run = async (sandboxed: boolean): Promise<SnapshotResult> => {
     const profileDir = await mkdtemp(path.join(tmpdir(), 'codekin-snapshot-'))
     const { proc, cdp, stderr } = launch(executable, profileDir, sandboxed)
     try {
-      return await withTimeout(capture(cdp, opts, !sandboxed), TOTAL_TIMEOUT_MS, 'The snapshot took longer than 30 seconds.')
+      return await withTimeout(capture(cdp, opts, !sandboxed), timeoutMs, `The snapshot took longer than ${Math.round(timeoutMs / 1000)} seconds.`)
     } catch (err) {
       // A browser that died at once has its reason on stderr: let it arrive.
       await exited(proc, 1000)
