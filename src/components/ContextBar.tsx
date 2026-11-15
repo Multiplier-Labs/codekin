@@ -157,11 +157,11 @@ export function ContextBar({
           aria-expanded={pickerOpen}
           aria-label="Attach folder, repo or org"
           title="Attach a folder, repo or org to this session"
-          className={`${CHIP} ${progress ? '' : 'w-(--pane-control-h) justify-center px-0'} hover:bg-surface-raised hover:text-ink disabled:opacity-50`}
+          className={`${CHIP} border border-dashed border-edge-strong hover:border-solid hover:bg-surface-raised hover:text-ink disabled:opacity-50`}
         >
           <IconPlus size={14} stroke={2} className="shrink-0" />
-          {/* Icon only at rest; the name is in the tooltip and aria-label. */}
-          {progress}
+          {/* A dashed placeholder chip, so it reads as "add a place here", not a bare +. */}
+          {progress ?? 'Attach'}
         </button>
         {error && <span className="shrink-0 text-meta text-error-4" role="alert">{error}</span>}
       </div>
