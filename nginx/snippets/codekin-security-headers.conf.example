@@ -2,7 +2,8 @@
 # self-hosted relay's web app).
 #
 # Install: copy to /etc/nginx/snippets/codekin-security-headers.conf and
-# replace YOUR_DOMAIN. Then `include snippets/codekin-security-headers.conf;`
+# replace YOUR_DOMAIN (the web app's hostname) and SANDBOX_DOMAIN (the Canvas
+# sandbox page's, nginx/sandbox.example). Then `include snippets/codekin-security-headers.conf;`
 # in EVERY location that serves the app (`/` and `/assets/`). nginx drops
 # server-level add_header directives in any location that sets its own
 # add_header, such as Cache-Control.

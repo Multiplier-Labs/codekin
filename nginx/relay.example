@@ -5,6 +5,8 @@
 # relay server (server/relay) listens on 127.0.0.1:32360 and owns /api and
 # /relay (browser and connector WebSockets). TLS is added by certbot --nginx.
 # Security headers: install nginx/snippets/codekin-security-headers.conf.example.
+# Canvas sandbox page: a second hostname, served by nginx/sandbox.example
+# (docs/SELF-HOSTED-RELAY.md, "Canvas: the sandbox page").
 
 server {
     listen 80;
