@@ -10,6 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - **Preview snapshots.** **Snapshot** in a Canvas preview loads the page in a headless Chrome or Chromium on the machine Codekin runs on and keeps a screenshot, with the console errors and warnings seen while it loaded. Pick a desktop, tablet or phone size. Snapshots of a preview are revisions of one item, so you can step through them or compare two. This is how the hosted web app and relay sessions see a preview, since they can't reach the live page. Set the browser with `CANVAS_SNAPSHOT_BROWSER` (a path, or `off`); otherwise Codekin finds Chrome, Chromium, Edge or a Playwright-installed browser. Starting a launch configuration from a preview now works in the hosted web app too.
 
+### Changed
+- **Snapshots keep Chrome's sandbox.** Where the sandbox can't start (Ubuntu 23.10 and later, unless the browser ships an AppArmor profile), a snapshot used to run without it silently. It now fails and says how to fix it. Set `CANVAS_SNAPSHOT_NO_SANDBOX=1` to allow snapshots without the sandbox; as before, the page then loads only from this machine.
+
 ### Fixed
 - **Preview storage across apps.** When a preview port moved to a different app, only the first browser to open it had the old app's storage cleared; other browsers (another device, a second window profile) kept it, and the new app could read it. Each browser now gets the clear on its own first entry.
 - **Large comparisons.** Comparing two revisions of a big table, file or document no longer draws every row at once. Long runs of unchanged rows fold into a "N unchanged rows" line you can open, and rows are drawn 500 at a time, as in the table view.

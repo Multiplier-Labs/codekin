@@ -12,8 +12,9 @@
  * - Each snapshot gets a fresh, temporary profile: no cookies, storage or
  *   logins carry over, and nothing is left behind.
  * - When Chrome's sandbox can't start (Ubuntu 23.10+ restricts the user
- *   namespaces it needs), it runs without it, but then only reaches
- *   localhost: every other request goes to a dead proxy.
+ *   namespaces it needs), the snapshot fails with setup guidance, unless
+ *   `CANVAS_SNAPSHOT_NO_SANDBOX=1` allows running without it. The page then
+ *   only reaches localhost: every other request goes to a dead proxy.
  */
 
 import { spawn, type ChildProcess } from 'child_process'
@@ -158,6 +159,16 @@ export function findSnapshotBrowser(env: NodeJS.ProcessEnv = process.env, os: No
   }
   return playwrightBrowser(env, os)
 }
+
+/** Whether this machine allows snapshots without Chrome's sandbox (`CANVAS_SNAPSHOT_NO_SANDBOX=1`). */
+export function noSandboxAllowed(env: NodeJS.ProcessEnv = process.env): boolean {
+  return /^(1|true|yes)$/i.test(env.CANVAS_SNAPSHOT_NO_SANDBOX?.trim() ?? '')
+}
+
+export const NO_SANDBOX_MESSAGE =
+  "Chrome's sandbox can't start on this computer (Ubuntu 23.10 and later restrict the user namespaces it needs). " +
+  'Use a browser that ships an AppArmor profile, or set CANVAS_SNAPSHOT_NO_SANDBOX=1 to take snapshots without the sandbox; ' +
+  'the page can then load only from this computer.'
 
 /** Command-line flags for one snapshot browser. */
 export function browserArgs(profileDir: string, sandboxed: boolean): string[] {
@@ -428,7 +439,7 @@ async function capture(cdp: Cdp, opts: SnapshotOptions, restricted: boolean): Pr
 }
 
 /** Run one snapshot in a fresh browser; the browser and its profile are gone afterwards. */
-export async function takeSnapshot(executable: string, opts: SnapshotOptions): Promise<SnapshotResult> {
+export async function takeSnapshot(executable: string, opts: SnapshotOptions, allowNoSandbox = noSandboxAllowed()): Promise<SnapshotResult> {
   const run = async (sandboxed: boolean): Promise<SnapshotResult> => {
     const profileDir = await mkdtemp(path.join(tmpdir(), 'codekin-snapshot-'))
     const { proc, cdp, stderr } = launch(executable, profileDir, sandboxed)
@@ -452,8 +463,10 @@ export async function takeSnapshot(executable: string, opts: SnapshotOptions): P
   try {
     return await run(true)
   } catch (err) {
-    if (err instanceof NoSandbox) return run(false)
-    throw err
+    if (!(err instanceof NoSandbox)) throw err
+    // Running without the sandbox is the machine owner's call, never a silent fallback.
+    if (!allowNoSandbox) throw new SnapshotError(NO_SANDBOX_MESSAGE)
+    return run(false)
   }
 }
 
