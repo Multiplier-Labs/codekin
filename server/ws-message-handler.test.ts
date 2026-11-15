@@ -74,6 +74,7 @@ function createContext(): WsHandlerContext & { sent: WsServerMessage[] } {
       join: vi.fn().mockReturnValue(session),
       leave: vi.fn(),
       startClaude: vi.fn(),
+      startPreparedSession: vi.fn(),
       stopClaude: vi.fn(),
       stopSession: vi.fn(),
       stopClaudeAndWait: vi.fn().mockResolvedValue(undefined),
@@ -234,7 +235,7 @@ describe('handleWsMessage', () => {
       expect((ctx.sessions.create as ReturnType<typeof vi.fn>).mock.calls[0][2].orgManifest).toBeUndefined()
     })
 
-    it('creates session, creates worktree async, sends session_created after', async () => {
+    it('sends session_created at once, then creates the worktree and starts the agent', async () => {
       const session = mockSession({ id: 'wt-1', name: 'WT Session', workingDir: '/projects/app' })
       ;(ctx.sessions.create as ReturnType<typeof vi.fn>).mockReturnValue(session)
       ;(ctx.sessions.get as ReturnType<typeof vi.fn>).mockReturnValue(session)
@@ -247,19 +248,17 @@ describe('handleWsMessage', () => {
         useWorktree: true,
       } as WsClientMessage, ctx)
 
-      // session_created is sent asynchronously after worktree resolves
-      expect(ctx.sent).toHaveLength(0)
+      // The client opens the chat before git runs; nothing starts until the worktree exists.
+      expect(ctx.sent[0]).toMatchObject({ type: 'session_created', sessionId: 'wt-1' })
+      expect(ctx.sessions.startPreparedSession).not.toHaveBeenCalled()
 
-      // Flush microtasks
-      await vi.waitFor(() => expect(ctx.sent.length).toBeGreaterThan(0))
+      await vi.waitFor(() => expect(ctx.sessions.startPreparedSession).toHaveBeenCalled())
 
       expect(ctx.sessions.prepareSessionWorktree).toHaveBeenCalledWith('wt-1', '/projects/app')
       expect(ctx.sessions.create).toHaveBeenCalledWith('WT Session', '/projects/app', expect.objectContaining({ useWorktree: true }))
-      expect(ctx.sent[0]).toMatchObject({
-        type: 'session_created',
-        sessionId: 'wt-1',
-      })
-      expect(ctx.sessions.startClaude).toHaveBeenCalledWith('wt-1')
+      expect(ctx.sessions.startPreparedSession).toHaveBeenCalledWith('wt-1', expect.objectContaining({ ok: true, path: '/tmp/worktree' }))
+      expect(ctx.sessions.startClaude).not.toHaveBeenCalled()
+      expect(ctx.sent).toHaveLength(1)
     })
 
     it('passes the canonical (realpath-resolved) dir to prepareSessionWorktree(), not the raw path', async () => {
@@ -320,7 +319,9 @@ describe('handleWsMessage', () => {
       await vi.waitFor(() => expect(ctx.sessions.prepareSessionWorktree).toHaveBeenCalled())
       await new Promise(r => setTimeout(r, 0))
 
-      expect(ctx.sent).toHaveLength(0)
+      expect(ctx.sent).toHaveLength(1)
+      expect(ctx.sent[0]).toMatchObject({ type: 'session_created', sessionId: 'wt-3' })
+      expect(ctx.sessions.startPreparedSession).not.toHaveBeenCalled()
       expect(ctx.sessions.startClaude).not.toHaveBeenCalled()
     })
   })

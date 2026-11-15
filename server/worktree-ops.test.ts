@@ -4,7 +4,7 @@ import { execFileSync } from 'child_process'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
-import { inspectWorktree, prepareWorktree, removeWorktree, type WorktreeCreated } from './worktree-ops.js'
+import { freshBaseRef, inspectWorktree, prepareWorktree, removeWorktree, type WorktreeCreated } from './worktree-ops.js'
 
 let root: string
 let repo: string
@@ -189,6 +189,62 @@ describe('prepareWorktree', () => {
       prepareWorktree({ sourceDir: repo, ownerId: `${id}0000000`, branch: `wt/${id}0000000`, generatedBranch: true })))
 
     expect(results.every(r => r.ok)).toBe(true)
+  })
+})
+
+describe('prepareWorktree base: the default branch as it is on origin', () => {
+  let clone: string
+
+  beforeEach(() => {
+    // `repo` plays the remote; `clone` is the machine's checkout of it.
+    clone = join(root, 'clone')
+    git(['clone', '-q', repo, clone], root)
+  })
+
+  it('branches from a freshly fetched origin/main when the local main is behind', async () => {
+    const upstreamHead = commit(repo, 'NEW.md', 'new\n', 'landed upstream')
+    const wt = await created({ sourceDir: clone, ownerId: 'fresh001', branch: 'wt/fresh001', generatedBranch: true })
+
+    expect(wt.baseRef).toBe('origin/main')
+    expect(git(['rev-parse', 'HEAD'], wt.path)).toBe(upstreamHead)
+    // The local main is left alone, and origin/main does not become the upstream.
+    expect(git(['rev-parse', 'main'], clone)).not.toBe(upstreamHead)
+    expect(() => git(['config', '--get', 'branch.wt/fresh001.merge'], clone)).toThrow()
+  })
+
+  it('keeps the local main when it already contains origin/main', async () => {
+    const localHead = commit(clone, 'LOCAL.md', 'local\n', 'not pushed yet')
+    const wt = await created({ sourceDir: clone, ownerId: 'fresh002', branch: 'wt/fresh002', generatedBranch: true })
+
+    expect(wt.baseRef).toBe('main')
+    expect(git(['rev-parse', 'HEAD'], wt.path)).toBe(localHead)
+  })
+
+  it('uses the refs already fetched when origin cannot be reached', async () => {
+    const upstreamHead = commit(repo, 'NEW.md', 'new\n', 'landed upstream')
+    git(['fetch', '-q', 'origin'], clone)
+    git(['remote', 'set-url', 'origin', join(root, 'gone')], clone)
+
+    expect(await freshBaseRef(clone, 'main')).toBe('origin/main')
+    const wt = await created({ sourceDir: clone, ownerId: 'fresh003', branch: 'wt/fresh003', generatedBranch: true })
+    expect(git(['rev-parse', 'HEAD'], wt.path)).toBe(upstreamHead)
+  })
+
+  it('restarts an unused generated branch from the fresh origin/main', async () => {
+    git(['branch', 'wt/fresh004'], clone)
+    const upstreamHead = commit(repo, 'NEW.md', 'new\n', 'landed upstream')
+    const wt = await created({ sourceDir: clone, ownerId: 'fresh004', branch: 'wt/fresh004', generatedBranch: true })
+
+    expect(wt.baseRef).toBe('origin/main')
+    expect(git(['rev-parse', 'HEAD'], wt.path)).toBe(upstreamHead)
+  })
+
+  it('leaves a caller-supplied base as it is', async () => {
+    commit(repo, 'NEW.md', 'new\n', 'landed upstream')
+    const wt = await created({ sourceDir: clone, ownerId: 'fresh005', branch: 'wt/fresh005', generatedBranch: true, baseBranch: 'main' })
+
+    expect(wt.baseRef).toBe('main')
+    expect(git(['rev-parse', 'HEAD'], wt.path)).toBe(git(['rev-parse', 'main'], clone))
   })
 })
 
