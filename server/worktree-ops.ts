@@ -57,7 +57,10 @@ export interface PrepareWorktreeOptions {
   branch: string
   /** True when Codekin generated the branch name (e.g. `wt/<id>`), so it may reset an unused one. */
   generatedBranch: boolean
-  /** Ref to branch from when creating a new branch. Defaults to the detected default branch. */
+  /**
+   * Ref to branch from when creating a new branch. Defaults to the default
+   * branch, freshly fetched from origin (see {@link freshBaseRef}).
+   */
   baseBranch?: string
   /** Worktree path the owner already holds, if any; it may be reused. */
   ownedPath?: string
@@ -89,7 +92,8 @@ async function withRepoLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
 }
 
 async function git(args: string[], cwd: string, timeout = 5000): Promise<string> {
-  const { stdout } = await execFileAsync('git', args, { cwd, env: cleanGitEnv(), timeout })
+  // Never wait on a credential prompt: there is no terminal to answer it.
+  const { stdout } = await execFileAsync('git', args, { cwd, env: { ...cleanGitEnv(), GIT_TERMINAL_PROMPT: '0' }, timeout })
   return stdout
 }
 
@@ -144,6 +148,51 @@ export async function detectDefaultBranch(repoRoot: string): Promise<string | nu
     }
   }
   return null
+}
+
+/** How long a worktree creation waits for the remote before using what it has. */
+const FETCH_TIMEOUT_MS = 10_000
+/** A repository fetched this recently is not fetched again (parallel or back-to-back sessions). */
+const FETCH_REUSE_MS = 30_000
+const lastFetchAt = new Map<string, number>()
+
+/**
+ * The ref a new worktree branches from when the caller names none: the
+ * default branch as it is on `origin` now, not as it was when the local
+ * branch was last pulled. Fetches the branch first (bounded; an offline or
+ * slow remote falls back to the refs already there). The local branch is
+ * used when it already contains the remote one (equal, or ahead with
+ * unpushed commits), or when there is no remote copy.
+ */
+export async function freshBaseRef(repoRoot: string, branch: string): Promise<string> {
+  const remoteRef = `refs/remotes/origin/${branch}`
+  const hasOrigin = await git(['config', '--get', 'remote.origin.url'], repoRoot).then(() => true, () => false)
+  if (!hasOrigin) return branch
+  const key = canonical(repoRoot)
+  const last = lastFetchAt.get(key)
+  if (last === undefined || Date.now() - last > FETCH_REUSE_MS) {
+    try {
+      await git(['fetch', '--quiet', '--no-tags', 'origin', `+refs/heads/${branch}:${remoteRef}`], repoRoot, FETCH_TIMEOUT_MS)
+      lastFetchAt.set(key, Date.now())
+    } catch (err) {
+      console.warn(`[worktree] Could not fetch origin/${branch}; using the refs already fetched:`, errorText(err))
+    }
+  }
+  if (!await refExists(remoteRef, repoRoot)) return branch
+  if (!await refExists(`refs/heads/${branch}`, repoRoot)) return `origin/${branch}`
+  try {
+    await git(['merge-base', '--is-ancestor', remoteRef, `refs/heads/${branch}`], repoRoot)
+    return branch
+  } catch {
+    return `origin/${branch}`
+  }
+}
+
+/** The caller's base, else the default branch as fresh as the remote allows. */
+async function resolveBase(repoRoot: string, baseBranch: string | undefined): Promise<string | undefined> {
+  if (baseBranch) return baseBranch
+  const detected = await detectDefaultBranch(repoRoot)
+  return detected ? freshBaseRef(repoRoot, detected) : undefined
 }
 
 async function listWorktrees(repoRoot: string): Promise<WorktreeEntry[]> {
@@ -264,20 +313,21 @@ async function prepareLocked(repoRoot: string, opts: PrepareWorktreeOptions): Pr
     let baseRef: string | undefined
     let args: string[]
     if (branchExists) {
-      const base = opts.generatedBranch ? (opts.baseBranch ?? await detectDefaultBranch(repoRoot)) : undefined
+      const base = opts.generatedBranch ? await resolveBase(repoRoot, opts.baseBranch) : undefined
       const unique = base
         ? Number((await git(['rev-list', '--count', `${base}..${branch}`], repoRoot).catch(() => '1')).trim())
         : 1
       if (base && unique === 0) {
         // A generated branch with no commits of its own: restart it from the base.
         baseRef = base
-        args = ['worktree', 'add', '-B', branch, worktreePath, base]
+        args = ['worktree', 'add', '--no-track', '-B', branch, worktreePath, base]
       } else {
         args = ['worktree', 'add', worktreePath, branch]
       }
     } else {
-      baseRef = opts.baseBranch ?? await detectDefaultBranch(repoRoot) ?? undefined
-      args = ['worktree', 'add', '-b', branch, worktreePath]
+      baseRef = await resolveBase(repoRoot, opts.baseBranch)
+      // --no-track: branching from origin/<default> must not make it the upstream.
+      args = ['worktree', 'add', '--no-track', '-b', branch, worktreePath]
       if (baseRef) args.push(baseRef)
     }
     const baseCommit = await resolveCommit(baseRef ?? 'HEAD', repoRoot)

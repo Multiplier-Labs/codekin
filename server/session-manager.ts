@@ -47,7 +47,7 @@ import {
   type AnchorInput, type ReviewAuthor,
 } from './review-comments.js'
 import { ProcessCoordinator } from './process-coordinator.js'
-import { inspectWorktree, prepareWorktree, removeWorktree, type WorktreeResult } from './worktree-ops.js'
+import { inspectWorktree, prepareWorktree, removeWorktree, type WorktreeCreated, type WorktreeResult } from './worktree-ops.js'
 import { describePlace, invalidatePlace } from './places.js'
 import { moveDir, validateMoveTarget } from './move-folder.js'
 import { buildPlaceNote, describeAttached, validateAttachPath } from './attached-places.js'
@@ -616,6 +616,17 @@ export class SessionManager {
     this._globalBroadcast?.({ type: 'sessions_updated' })
     this.resumeAfterWorktreeChange(session, `Switched to the shared checkout: ${checkout}`)
     return true
+  }
+
+  /**
+   * A new isolated session's worktree is ready: say where it branched from,
+   * then start the agent with any input sent while it was being prepared.
+   */
+  startPreparedSession(sessionId: string, result: WorktreeCreated): void {
+    const session = this.sessions.get(sessionId)
+    if (!session) return
+    const from = result.baseRef ? ` (branched from ${result.baseRef})` : ''
+    this.resumeAfterWorktreeChange(session, `Worktree ready: ${result.path}${from}`)
   }
 
   /** Announce a working-directory change, then start the session with any held input. */
