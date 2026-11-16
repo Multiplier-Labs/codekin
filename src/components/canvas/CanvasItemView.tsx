@@ -1,6 +1,6 @@
 /**
  * The body of a Canvas item. Markdown renders through the shared sanitized
- * pipeline, images only through <img> (so SVG scripts never run), tables in
+ * pipeline, images only through <img> (so SVG scripts never run) with pan and zoom, tables in
  * a sortable, filterable grid, and diagrams through Mermaid in strict mode.
  */
 
@@ -16,6 +16,7 @@ import { SandboxFrame } from './SandboxFrame'
 import { isDesktopWebView } from '../../lib/desktopLinks'
 import { PreviewView } from './PreviewView'
 import { SnapshotView } from './SnapshotView'
+import { ZoomableImage } from './ZoomableImage'
 
 // ext-apps and the MCP protocol code load only when an MCP App is shown.
 const McpAppView = lazy(() => import('./McpAppView'))
@@ -73,15 +74,7 @@ export function CanvasItemView({ view, onAttach, onOpenFile, toc, sandboxOrigin,
     if (content.meta?.snapshot) {
       return <SnapshotView item={item} revision={view.revision} src={`data:${content.mediaType};base64,${content.content}`} meta={content.meta.snapshot} onAttach={onAttach} />
     }
-    return (
-      <div className="flex flex-1 items-start justify-center p-8">
-        <img
-          src={`data:${content.mediaType};base64,${content.content}`}
-          alt={item.title}
-          className="max-h-full max-w-full rounded-control border border-edge bg-surface object-contain"
-        />
-      </div>
-    )
+    return <ZoomableImage src={`data:${content.mediaType};base64,${content.content}`} alt={item.title} />
   }
   if (item.kind === 'mcp_app') {
     if (sandboxOrigin) {

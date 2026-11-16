@@ -10,6 +10,7 @@ import { IconAlertTriangle, IconChevronDown, IconChevronRight, IconInfoCircle, I
 import type { CanvasItem, SnapshotMeta } from '../../types'
 import type { CanvasSelectionKind } from '../../lib/canvasContext'
 import { consoleContext } from '../../lib/previewProtocol'
+import { ZoomableImage } from './ZoomableImage'
 
 interface Props {
   item: CanvasItem
@@ -71,9 +72,7 @@ export function SnapshotView({ item, revision, src, meta, onAttach }: Props) {
           </ul>
         </div>
       )}
-      <div className="flex min-h-0 flex-1 items-start justify-center overflow-auto p-4">
-        <img src={src} alt={item.title} style={{ width: VIEWPORT_WIDTH[meta.viewport] }} className="h-auto max-w-full rounded-control border border-edge bg-surface" />
-      </div>
+      <ZoomableImage src={src} alt={item.title} width={VIEWPORT_WIDTH[meta.viewport]} />
     </div>
   )
 }
