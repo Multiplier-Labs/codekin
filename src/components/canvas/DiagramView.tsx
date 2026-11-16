@@ -5,11 +5,13 @@
  * for, ask the agent about them, or open the file in Canvas.
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { IconAlertTriangle, IconLoader2, IconMaximize, IconMinus, IconPlus } from '@tabler/icons-react'
+import { useEffect, useRef, useState } from 'react'
+import { IconAlertTriangle, IconLoader2 } from '@tabler/icons-react'
 import type { CanvasItemMeta } from '../../types'
 import { mermaidNodeId, mountSvg, renderMermaid } from '../../lib/mermaidRender'
 import { canvasKindForPath } from '../../lib/canvas'
+import { usePanZoom } from './usePanZoom'
+import { ZoomControls } from './ZoomControls'
 
 type NodeInfo = NonNullable<CanvasItemMeta['nodes']>[string]
 
@@ -22,9 +24,6 @@ interface Props {
   onOpenFile: (path: string) => void
 }
 
-const MIN = 0.2
-const MAX = 4
-
 function currentScheme(): 'light' | 'dark' {
   return document.documentElement.dataset.scheme === 'dark' ? 'dark' : 'light'
 }
@@ -34,9 +33,8 @@ export function DiagramView({ source, meta, onAttachNode, onOpenFile }: Props) {
   const hostRef = useRef<HTMLDivElement>(null)
   const [state, setState] = useState<{ status: 'loading' } | { status: 'ready' } | { status: 'error'; message: string }>({ status: 'loading' })
   const [scheme, setScheme] = useState(currentScheme)
-  const [view, setView] = useState({ scale: 1, x: 0, y: 0 })
+  const { view, fit, zoomBy, handlers } = usePanZoom(viewportRef)
   const [popover, setPopover] = useState<{ id: string; label: string; info: NodeInfo; x: number; y: number } | null>(null)
-  const size = useRef({ w: 0, h: 0 })
 
   // Re-render when the theme flips between light and dark.
   useEffect(() => {
@@ -45,18 +43,10 @@ export function DiagramView({ source, meta, onAttachNode, onOpenFile }: Props) {
     return () => { observer.disconnect() }
   }, [])
 
-  const fit = useCallback(() => {
-    const vp = viewportRef.current
-    const { w, h } = size.current
-    if (!vp || !w || !h) return
-    const pad = 48
-    const scale = Math.min(1, (vp.clientWidth - pad) / w, (vp.clientHeight - pad) / h)
-    setView({ scale, x: (vp.clientWidth - w * scale) / 2, y: Math.max(pad / 2, (vp.clientHeight - h * scale) / 2) })
-  }, [])
-
   useEffect(() => {
     let cancelled = false
     let cleanup: (() => void) | undefined
+    let fitSize: { w: number; h: number } | undefined
     setState({ status: 'loading' }) // eslint-disable-line react-hooks/set-state-in-effect -- a new source starts loading
     setPopover(null)
     renderMermaid(source, scheme).then(svg => {
@@ -66,64 +56,37 @@ export function DiagramView({ source, meta, onAttachNode, onOpenFile }: Props) {
       if (el) {
         // Lay the SVG out at its natural size; the wrapper scales it.
         const vb = el.viewBox.baseVal
-        size.current = { w: vb.width || el.getBoundingClientRect().width, h: vb.height || el.getBoundingClientRect().height }
+        const w = vb.width || el.getBoundingClientRect().width
+        const h = vb.height || el.getBoundingClientRect().height
         el.style.maxWidth = 'none'
-        el.setAttribute('width', String(size.current.w))
-        el.setAttribute('height', String(size.current.h))
+        el.setAttribute('width', String(w))
+        el.setAttribute('height', String(h))
+        fitSize = { w, h }
         for (const node of Array.from(el.querySelectorAll('g.node'))) {
           const id = mermaidNodeId(node)
           if (id && meta?.nodes?.[id]) (node as SVGGElement).style.cursor = 'pointer'
         }
       }
       setState({ status: 'ready' })
-      fit()
+      if (fitSize) fit(fitSize.w, fitSize.h)
     }).catch((err: unknown) => {
       if (!cancelled) setState({ status: 'error', message: err instanceof Error ? err.message : String(err) })
     })
     return () => { cancelled = true; cleanup?.() }
   }, [source, scheme, meta, fit])
 
-  // Scroll to zoom around the pointer (non-passive, so the panel doesn't scroll).
-  useEffect(() => {
-    const vp = viewportRef.current
-    if (!vp) return
-    const onWheel = (e: WheelEvent) => {
-      e.preventDefault()
-      const rect = vp.getBoundingClientRect()
-      const px = e.clientX - rect.left
-      const py = e.clientY - rect.top
-      setView(v => {
-        const scale = Math.min(MAX, Math.max(MIN, v.scale * Math.exp(-e.deltaY * 0.0015)))
-        const k = scale / v.scale
-        return { scale, x: px - (px - v.x) * k, y: py - (py - v.y) * k }
-      })
-    }
-    vp.addEventListener('wheel', onWheel, { passive: false })
-    return () => { vp.removeEventListener('wheel', onWheel) }
-  }, [])
-
   // The node under the pointer is taken at pointerdown: once the viewport
   // captures the pointer, pointerup targets the viewport, not the node.
-  const drag = useRef<{ x: number; y: number; vx: number; vy: number; moved: boolean; node: Element | null } | null>(null)
+  const pressedNode = useRef<Element | null>(null)
   const onPointerDown = (e: React.PointerEvent) => {
-    if ((e.target as Element).closest('[data-diagram-popover], [data-diagram-controls]')) return
-    drag.current = { x: e.clientX, y: e.clientY, vx: view.x, vy: view.y, moved: false, node: (e.target as Element).closest('g.node') }
-    ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+    if ((e.target as Element).closest('[data-diagram-popover], [data-zoom-controls]')) return
+    pressedNode.current = (e.target as Element).closest('g.node')
+    handlers.onPointerDown(e)
   }
-  const onPointerMove = (e: React.PointerEvent) => {
-    const d = drag.current
-    if (!d) return
-    const dx = e.clientX - d.x
-    const dy = e.clientY - d.y
-    if (Math.abs(dx) + Math.abs(dy) > 3) d.moved = true
-    if (d.moved) setView(v => ({ ...v, x: d.vx + dx, y: d.vy + dy }))
-  }
-  const onPointerUp = () => {
-    const d = drag.current
-    drag.current = null
-    if (!d || d.moved) return
+  const onPointerUp = (e: React.PointerEvent) => {
+    if (!handlers.onPointerUp(e)) return
     // A click, not a drag: open the clicked node's details, or close them.
-    const node = d.node
+    const node = pressedNode.current
     const id = node ? mermaidNodeId(node) : null
     const info = id ? meta?.nodes?.[id] : undefined
     if (!node || !id || !info) { setPopover(null); return }
@@ -135,18 +98,6 @@ export function DiagramView({ source, meta, onAttachNode, onOpenFile }: Props) {
     const below = box.bottom - vp.top + 8
     const y = below + 200 > vp.height ? Math.max(8, box.top - vp.top - 208) : below
     setPopover({ id, label: node.textContent.trim() || id, info, x, y })
-  }
-
-  const zoomBy = (factor: number) => {
-    const vp = viewportRef.current
-    if (!vp) return
-    const cx = vp.clientWidth / 2
-    const cy = vp.clientHeight / 2
-    setView(v => {
-      const scale = Math.min(MAX, Math.max(MIN, v.scale * factor))
-      const k = scale / v.scale
-      return { scale, x: cx - (cx - v.x) * k, y: cy - (cy - v.y) * k }
-    })
   }
 
   if (state.status === 'error') {
@@ -173,8 +124,9 @@ export function DiagramView({ source, meta, onAttachNode, onOpenFile }: Props) {
       ref={viewportRef}
       className="relative min-h-0 flex-1 cursor-grab touch-none overflow-hidden select-none active:cursor-grabbing"
       onPointerDown={onPointerDown}
-      onPointerMove={onPointerMove}
+      onPointerMove={handlers.onPointerMove}
       onPointerUp={onPointerUp}
+      onPointerCancel={handlers.onPointerCancel}
     >
       <div
         ref={hostRef}
@@ -225,12 +177,7 @@ export function DiagramView({ source, meta, onAttachNode, onOpenFile }: Props) {
         </div>
       )}
       <div className="absolute bottom-3 left-4 text-meta text-ink-faint">Drag to pan · scroll to zoom{meta?.nodes ? ' · click a box for its file' : ''}</div>
-      <div data-diagram-controls className="absolute bottom-3 right-3 flex items-center gap-1 rounded-control border border-edge bg-surface p-1">
-        <button type="button" onClick={() => { zoomBy(1 / 1.25) }} className="inline-flex h-7 w-7 items-center justify-center rounded-control text-ink-muted hover:bg-surface-raised hover:text-ink" aria-label="Zoom out"><IconMinus size={15} /></button>
-        <span className="w-12 text-center text-meta tabular-nums text-ink">{Math.round(view.scale * 100)}%</span>
-        <button type="button" onClick={() => { zoomBy(1.25) }} className="inline-flex h-7 w-7 items-center justify-center rounded-control text-ink-muted hover:bg-surface-raised hover:text-ink" aria-label="Zoom in"><IconPlus size={15} /></button>
-        <button type="button" onClick={fit} className="inline-flex h-7 w-7 items-center justify-center rounded-control text-ink-muted hover:bg-surface-raised hover:text-ink" aria-label="Fit to view" title="Fit to view"><IconMaximize size={15} /></button>
-      </div>
+      <ZoomControls scale={view.scale} onZoomBy={zoomBy} onFit={() => { fit() }} />
     </div>
   )
 }

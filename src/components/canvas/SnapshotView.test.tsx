@@ -40,7 +40,7 @@ describe('SnapshotView', () => {
     expect(el.textContent).toContain('Phone, 390 px')
     expect(el.textContent).toContain('1 error, 1 warning')
     expect(el.textContent).toContain('TypeError: x is undefined')
-    expect(el.querySelector('img')!.style.width).toBe('390px')
+    expect(el.querySelector('img')!.getAttribute('width')).toBe('390')
     const send = [...el.querySelectorAll('button')].find(b => b.textContent?.includes('Send errors to agent'))!
     act(() => { send.click() })
     expect(onAttach).toHaveBeenCalledWith('console', expect.stringContaining('TypeError: x is undefined'), '1 console error', true)
