@@ -169,7 +169,7 @@ function UserMessage({ msg, fontSize, canvas }: { msg: ChatMessage & { type: 'us
   const { text, context } = parseWithContext(msg.text)
   const bubble = text && (
     <div
-      className="user-bubble rounded-control border border-edge bg-surface px-3 py-2 text-ink whitespace-pre-wrap"
+      className="user-bubble rounded-control border border-edge bg-surface px-3 py-2 text-ink whitespace-pre-wrap wrap-anywhere"
       style={{ fontSize: `${fontSize}px` }}
     >
       {formatUserText(text)}
