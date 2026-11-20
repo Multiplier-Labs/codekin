@@ -5,6 +5,7 @@
  * Usage:
  *   codekin start                  Run server in foreground
  *   codekin stop                   Stop the running background service
+ *   codekin restart                Restart the background service
  *   codekin setup                  First-time setup wizard
  *   codekin service install        Install + start background service
  *   codekin service uninstall      Remove background service
@@ -658,6 +659,54 @@ function cmdStop() {
   }
 }
 
+/**
+ * Restart the background service. The server probes the agent CLIs (Claude,
+ * Codex, OpenCode, Grok) only at startup, so this is also how a CLI installed
+ * or signed in after boot gets picked up.
+ */
+function cmdRestart() {
+  const os = platform()
+  if (os === 'darwin') {
+    if (!existsSync(LAUNCHD_PLIST)) {
+      printNoServiceHint()
+      return
+    }
+    // Unload fails harmlessly when the job is already stopped (`codekin stop`);
+    // load then starts it either way. Unload waits for the graceful shutdown.
+    spawnSync('launchctl', ['unload', LAUNCHD_PLIST], { stdio: 'pipe' })
+    const result = spawnSync('launchctl', ['load', LAUNCHD_PLIST], { stdio: 'inherit' })
+    if (result.status === 0) {
+      console.log('Codekin service restarted.')
+    } else {
+      console.error('Failed to restart launchd service. Log: ~/.codekin/server.log')
+      process.exit(1)
+    }
+  } else if (os === 'linux') {
+    if (!existsSync(SYSTEMD_SERVICE_FILE)) {
+      printNoServiceHint()
+      return
+    }
+    const result = spawnSync('systemctl', ['--user', 'restart', 'codekin'], { stdio: 'pipe', encoding: 'utf-8' })
+    if (result.status === 0) {
+      console.log('Codekin service restarted.')
+    } else {
+      const msg = (result.stderr || '').trim()
+      if (msg) console.error(msg)
+      console.error('Check: journalctl --user -u codekin')
+      process.exit(1)
+    }
+  } else {
+    console.error(`Service restart is not supported on ${os}. Press Ctrl+C in the foreground server's terminal, then run 'codekin start'.`)
+    process.exit(1)
+  }
+}
+
+function printNoServiceHint() {
+  console.log('Codekin background service is not installed.')
+  console.log("  - Foreground server: press Ctrl+C in its terminal, then run 'codekin start'.")
+  console.log('  - Desktop app: quit it (Cmd+Q) and open it again.')
+}
+
 // ---------------------------------------------------------------------------
 // Service dispatch
 // ---------------------------------------------------------------------------
@@ -777,6 +826,8 @@ if (cmd === 'start') {
   if (code !== null) process.exit(code)
 } else if (cmd === 'stop') {
   cmdStop()
+} else if (cmd === 'restart') {
+  cmdRestart()
 } else if (cmd === 'setup') {
   await cmdSetup({ regenerate: args.includes('--regenerate') })
 } else if (cmd === 'config') {
@@ -824,6 +875,7 @@ if (cmd === 'start') {
 Usage:
   codekin start                   Run server in foreground
   codekin stop                    Stop the running background service
+  codekin restart                 Restart the background service
   codekin setup                   First-time setup wizard
   codekin setup --regenerate      Regenerate auth token
   codekin config                  Update settings

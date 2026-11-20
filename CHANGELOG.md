@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `codekin restart` restarts the background service (launchd on macOS, systemd on Linux). The server checks for agent CLIs only at startup, so restart after installing or signing in to one.
+
+### Fixed
+- Codex could show "Connected" in the footer and still be greyed out as "not installed" in the new-session picker. The picker used the CLI check from server startup, so a Codex installed afterwards (or whose `codex --version` timed out at login) stayed unavailable until a restart. A successful live Codex model list now makes it selectable. The "not found" tooltip now suggests restarting Codekin.
+
 ## [0.12.2] - 2026-11-15
 
 ### Changed
