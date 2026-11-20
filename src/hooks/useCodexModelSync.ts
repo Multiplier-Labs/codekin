@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { fetchCodexModels } from '../lib/ccApi'
 import type { ModelOption, CodingProvider } from '../types'
 import { getPref } from '../lib/prefs'
+import { setCodexLiveCheck } from '../lib/agentHealth'
 
 interface UseCodexModelSyncOptions {
   token: string
@@ -37,6 +38,9 @@ export function useCodexModelSync({
 }: UseCodexModelSyncOptions) {
   const [codexModels, setCodexModels] = useState<ModelOption[]>([])
   const [codexConnected, setCodexConnected] = useState<boolean | null>(null)
+  // The pickers read availability from the server's boot-time probe; feed
+  // them the live result too, so a CLI installed after boot is selectable.
+  useEffect(() => { setCodexLiveCheck(codexConnected) }, [codexConnected])
   const currentModelRef = useRef(currentModel)
   useEffect(() => { currentModelRef.current = currentModel }, [currentModel])
   const providerRef = useRef(activeSessionProvider)

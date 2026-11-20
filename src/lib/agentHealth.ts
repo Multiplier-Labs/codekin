@@ -25,12 +25,45 @@ export interface AgentHealth {
   grokAuthenticated?: boolean
 }
 
+/** The server's startup probes, as last received. */
+let reported: AgentHealth | null = null
+/** Result of the latest live Codex check (model list fetch); null = not run. */
+let codexLive: boolean | null = null
+/** `reported` with live checks applied; a stable reference for useSyncExternalStore. */
 let current: AgentHealth | null = null
 const listeners = new Set<() => void>()
 
-export function setAgentHealth(health: AgentHealth): void {
-  current = health
+/**
+ * The server probes each CLI once, at boot, and keeps the answer until it
+ * restarts. A CLI installed after boot (or whose `--version` probe timed out
+ * at login) stays "not installed" in the pickers while the footer, which
+ * lists Codex models live, says "Connected". A live model list is proof the
+ * binary runs and is signed in, so it overrides a stale "not installed".
+ * It never downgrades a probe: one failed fetch is weaker evidence than it.
+ */
+function applyLiveChecks(health: AgentHealth | null): AgentHealth | null {
+  if (!health || codexLive !== true || health.codexAvailable) return health
+  return { ...health, codexAvailable: true, codexAuthenticated: true }
+}
+
+function publish(): void {
+  current = applyLiveChecks(reported)
   for (const listener of [...listeners]) listener()
+}
+
+export function setAgentHealth(health: AgentHealth): void {
+  reported = health
+  publish()
+}
+
+/**
+ * Record the outcome of a live Codex check (the `/api/codex/models` fetch
+ * behind the footer's Codex status), so the pickers agree with the footer.
+ */
+export function setCodexLiveCheck(reachable: boolean | null): void {
+  if (reachable === codexLive) return
+  codexLive = reachable
+  publish()
 }
 
 export function getAgentHealth(): AgentHealth | null {
@@ -61,18 +94,18 @@ export function providerAvailability(health: AgentHealth | null, provider: Codin
   if (!health) return { available: true, hint: null }
   switch (provider) {
     case 'claude':
-      if (!health.claudeAvailable) return { available: false, hint: 'Claude CLI not installed on the host' }
+      if (!health.claudeAvailable) return { available: false, hint: 'Claude CLI not found on the host — installed it since? Restart Codekin' }
       if (!health.claudeAuthenticated) return { available: true, hint: 'Claude CLI may not be signed in — run `claude` on the host' }
       return { available: true, hint: null }
     case 'codex':
-      if (!health.codexAvailable) return { available: false, hint: 'Codex CLI not installed on the host' }
+      if (!health.codexAvailable) return { available: false, hint: 'Codex CLI not found on the host — installed it since? Restart Codekin' }
       if (!health.codexAuthenticated) return { available: true, hint: 'Codex not authenticated — run `codex login` on the host' }
       return { available: true, hint: null }
     case 'opencode':
-      if (!health.openCodeAvailable) return { available: false, hint: 'OpenCode CLI not installed on the host' }
+      if (!health.openCodeAvailable) return { available: false, hint: 'OpenCode CLI not found on the host — installed it since? Restart Codekin' }
       return { available: true, hint: null }
     case 'grok':
-      if (!health.grokAvailable) return { available: false, hint: 'Grok Build CLI not installed on the host' }
+      if (!health.grokAvailable) return { available: false, hint: 'Grok Build CLI not found on the host — installed it since? Restart Codekin' }
       if (!health.grokAuthenticated) return { available: true, hint: 'Grok not signed in — run `grok login` on the host' }
       return { available: true, hint: null }
     default:

@@ -1,6 +1,6 @@
 /** Tests for the agent-health store and the provider availability policy. */
 import { describe, it, expect, beforeEach } from 'vitest'
-import { setAgentHealth, getAgentHealth, subscribeAgentHealth, providerAvailability, resolveDefaultProvider, type AgentHealth } from './agentHealth'
+import { setAgentHealth, getAgentHealth, subscribeAgentHealth, setCodexLiveCheck, providerAvailability, resolveDefaultProvider, type AgentHealth } from './agentHealth'
 
 function health(overrides: Partial<AgentHealth> = {}): AgentHealth {
   return {
@@ -61,6 +61,7 @@ describe('providerAvailability', () => {
 describe('store', () => {
   beforeEach(() => {
     // Reset by setting a fresh value — the module keeps a singleton.
+    setCodexLiveCheck(null)
     setAgentHealth(health())
   })
 
@@ -75,6 +76,44 @@ describe('store', () => {
     unsubscribe()
     setAgentHealth(health())
     expect(notified).toBe(1)
+  })
+
+  it('a live Codex model list overrides a stale "not installed" boot probe', () => {
+    setAgentHealth(health({ codexAvailable: false, codexAuthenticated: false }))
+    expect(providerAvailability(getAgentHealth(), 'codex').available).toBe(false)
+
+    setCodexLiveCheck(true)
+    expect(providerAvailability(getAgentHealth(), 'codex')).toEqual({ available: true, hint: null })
+  })
+
+  it('keeps the override when the boot probe arrives after the live check', () => {
+    setCodexLiveCheck(true)
+    setAgentHealth(health({ codexAvailable: false, codexAuthenticated: false }))
+    expect(getAgentHealth()?.codexAvailable).toBe(true)
+  })
+
+  it('a failed live check never downgrades the boot probe', () => {
+    setCodexLiveCheck(false)
+    expect(providerAvailability(getAgentHealth(), 'codex')).toEqual({ available: true, hint: null })
+  })
+
+  it('leaves a real auth warning alone when the binary was found', () => {
+    setAgentHealth(health({ codexAuthenticated: false }))
+    setCodexLiveCheck(true)
+    expect(providerAvailability(getAgentHealth(), 'codex').hint).toMatch(/codex login/)
+  })
+
+  it('drops the override once the live check stops succeeding', () => {
+    setAgentHealth(health({ codexAvailable: false }))
+    setCodexLiveCheck(true)
+    setCodexLiveCheck(false)
+    expect(getAgentHealth()?.codexAvailable).toBe(false)
+  })
+
+  it('returns a stable reference between updates', () => {
+    setAgentHealth(health({ codexAvailable: false }))
+    setCodexLiveCheck(true)
+    expect(getAgentHealth()).toBe(getAgentHealth())
   })
 })
 

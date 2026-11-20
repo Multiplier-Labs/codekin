@@ -147,6 +147,7 @@ codekin service install         # (Re-)install the background service
 codekin service uninstall       # Remove the background service
 codekin start                   # Run in foreground (for debugging)
 codekin stop                    # Stop the running background service
+codekin restart                 # Restart it (picks up newly installed agent CLIs)
 codekin setup --regenerate      # Generate a new auth token
 codekin relay status            # Show web app pairing + connection
 codekin relay login             # Pair this computer with a web app
