@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync
 import { tmpdir } from 'os'
 import { join } from 'path'
 import {
-  CodexRunner, parseEnabledFeatures, parseMcpServerNames, billingModeFor, mapTurnError, parseRateLimits, type RunSpec,
+  CodexRunner, type RateLimitSnapshot, parseEnabledFeatures, parseMcpServerNames, billingModeFor, mapTurnError, parseRateLimits, type RunSpec,
 } from './execution-codex-runner.js'
 
 /**
@@ -42,10 +42,11 @@ rl.on('line', (line) => {
       if (mode === 'apikey') return reply({ account: { type: 'apiKey' } })
       return reply({ account: { type: 'chatgpt', email: 'x@example.com', planType: 'plus' } })
     case 'account/rateLimits/read':
+      if (mode === 'nolimits') return send({ id: m.id, error: { code: -32000, message: 'not available' } })
       return reply({ rateLimits: { primary: { usedPercent: 12, windowDurationMins: 10080, resetsAt: 2000000000 },
         credits: { hasCredits: mode === 'credits' }, planType: 'plus', rateLimitReachedType: mode === 'limited' ? 'primary' : null } })
     case 'model/list': return reply({ data: [{ id: 'fake-model', isDefault: true }, { id: 'other' }] })
-    case 'thread/start': current = 't' + (++threads); return reply({ thread: { id: current }, model: 'fake-model' })
+    case 'thread/start': current = 't' + (++threads); return reply({ thread: { id: current }, model: 'fake-model', instructionSources: mode === 'agentsmd' ? [process.env.HOME + '/.codex/AGENTS.md'] : [] })
     case 'thread/unsubscribe': return reply({})
     case 'turn/start': {
       reply({ turn: { id: 'turn1' } })
@@ -55,6 +56,19 @@ rl.on('line', (line) => {
       if (mode === 'tool') return send({ method: 'item/started', params: { item: { type: 'commandExecution', id: 'c1', command: 'cat secrets' } } })
       if (mode === 'mcp') return send({ method: 'mcpServer/startupStatus/updated', params: { name: 'x', status: 'starting' } })
       if (mode === 'request') return send({ id: 99, method: 'item/commandExecution/requestApproval', params: {} })
+      if (mode === 'child') {
+        // A grandchild that ignores SIGTERM, as a sandboxed command might.
+        const c = require('child_process').spawn(process.execPath, ['-e', "process.on('SIGTERM', () => {}); setInterval(() => {}, 1000)"], { stdio: 'ignore' })
+        log({ childPid: c.pid })
+        return
+      }
+      if (mode === 'twocalls') {
+        // A tool call that emits no item: two model requests, then an answer.
+        send({ method: 'thread/tokenUsage/updated', params: { threadId: current, tokenUsage: { last: { inputTokens: 40, outputTokens: 5 } } } })
+        send({ method: 'thread/tokenUsage/updated', params: { threadId: current, tokenUsage: { last: { inputTokens: 50, outputTokens: 5 } } } })
+        item('agentMessage', { text: '{"ok":true}', phase: 'final_answer' })
+        return send({ method: 'turn/completed', params: { threadId: current, turn: { id: 'turn1', status: 'completed', items: [] } } })
+      }
       if (mode === 'quota') return send({ method: 'turn/completed', params: { turn: { id: 'turn1', status: 'failed', error: { message: 'limit', codexErrorInfo: 'usageLimitExceeded' } } } })
       item('userMessage')
       item('reasoning')
@@ -163,6 +177,7 @@ describe('CodexRunner.run', () => {
     const start = lines.find(l => Array.isArray(l.argv) && (l.argv as string[]).includes('app-server'))!
     const argv = start.argv as string[]
     expect(argv).toEqual(expect.arrayContaining(['--disable', 'shell_tool', 'apps', 'web_search="disabled"', 'mcp_servers.alpha.enabled=false', 'mcp_servers."beta.x".enabled=false']))
+    expect(argv).toEqual(expect.arrayContaining(['skills.include_instructions=false', 'include_environment_context=false', 'project_doc_max_bytes=0']))
     expect(argv).not.toContain('memories') // already off: not passed
     expect(argv).not.toContain('fast_mode') // not a tool feature
     expect((start.env as Record<string, unknown>).OPENAI_API_KEY).toBeNull()
@@ -188,6 +203,8 @@ describe('CodexRunner.run', () => {
     ['tool', /commandExecution/],
     ['mcp', /MCP server/],
     ['request', /asked the client/],
+    ['twocalls', /second model request/],
+    ['agentsmd', /instruction files into the job \(AGENTS\.md\)/],
   ])('fails closed when the guard trips (%s)', async (mode, message) => {
     process.env.FAKE_MODE = mode
     const res = await runner().run(spec(), new AbortController().signal)
@@ -214,6 +231,43 @@ describe('CodexRunner.run', () => {
     if (mode === 'apikey' || mode === 'credits' || mode === 'nologin' || mode === 'limited') {
       expect(logLines().some(l => l.method === 'turn/start')).toBe(false)
     }
+  })
+
+  it('decides billing on a recent usage snapshot only', async () => {
+    process.env.FAKE_MODE = 'nolimits'
+    const snapshot = (ageMs: number): RateLimitSnapshot => ({
+      usedPercent: 1, windowDurationMins: null, resetsAt: null, planType: 'plus', hasCredits: false, limitReached: null,
+      at: new Date(Date.now() - ageMs).toISOString(),
+    })
+    // A recent snapshot is used as is (the warm path): no read, the job runs.
+    const warm = runner()
+    ;(warm as unknown as { lastRateLimits: RateLimitSnapshot }).lastRateLimits = snapshot(1000)
+    expect((await warm.run(spec(), new AbortController().signal)).ok).toBe(true)
+    // An old one is not: the read is due, it fails, and billing is unknown.
+    const stale = runner()
+    ;(stale as unknown as { lastRateLimits: RateLimitSnapshot }).lastRateLimits = snapshot(120_000)
+    const res = await stale.run(spec(), new AbortController().signal)
+    expect(res).toMatchObject({ ok: false, billingMode: 'unknown', error: { code: 'UNSUPPORTED_CAPABILITY' } })
+    expect(logLines().filter(l => l.method === 'turn/start')).toHaveLength(1)
+  })
+
+  it.skipIf(process.platform === 'win32')('kills what the app-server started along with it', async () => {
+    process.env.FAKE_MODE = 'child'
+    const ac = new AbortController()
+    const p = runner().run(spec(), ac.signal)
+    let pid: number | undefined
+    for (let i = 0; i < 50 && !pid; i++) {
+      await new Promise(r => setTimeout(r, 50))
+      pid = logLines().find(l => typeof l.childPid === 'number')?.childPid as number | undefined
+    }
+    expect(pid).toBeTypeOf('number')
+    ac.abort()
+    await p
+    let alive = true
+    for (let i = 0; i < 20 && alive; i++) {
+      try { process.kill(pid!, 0); await new Promise(r => setTimeout(r, 50)) } catch { alive = false }
+    }
+    expect(alive).toBe(false)
   })
 
   it('stops at the deadline', async () => {

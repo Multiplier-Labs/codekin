@@ -95,6 +95,13 @@ describe('execution routes', () => {
     expect(caps.body.harnesses.codex.profiles).toEqual(['inference'])
   })
 
+  it('refuses an IP after repeated bad tokens, before looking at the token', async () => {
+    for (let i = 0; i < 20; i++) expect((await call('/capabilities', { token: `guess-${i}` })).status).toBe(401)
+    const blocked = await call('/capabilities', { token: 'app-token' })
+    expect(blocked.status).toBe(429)
+    expect(blocked.body.error.code).toBe('RATE_LIMITED')
+  })
+
   it('submits, deduplicates and long-polls a job to its result', async () => {
     runner.delayMs = 300
     const first = await call('/jobs', { method: 'POST', token: 'app-token', key: 'k1', body: jobBody() })

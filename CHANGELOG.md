@@ -8,7 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Execution API** (`/api/execution/v1`, off unless `EXECUTION_ENABLED=1`): your own applications can run bounded, tool-less model jobs (JSON with a schema, or text) through a signed-in Codex, with per-application tokens, a durable queue, a warm Codex process reused across jobs and subscription-only billing. See docs/EXECUTION-API.md (#945, #946).
 - `codekin restart` restarts the background service (launchd on macOS, systemd on Linux). The server checks for agent CLIs only at startup, so restart after installing or signing in to one.
+
+### Security
+- Execution API hardening. Jobs no longer carry your Codex skills list or environment details. Jobs fail closed on a second model request (a tool call that emits no event) or on a loaded `AGENTS.md`. Billing is decided only on the job's own usage read. Requests are dropped when a job ends, so submit-and-cancel can't fill the disk. Failed token attempts are rate limited per IP. Output validation no longer accepts `constructor`/`__proto__` as properties. Stopping a job kills everything its Codex process started. A separate Codex home stays optional.
 
 ### Fixed
 - Codex could show "Connected" in the footer and still be greyed out as "not installed" in the new-session picker. The picker used the CLI check from server startup, so a Codex installed afterwards (or whose `codex --version` timed out at login) stayed unavailable until a restart. A successful live Codex model list now makes it selectable. The "not found" tooltip now suggests restarting Codekin.

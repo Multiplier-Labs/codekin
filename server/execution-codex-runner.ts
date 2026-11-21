@@ -6,11 +6,14 @@
  * process underneath is kept warm and reused for later jobs (up to
  * `warmMaxAgeMs`, default an hour) — but only after a clean, completed turn;
  * a guard trip, cancellation, deadline or any incomplete turn replaces it. The job
- * gets no tools: tool-bearing features are disabled, every MCP server in the
+ * runs nothing: tool-bearing features are disabled, every MCP server in the
  * Codex config is disabled by name, the sandbox is read-only and approvals
- * are never granted. A runtime guard then fails the job closed if anything
- * slips through anyway — an MCP server starting, any item other than the
- * user message / reasoning / the answer, or any server-initiated request.
+ * are never granted. The skills list and environment context are left out of
+ * the model's context. A runtime guard then fails the job closed if anything
+ * slips through anyway: instruction files (AGENTS.md) loaded into the thread,
+ * an MCP server starting, any item other than the user message / reasoning /
+ * the answer, a second model request in the turn (which only a tool call
+ * causes), or any server-initiated request.
  *
  * Unlike CodexProcess (interactive coding sessions) no conversation is ever
  * shared: each job's thread is unsubscribed when it ends, so nothing can leak
@@ -216,13 +219,28 @@ class AppServerConnection {
     this.write({ method })
   }
 
-  /** SIGTERM, then SIGKILL after a grace period; resolves once the process has exited. */
+  /** Signal the app-server's process group (it was spawned detached), else the process alone. */
+  private signal(sig: NodeJS.Signals): void {
+    const pid = this.proc.pid
+    try {
+      if (USE_PROCESS_GROUP && pid) process.kill(-pid, sig)
+      else this.proc.kill(sig)
+    } catch { /* already gone */ }
+  }
+
+  /**
+   * SIGTERM, then SIGKILL after a grace period; resolves once the process has
+   * exited. Anything it started in its process group is killed with it.
+   */
   async terminate(graceMs = 2000): Promise<void> {
-    if (this.exited) return
-    try { this.proc.kill('SIGTERM') } catch { /* already gone */ }
-    const timer = setTimeout(() => { try { this.proc.kill('SIGKILL') } catch { /* gone */ } }, graceMs)
-    await this.exitPromise
-    clearTimeout(timer)
+    if (!this.exited) {
+      this.signal('SIGTERM')
+      const timer = setTimeout(() => { this.signal('SIGKILL') }, graceMs)
+      await this.exitPromise
+      clearTimeout(timer)
+    }
+    // Children that ignored SIGTERM outlive the app-server; the group id stays valid while they run.
+    this.signal('SIGKILL')
   }
 }
 
@@ -260,6 +278,23 @@ const ACCOUNT_TTL_MS = 60_000
 const INIT_TIMEOUT_MS = 20_000
 
 const ALLOWED_ITEM_TYPES = new Set(['userMessage', 'reasoning', 'agentMessage'])
+
+/**
+ * Config overrides that keep the user's Codex home out of the job: without
+ * them every job's context lists the home's skills (names and descriptions)
+ * and describes the machine's environment, so a client could have them echoed
+ * back. Unknown keys are ignored by older CLIs; instruction files are also
+ * caught by the guard after thread/start.
+ */
+export const CONTEXT_OVERRIDES = [
+  'web_search="disabled"',
+  'skills.include_instructions=false',
+  'include_environment_context=false',
+  'project_doc_max_bytes=0',
+]
+
+/** Process groups exist on POSIX only; on Windows only the app-server itself is signalled. */
+const USE_PROCESS_GROUP = process.platform !== 'win32'
 const STRIPPED_FOR_JOBS = ['OPENAI_API_KEY', 'CODEX_API_KEY', 'OPENAI_BASE_URL', 'AUTH_TOKEN', 'AUTH_TOKEN_FILE']
 
 function err(code: JobErrorCode, message: string, retryable = false, retryAfter: string | null = null): JobError {
@@ -372,7 +407,7 @@ export class CodexRunner implements HarnessRunner {
     const dir = mkdtempSync(join(tmpdir(), 'codekin-exec-'))
     let proc: ChildProcess
     try {
-      proc = spawn(this.binary, args, { cwd: dir, env: this.env(), stdio: ['pipe', 'pipe', 'ignore'] })
+      proc = spawn(this.binary, args, { cwd: dir, env: this.env(), stdio: ['pipe', 'pipe', 'ignore'], detached: USE_PROCESS_GROUP })
     } catch (e) {
       rmSync(dir, { recursive: true, force: true })
       throw e
@@ -451,7 +486,11 @@ export class CodexRunner implements HarnessRunner {
     return this.featureFlags
   }
 
-  /** Arguments for one job's app-server: tool features off, every configured MCP server off, no web search. */
+  /**
+   * Arguments for one job's app-server: tool features off, every configured
+   * MCP server off, no web search, and none of the home's skills, project docs
+   * or environment details in the model's context.
+   */
   async appServerArgs(): Promise<string[]> {
     const flags = await this.ensureFeatureFlags()
     let servers: string[] = []
@@ -459,7 +498,7 @@ export class CodexRunner implements HarnessRunner {
     if (existsSync(cfg)) servers = parseMcpServerNames(readFileSync(cfg, 'utf-8'))
     return [
       ...this.binaryArgs, 'app-server', ...flags,
-      '-c', 'web_search="disabled"',
+      ...CONTEXT_OVERRIDES.flatMap(o => ['-c', o]),
       ...servers.flatMap(n => ['-c', `mcp_servers.${tomlKey(n)}.enabled=false`]),
     ]
   }
@@ -499,6 +538,7 @@ export class CodexRunner implements HarnessRunner {
     }
 
     let usage: JobUsage | null = null
+    let modelRequests = 0
     let finalText: string | null = null
     let lastText: string | null = null
     let model: string | null = spec.model
@@ -526,6 +566,13 @@ export class CodexRunner implements HarnessRunner {
       }
       if (!mine(params)) return
       if (method === 'thread/tokenUsage/updated') {
+        // One update per model request. A tool-less turn makes exactly one; a
+        // second means the model called a tool and Codex fed the result back.
+        // Not every tool call emits an item, so this is the guard that holds.
+        if (++modelRequests > 1) {
+          guard('the turn made a second model request (a tool call)')
+          return
+        }
         const tu = (params.tokenUsage ?? {}) as Record<string, unknown>
         const b = (tu.last ?? tu.total ?? {}) as Record<string, unknown>
         usage = { inputTokens: num(b.inputTokens), outputTokens: num(b.outputTokens) }
@@ -574,23 +621,27 @@ export class CodexRunner implements HarnessRunner {
         finish({ ok: false, error: err('AUTH_REQUIRED', 'Codex is not logged in for execution jobs') })
         return
       }
-      // Usage arrives with every turn; read it only when none is recent.
-      const rlAge = this.lastRateLimits ? Date.now() - Date.parse(this.lastRateLimits.at) : Infinity
+      // Usage arrives with every turn; read it only when none is recent. Billing
+      // is decided on a recent snapshot only: when the read is due and fails,
+      // the mode is unknown, never whatever an older job saw.
+      let rl = this.lastRateLimits
+      const rlAge = rl ? Date.now() - Date.parse(rl.at) : Infinity
       if (rlAge >= ACCOUNT_TTL_MS) {
+        rl = null
         try {
-          const rl = parseRateLimits(((await conn.request('account/rateLimits/read', null)) ?? {}) as Record<string, unknown>)
+          rl = parseRateLimits(((await conn.request('account/rateLimits/read', null)) ?? {}) as Record<string, unknown>)
           if (rl) this.lastRateLimits = rl
-        } catch { /* not every account type reports limits */ }
+        } catch { /* not every account type reports limits; billing is then unknown */ }
       }
-      if (this.lastRateLimits) hooks.onRateLimits?.(this.lastRateLimits)
-      billingMode = billingModeFor(account, this.lastRateLimits)
+      if (rl) hooks.onRateLimits?.(rl)
+      billingMode = billingModeFor(account, rl)
       if (billingMode !== 'subscription') {
         this.accountCache = null
         finish({ ok: false, error: err('UNSUPPORTED_CAPABILITY', `Billing mode is ${billingMode}, and the job allows subscription only`) })
         return
       }
-      if (this.lastRateLimits?.limitReached) {
-        finish({ ok: false, error: err('QUOTA_EXHAUSTED', `Subscription limit reached (${this.lastRateLimits.limitReached})`, true, this.lastRateLimits.resetsAt) })
+      if (rl?.limitReached) {
+        finish({ ok: false, error: err('QUOTA_EXHAUSTED', `Subscription limit reached (${rl.limitReached})`, true, rl.resetsAt) })
         return
       }
       const thread = await conn.request('thread/start', {
@@ -601,10 +652,17 @@ export class CodexRunner implements HarnessRunner {
         baseInstructions: spec.instructions,
         ...(spec.model ? { model: spec.model } : {}),
         ...(spec.effort ? { config: { model_reasoning_effort: spec.effort } } : {}),
-      }) as { thread?: { id?: string }; model?: string } | null
+      }) as { thread?: { id?: string }; model?: string; instructionSources?: unknown } | null
       if (!spec.model && typeof thread?.model === 'string') model = thread.model
       job.threadId = thread?.thread?.id ?? null
       if (!job.threadId) throw new Error('thread/start returned no thread id')
+      // A global AGENTS.md in the Codex home would be in every job's context.
+      const sources = Array.isArray(thread?.instructionSources) ? thread.instructionSources.filter((s): s is string => typeof s === 'string') : []
+      if (sources.length > 0) {
+        const names = [...new Set(sources.map(s => s.split(/[\\/]/).pop()))].join(', ')
+        guard(`Codex loaded instruction files into the job (${names}); remove them from the Codex home or set EXECUTION_CODEX_HOME`)
+        return
+      }
       await conn.request('turn/start', {
         threadId: job.threadId,
         input: [{ type: 'text', text: spec.input, text_elements: [] }],
@@ -646,7 +704,7 @@ export class CodexRunner implements HarnessRunner {
   private async withAppServer<T>(fn: (conn: AppServerConnection) => Promise<T>, timeoutMs = 20_000): Promise<T> {
     const args = await this.appServerArgs()
     const cwd = mkdtempSync(join(tmpdir(), 'codekin-exec-probe-'))
-    const proc = spawn(this.binary, args, { cwd, env: this.env(), stdio: ['pipe', 'pipe', 'ignore'] })
+    const proc = spawn(this.binary, args, { cwd, env: this.env(), stdio: ['pipe', 'pipe', 'ignore'], detached: USE_PROCESS_GROUP })
     proc.on('error', () => { /* surfaced via close */ })
     const conn = new AppServerConnection(proc)
     const timer = setTimeout(() => { void conn.terminate() }, timeoutMs)

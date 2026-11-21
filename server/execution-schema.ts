@@ -122,14 +122,15 @@ export function validateAgainstSchema(schema: JsonSchema, value: unknown, path =
   if (matched === 'object') {
     const obj = value as Record<string, unknown>
     const props = (schema.properties ?? {}) as Record<string, JsonSchema>
+    // Own properties only: `in` would accept "constructor", "toString" or "__proto__" via Object.prototype.
     for (const key of Object.keys(obj)) {
-      if (!(key in props)) return `${path}: unexpected property "${key}"`
+      if (!Object.hasOwn(props, key)) return `${path}: unexpected property "${key}"`
     }
     for (const name of (schema.required ?? []) as string[]) {
-      if (!(name in obj)) return `${path}: missing property "${name}"`
+      if (!Object.hasOwn(obj, name)) return `${path}: missing property "${name}"`
     }
     for (const [name, sub] of Object.entries(props)) {
-      if (name in obj) {
+      if (Object.hasOwn(obj, name)) {
         const err = validateAgainstSchema(sub, obj[name], `${path}.${name}`)
         if (err) return err
       }

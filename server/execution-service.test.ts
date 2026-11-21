@@ -84,6 +84,16 @@ describe('submission', () => {
     expect(done).toMatchObject({ status: 'succeeded', output: { ok: true }, attempts: 1, billingMode: 'subscription' })
   })
 
+  it('drops the request when the job ends, and still deduplicates', async () => {
+    const job = submit('k1')
+    const done = await service.waitFor(job.id, 3000)
+    expect(done?.status).toBe('succeeded')
+    expect(store.getRequest(job.id)).toBeNull()
+    expect(done?.output).toEqual({ ok: true })
+    expect(submit('k1').id).toBe(job.id)
+    expect(() => submit('k1', { input: 'other mail' })).toThrow(/different request/)
+  })
+
   it('deduplicates by key and rejects a different payload under the same key', async () => {
     const a = service.submit({ clientId: 'app', allowedHarnesses: ['codex'], idempotencyKey: 'k', body: body() })
     // A retry computes a new deadline; it is still the same logical request.

@@ -51,6 +51,14 @@ describe('validateAgainstSchema', () => {
     expect(validateAgainstSchema(proposal, value)).toMatch(message)
   })
 
+  it('does not take Object.prototype names for properties', () => {
+    const one = { type: 'object', additionalProperties: false, required: ['a'], properties: { a: { type: 'string' } } }
+    expect(validateAgainstSchema(one, JSON.parse('{"a":"x","constructor":1}'))).toMatch(/unexpected property "constructor"/)
+    expect(validateAgainstSchema(one, JSON.parse('{"a":"x","__proto__":{"z":1}}'))).toMatch(/unexpected property "__proto__"/)
+    const named = { type: 'object', additionalProperties: false, required: ['toString'], properties: { toString: { type: 'string' } } }
+    expect(validateAgainstSchema(named, {})).toMatch(/missing property "toString"/)
+  })
+
   it('checks integers and anyOf', () => {
     expect(validateAgainstSchema({ type: 'integer' }, 1.5)).toMatch(/expected integer/)
     expect(validateAgainstSchema({ anyOf: [{ type: 'string' }, { type: 'null' }] }, 3)).toMatch(/anyOf/)
