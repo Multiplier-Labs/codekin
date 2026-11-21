@@ -8,8 +8,10 @@
  *                    deduplication is committed before anything executes.
  *
  * Same conventions as the other stores: better-sqlite3, WAL, 0o600, JSON as
- * TEXT, ':memory:' for tests. Payload columns (instructions, input, schema,
- * output, raw) are cleared by the retention sweep while the row itself —
+ * TEXT, ':memory:' for tests. The request (instructions, input, schema) is
+ * dropped as soon as the job ends: deduplication needs only its hash, and
+ * keeping it would let a client store 256 KB per submit-and-cancel. Output
+ * and raw answers are cleared by the retention sweep, while the row itself —
  * the dedup tombstone — stays until it ages out.
  */
 
@@ -223,7 +225,7 @@ export class ExecutionStore {
     return row ? this.toJob(row) : null
   }
 
-  /** The stored request, or null once payloads have expired. */
+  /** The stored request, or null once the job has ended. */
   getRequest(id: string): JobRequest | null {
     const row = this.db.prepare('SELECT request_json FROM execution_jobs WHERE id = ?').get(id) as { request_json: string | null } | undefined
     return row?.request_json ? parseOr<JobRequest | null>(row.request_json, null) : null
@@ -275,14 +277,14 @@ export class ExecutionStore {
   }
 
   /**
-   * Move a non-terminal job to a terminal state. Returns false when it was
-   * already terminal — the first committed outcome wins.
+   * Move a non-terminal job to a terminal state and drop its request. Returns
+   * false when it was already terminal — the first committed outcome wins.
    */
   finish(id: string, status: Exclude<JobStatus, 'queued' | 'running'>, fields: {
     output?: unknown; raw?: string | null; usage?: JobUsage | null; error?: JobError | null; billingMode?: string | null; model?: string | null
   } = {}, now = new Date()): boolean {
     const r = this.db.prepare(`
-      UPDATE execution_jobs SET status = ?, finished_at = ?, wait_reason = NULL,
+      UPDATE execution_jobs SET status = ?, finished_at = ?, wait_reason = NULL, request_json = NULL,
         output_json = ?, raw = ?, usage_json = ?, error_json = ?,
         billing_mode = COALESCE(?, billing_mode), model = COALESCE(?, model)
       WHERE id = ? AND status IN ('queued', 'running')

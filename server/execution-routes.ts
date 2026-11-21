@@ -11,6 +11,8 @@
  * lookup outside that scope is a 404, never a 403, so IDs reveal nothing.
  * The router parses its own JSON body (prompts exceed the global 100 kB
  * limit) and has its own per-client rate limit instead of the per-IP one.
+ * Because it sits before the per-IP limiter, it limits failed token
+ * attempts per IP itself.
  */
 
 import express, { Router, type Request, type Response, type NextFunction } from 'express'
@@ -21,6 +23,9 @@ import type { Job } from './execution-store.js'
 const MAX_WAIT_S = 30
 const RATE_WINDOW_MS = 60_000
 const RATE_MAX = 600
+/** Failed token attempts per IP per window before every request from it is refused. */
+const AUTH_FAIL_MAX = 20
+const AUTH_FAIL_MAP_MAX = 10_000
 
 type AuthedRequest = Request & { executionClient?: ExecutionClient }
 
@@ -71,14 +76,32 @@ function sendInputError(res: Response, e: ExecutionInputError): void {
 export function createExecutionRouter(clients: ExecutionClients, service: ExecutionService): Router {
   const router = Router()
   const buckets = new Map<string, { count: number; resetAt: number }>()
+  const authFailures = new Map<string, { count: number; resetAt: number }>()
 
   router.use((req: AuthedRequest, res: Response, next: NextFunction) => {
+    const now = Date.now()
+    const ip = req.ip || req.socket.remoteAddress || 'unknown'
+    const failed = authFailures.get(ip)
+    if (failed && now < failed.resetAt && failed.count >= AUTH_FAIL_MAX) {
+      // Refused before the token is looked at, so a blocked IP learns nothing about it.
+      res.setHeader('Retry-After', String(Math.ceil((failed.resetAt - now) / 1000)))
+      res.status(429).json({ error: { code: 'RATE_LIMITED', message: 'Too many failed authentication attempts', retryable: true } })
+      return
+    }
     const client = clients.authenticate(bearer(req))
     if (!client) {
+      if (!failed || now >= failed.resetAt) {
+        if (authFailures.size >= AUTH_FAIL_MAP_MAX) {
+          for (const [k, v] of authFailures) if (now >= v.resetAt) authFailures.delete(k)
+          if (authFailures.size >= AUTH_FAIL_MAP_MAX) authFailures.clear()
+        }
+        authFailures.set(ip, { count: 1, resetAt: now + RATE_WINDOW_MS })
+      } else {
+        failed.count++
+      }
       res.status(401).json({ error: { code: 'UNAUTHORIZED', message: 'Unknown execution client token', retryable: false } })
       return
     }
-    const now = Date.now()
     const b = buckets.get(client.id)
     if (!b || now >= b.resetAt) buckets.set(client.id, { count: 1, resetAt: now + RATE_WINDOW_MS })
     else if (++b.count > RATE_MAX) {

@@ -2,7 +2,7 @@
 
 The execution API lets your own applications use the coding agents you have already signed in to in Codekin for **bounded model jobs**. Examples are classifying an email, extracting fields as JSON, or drafting a short reply. The jobs run through the agent CLI's own login (for Codex, ChatGPT sign-in), so an application needs no provider API key of its own.
 
-Each job is one isolated model turn with no tools. It is not a coding session: there is no repository, worktree, shell, file access, MCP server or web access. A job sees only the instructions and input you send.
+Each job is one isolated model turn that runs nothing. It is not a coding session: there is no repository, worktree, shell, file access, MCP server or web access. Your skills, instruction files and machine details are kept out of the job's context: the model sees your instructions and input, plus Codex's own built-in system and tool instructions.
 
 The first supported harness is Codex (`codex app-server`). The API is versioned under `/api/execution/v1` and is off by default.
 
@@ -20,32 +20,39 @@ The first supported harness is Codex (`codex app-server`). The API is versioned 
    chmod 600 ~/.codekin/execution-clients.json
    ```
 
-2. Optional but recommended: create a dedicated Codex home for jobs. Codex loads MCP servers, plugins, skills and hooks from its config home, and a home that holds nothing else keeps jobs isolated by construction. Sign it in separately; never copy `auth.json` between homes.
-
-   ```bash
-   mkdir -p ~/.codekin/execution-codex
-   printf 'web_search = "disabled"\n' > ~/.codekin/execution-codex/config.toml
-   CODEX_HOME=~/.codekin/execution-codex codex login --device-auth
-   ```
-
-   Without a dedicated home, jobs use your normal Codex home. Codekin then disables every `[mcp_servers.*]` entry it finds there by name at the start of each job.
-
-3. Set `EXECUTION_ENABLED=1` (plus any settings below) in Codekin's environment and restart it.
+2. Set `EXECUTION_ENABLED=1` (plus any settings below) in Codekin's environment and restart it.
 
 | Setting | Default | Meaning |
 |---|---|---|
 | `EXECUTION_ENABLED` | off | Mount `/api/execution/v1` |
 | `EXECUTION_CLIENTS_FILE` | `~/.codekin/execution-clients.json` | Client list (re-read when it changes) |
-| `EXECUTION_CODEX_HOME` | unset | Dedicated `CODEX_HOME` for jobs |
+| `EXECUTION_CODEX_HOME` | unset | Separate `CODEX_HOME` for jobs (see below) |
 | `EXECUTION_CONCURRENCY` | `1` | Jobs running at once (1–8) |
 | `EXECUTION_WARM_MINUTES` | `60` | Reuse a warm harness process for up to this long (0 = a new process per job) |
 | `EXECUTION_MAX_QUEUED` | `100` | Queued + running jobs across all clients |
 | `EXECUTION_BACKGROUND_BUDGET_PERCENT` | `80` | Hold `background` jobs while the subscription usage window is at or above this percent |
 | `EXECUTION_RETENTION_DAYS` | `7` | Delete job payloads after this many days (1–7) |
 
+### A separate Codex home (optional)
+
+Jobs use your normal Codex home and its sign-in by default. That home's MCP servers, plugins, hooks, skills and environment details are switched off or left out for each job, so you don't need a second home.
+
+Use one only if:
+
+- you keep a global `AGENTS.md` in your Codex home. Codex would put it in every job's context, so such jobs fail with `UNSUPPORTED_CAPABILITY` until you remove the file or point jobs at a home without it;
+- or you want jobs on a different ChatGPT account, so they don't share your sessions' usage window.
+
+Sign the new home in separately; never copy `auth.json` between homes, because each sign-in rotates its own refresh token.
+
+```bash
+mkdir -p ~/.codekin/execution-codex
+CODEX_HOME=~/.codekin/execution-codex codex login --device-auth
+# then set EXECUTION_CODEX_HOME=~/.codekin/execution-codex and restart Codekin
+```
+
 ## Authentication
 
-Send `Authorization: Bearer <client token>`. Only tokens from the clients file are accepted on these routes. Codekin's admin token and session tokens are not accepted here, and client tokens open nothing else.
+Send `Authorization: Bearer <client token>`. Only tokens from the clients file are accepted on these routes. Codekin's admin token and session tokens are not accepted here, and client tokens open nothing else. After 20 failed token attempts in a minute, an IP gets `429` for the rest of that minute, even with a valid token.
 
 Removing a client from the file revokes it on its next request. A file that fails to parse disables every client until it is fixed.
 
@@ -58,20 +65,25 @@ For every Codex job, Codekin:
 - runs the job on a new ephemeral thread whose base instructions are the job's `instructions`, with `sandbox: read-only` and `approvalPolicy: never`, in a new empty working directory that is deleted afterwards;
 - runs that thread in a warm `codex app-server` process, reused for up to `EXECUTION_WARM_MINUTES`. A process is reused only after a turn that ran to completion without a guard trip. Any guard trip, cancellation, deadline or incomplete turn stops it before the job is reported. A change in the CLI's features or the configured MCP servers starts a new one. Finished threads are unloaded (`thread/unsubscribe`), so no job's process holds another job's conversation;
 - disables every tool-bearing Codex feature the installed CLI reports as enabled, turns web search off, and disables configured MCP servers;
+- leaves the home's skills list, project docs and environment context (working directory, shell, date) out of the model's context;
 - removes `OPENAI_API_KEY`, `CODEX_API_KEY` and `OPENAI_BASE_URL` from the process environment, so the CLI cannot fall back to API-key billing;
 - passes the job's schema as `outputSchema` for JSON jobs.
 
-A runtime guard then fails the job **closed** with `UNSUPPORTED_CAPABILITY` and stops the process if any of these appear:
+Some current models are still offered Codex's built-in collaboration and code-mode tools (`spawn_agent`, `exec`, …) whatever the config says. Their hosts are disabled, so they can't run commands, read files or reach the network, but the model can call them.
 
+A runtime guard therefore fails the job **closed** with `UNSUPPORTED_CAPABILITY` and stops the process, along with anything it started, if any of these appear:
+
+- Codex loads an instruction file (`AGENTS.md`) into the thread;
 - an MCP server starts;
+- the turn makes a second model request. A tool-less turn makes exactly one, and a tool call always causes another, even a call that produces no item;
 - any thread in the process produces an item other than the user message, reasoning or the answer (for example a command, file change or tool call);
 - the harness sends the client any request.
 
-Treat job input as untrusted data. Isolation is enforced by the steps above; telling the model not to use tools is not relied on.
+Treat job input as untrusted data. Isolation is enforced by the steps above; telling the model not to use tools is not relied on. Re-check `/capabilities` after upgrading the Codex CLI: the probe job runs through the same guard.
 
 ## Billing
 
-Jobs require `"billingPolicy": "subscription-only"`. Before each turn Codekin checks the account (`account/read`, cached for a minute) and its usage window (`account/rateLimits/read`, kept current by the harness's per-turn usage updates). The billing mode is `subscription` only when all of these hold:
+Jobs require `"billingPolicy": "subscription-only"`. Before each turn Codekin checks the account (`account/read`, cached for a minute) and its usage window (`account/rateLimits/read`, kept current by the harness's per-turn usage updates). A usage reading more than a minute old is read again, and if that read fails the mode is `unknown`. The billing mode is `subscription` only when all of these hold:
 
 - the account is a ChatGPT sign-in;
 - the plan is not usage-based;
@@ -191,8 +203,8 @@ Idempotent.
 - Jobs run `EXECUTION_CONCURRENCY` at a time, separately from coding sessions. Coding sessions are not counted or limited by this API.
 - Jobs and your own sessions share the same subscription usage window. Above `EXECUTION_BACKGROUND_BUDGET_PERCENT`, `background` jobs stay queued with `waitReason: "budget"` while `interactive` jobs continue. They resume when the window has room again, or expire at their deadline.
 
-Each Codex job carries a fixed per-turn overhead of a few thousand input tokens, in addition to your prompt. Batch small items into one job where you can.
+Each Codex job carries a fixed per-turn overhead of about 3,500 input tokens (Codex's own system and tool instructions), in addition to your prompt. Batch small items into one job where you can.
 
 ## Retention
 
-Instructions, input, output and raw answers are deleted after `EXECUTION_RETENTION_DAYS`. A minimal record (key, request hash, status, timestamps) stays until 7 days, so retries keep deduplicating. Logs never contain prompts, outputs or tokens.
+Instructions, input and schema are deleted as soon as a job ends. Output and raw answers are deleted after `EXECUTION_RETENTION_DAYS`. A minimal record (key, request hash, status, timestamps) stays until 7 days, so retries keep deduplicating. Logs never contain prompts, outputs or tokens.
