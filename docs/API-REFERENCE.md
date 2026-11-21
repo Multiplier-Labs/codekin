@@ -14,6 +14,8 @@ The token is set via the `AUTH_TOKEN` environment variable or `--auth-file` CLI 
 
 Unauthenticated requests return `401 Unauthorized`.
 
+The execution API (`/api/execution/v1`, off by default) is the exception. It uses its own per-application client tokens and does not accept the admin token. See [Execution API](EXECUTION-API.md).
+
 ---
 
 ## WebSocket Server Hardening
