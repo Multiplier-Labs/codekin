@@ -144,6 +144,7 @@ export class ExecutionService extends EventEmitter {
       Promise.allSettled([...this.inflight]),
       new Promise((resolve) => { setTimeout(resolve, 5000).unref() }),
     ])
+    await Promise.all(Object.values(this.runners).map((r) => (r?.close ? r.close() : Promise.resolve())))
   }
 
   sweep(now = new Date()): { payloadsCleared: number; rowsDeleted: number } {

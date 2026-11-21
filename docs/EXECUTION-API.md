@@ -38,6 +38,7 @@ The first supported harness is Codex (`codex app-server`). The API is versioned 
 | `EXECUTION_CLIENTS_FILE` | `~/.codekin/execution-clients.json` | Client list (re-read when it changes) |
 | `EXECUTION_CODEX_HOME` | unset | Dedicated `CODEX_HOME` for jobs |
 | `EXECUTION_CONCURRENCY` | `1` | Jobs running at once (1–8) |
+| `EXECUTION_WARM_MINUTES` | `60` | Reuse a warm harness process for up to this long (0 = a new process per job) |
 | `EXECUTION_MAX_QUEUED` | `100` | Queued + running jobs across all clients |
 | `EXECUTION_BACKGROUND_BUDGET_PERCENT` | `80` | Hold `background` jobs while the subscription usage window is at or above this percent |
 | `EXECUTION_RETENTION_DAYS` | `7` | Delete job payloads after this many days (1–7) |
@@ -54,8 +55,8 @@ Jobs belong to the client that created them. Pass `X-Execution-User: <userRef>` 
 
 For every Codex job, Codekin:
 
-- starts a fresh `codex app-server` process in a new empty temporary directory, and deletes both afterwards;
-- uses an ephemeral thread whose base instructions are the job's `instructions`, with `sandbox: read-only` and `approvalPolicy: never`;
+- runs the job on a new ephemeral thread whose base instructions are the job's `instructions`, with `sandbox: read-only` and `approvalPolicy: never`, in a new empty working directory that is deleted afterwards;
+- runs that thread in a warm `codex app-server` process, reused for up to `EXECUTION_WARM_MINUTES`. A process is reused only after a turn that ran to completion without a guard trip. Any guard trip, cancellation, deadline or incomplete turn stops it before the job is reported. A change in the CLI's features or the configured MCP servers starts a new one. Finished threads are unloaded (`thread/unsubscribe`), so no job's process holds another job's conversation;
 - disables every tool-bearing Codex feature the installed CLI reports as enabled, turns web search off, and disables configured MCP servers;
 - removes `OPENAI_API_KEY`, `CODEX_API_KEY` and `OPENAI_BASE_URL` from the process environment, so the CLI cannot fall back to API-key billing;
 - passes the job's schema as `outputSchema` for JSON jobs.
@@ -63,14 +64,14 @@ For every Codex job, Codekin:
 A runtime guard then fails the job **closed** with `UNSUPPORTED_CAPABILITY` and stops the process if any of these appear:
 
 - an MCP server starts;
-- the turn produces any item other than the user message, reasoning or the answer (for example a command, file change or tool call);
+- any thread in the process produces an item other than the user message, reasoning or the answer (for example a command, file change or tool call);
 - the harness sends the client any request.
 
 Treat job input as untrusted data. Isolation is enforced by the steps above; telling the model not to use tools is not relied on.
 
 ## Billing
 
-Jobs require `"billingPolicy": "subscription-only"`. Before each turn Codekin reads the account (`account/read`) and its usage window (`account/rateLimits/read`). The billing mode is `subscription` only when all of these hold:
+Jobs require `"billingPolicy": "subscription-only"`. Before each turn Codekin checks the account (`account/read`, cached for a minute) and its usage window (`account/rateLimits/read`, kept current by the harness's per-turn usage updates). The billing mode is `subscription` only when all of these hold:
 
 - the account is a ChatGPT sign-in;
 - the plan is not usage-based;

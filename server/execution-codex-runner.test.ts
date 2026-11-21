@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest'
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from 'vitest'
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
@@ -26,6 +26,8 @@ if (argv[0] === 'features') {
 log({ argv, cwd: process.cwd(), env: { OPENAI_API_KEY: process.env.OPENAI_API_KEY ?? null, CODEX_HOME: process.env.CODEX_HOME ?? null } })
 const mode = process.env.FAKE_MODE || 'ok'
 const send = (m) => process.stdout.write(JSON.stringify(m) + '\n')
+let threads = 0
+let current = null
 const rl = require('readline').createInterface({ input: process.stdin })
 rl.on('line', (line) => {
   const m = JSON.parse(line)
@@ -43,10 +45,11 @@ rl.on('line', (line) => {
       return reply({ rateLimits: { primary: { usedPercent: 12, windowDurationMins: 10080, resetsAt: 2000000000 },
         credits: { hasCredits: mode === 'credits' }, planType: 'plus', rateLimitReachedType: mode === 'limited' ? 'primary' : null } })
     case 'model/list': return reply({ data: [{ id: 'fake-model', isDefault: true }, { id: 'other' }] })
-    case 'thread/start': return reply({ thread: { id: 't1' }, model: 'fake-model' })
+    case 'thread/start': current = 't' + (++threads); return reply({ thread: { id: current }, model: 'fake-model' })
+    case 'thread/unsubscribe': return reply({})
     case 'turn/start': {
       reply({ turn: { id: 'turn1' } })
-      const item = (type, extra = {}) => send({ method: 'item/completed', params: { item: { type, id: type + '1', ...extra } } })
+      const item = (type, extra = {}) => send({ method: 'item/completed', params: { threadId: current, item: { type, id: type + '1', ...extra } } })
       if (mode === 'hang') return
       if (mode === 'exit') process.exit(3)
       if (mode === 'tool') return send({ method: 'item/started', params: { item: { type: 'commandExecution', id: 'c1', command: 'cat secrets' } } })
@@ -57,8 +60,9 @@ rl.on('line', (line) => {
       item('reasoning')
       send({ method: 'account/rateLimits/updated', params: { rateLimits: { primary: { usedPercent: 13, windowDurationMins: 10080, resetsAt: 2000000000 }, credits: { hasCredits: false }, planType: 'plus' } } })
       item('agentMessage', { text: process.env.FAKE_TEXT || '{"ok":true}', phase: 'final_answer' })
-      send({ method: 'thread/tokenUsage/updated', params: { tokenUsage: { last: { inputTokens: 40, outputTokens: 5 } } } })
-      return send({ method: 'turn/completed', params: { turn: { id: 'turn1', status: 'completed', items: [] } } })
+      if (mode === 'late' && threads > 1) send({ method: 'item/completed', params: { threadId: 't' + (threads - 1), item: { type: 'agentMessage', id: 'stale', text: '{"ok":false}', phase: 'final_answer' } } })
+      send({ method: 'thread/tokenUsage/updated', params: { threadId: current, tokenUsage: { last: { inputTokens: 40, outputTokens: 5 } } } })
+      return send({ method: 'turn/completed', params: { threadId: current, turn: { id: 'turn1', status: 'completed', items: [] } } })
     }
     default: return reply({})
   }
@@ -85,9 +89,16 @@ function spec(over: Partial<RunSpec> = {}): RunSpec {
   }
 }
 
-function runner(): CodexRunner {
-  return new CodexRunner({ binary: process.execPath, binaryArgs: [script], codexHome, probeTimeoutMs: 5000 })
+const runners: CodexRunner[] = []
+function runner(opts: { warmMaxAgeMs?: number } = {}): CodexRunner {
+  const r = new CodexRunner({ binary: process.execPath, binaryArgs: [script], codexHome, probeTimeoutMs: 5000, ...opts })
+  runners.push(r)
+  return r
 }
+
+afterEach(async () => {
+  await Promise.all(runners.splice(0).map(r => r.close()))
+})
 
 beforeAll(() => {
   dir = mkdtempSync(join(tmpdir(), 'exec-runner-test-'))
@@ -156,9 +167,9 @@ describe('CodexRunner.run', () => {
     expect(argv).not.toContain('fast_mode') // not a tool feature
     expect((start.env as Record<string, unknown>).OPENAI_API_KEY).toBeNull()
     expect((start.env as Record<string, unknown>).CODEX_HOME).toBe(codexHome)
-    expect(existsSync(start.cwd as string)).toBe(false) // temp dir removed
-
     const thread = lines.find(l => l.method === 'thread/start')!.params as Record<string, unknown>
+    expect(thread.cwd).not.toBe(start.cwd) // the job's own directory, not the process's
+    expect(existsSync(thread.cwd as string)).toBe(false) // removed when the job ended
     expect(thread).toMatchObject({ ephemeral: true, approvalPolicy: 'never', sandbox: 'read-only', baseInstructions: 'Classify.', config: { model_reasoning_effort: 'low' } })
     const turn = lines.find(l => l.method === 'turn/start')!.params as Record<string, unknown>
     expect(turn.outputSchema).toEqual(spec().output.type === 'json' ? (spec().output as { schema: unknown }).schema : null)
@@ -242,5 +253,116 @@ describe('CodexRunner.probe', () => {
     const rl = await runner().readRateLimits()
     expect(rl).toMatchObject({ usedPercent: 12, windowDurationMins: 10080, hasCredits: false })
     expect(logLines().some(l => l.method === 'turn/start')).toBe(false)
+  })
+})
+
+describe('warm processes', () => {
+  const app = () => logLines().filter(l => Array.isArray(l.argv) && (l.argv as string[]).includes('app-server'))
+  const threadStarts = () => logLines().filter(l => l.method === 'thread/start').map(l => l.params as Record<string, unknown>)
+
+  it('reuses one process for consecutive jobs, each on its own thread and directory', async () => {
+    const r = runner()
+    const a = await r.run(spec({ input: 'first email' }), new AbortController().signal)
+    const b = await r.run(spec({ input: 'second email' }), new AbortController().signal)
+    expect(a.ok && b.ok).toBe(true)
+    expect(r.spawnCount).toBe(1)
+    expect(app()).toHaveLength(1)
+    const [t1, t2] = threadStarts()
+    expect(t1.ephemeral && t2.ephemeral).toBe(true)
+    expect(t1.cwd).not.toBe(t2.cwd)
+    // The finished thread is unloaded before the next job.
+    const unsub = logLines().filter(l => l.method === 'thread/unsubscribe').map(l => (l.params as { threadId: string }).threadId)
+    expect(unsub).toEqual(['t1', 't2'])
+    // The account is read once and cached; usage came from the first turn.
+    expect(logLines().filter(l => l.method === 'account/read')).toHaveLength(1)
+    expect(r.warmCount).toBe(1)
+  })
+
+  it('ignores late notifications from an earlier thread', async () => {
+    process.env.FAKE_MODE = 'late'
+    const r = runner()
+    expect((await r.run(spec(), new AbortController().signal)).ok).toBe(true)
+    // The process sends a stale answer for t1 during the t2 job; only t2's answer counts.
+    expect(await r.run(spec(), new AbortController().signal)).toMatchObject({ ok: true, text: '{"ok":true}' })
+    expect(r.spawnCount).toBe(1)
+  })
+
+  it.each([
+    ['tool'],
+    ['mcp'],
+    ['request'],
+  ])('replaces the process after a guard trip (%s)', async (mode) => {
+    process.env.FAKE_MODE = mode
+    const r = runner()
+    expect((await r.run(spec(), new AbortController().signal)).ok).toBe(false)
+    expect(r.warmCount).toBe(0)
+    process.env.FAKE_MODE = 'ok'
+    expect((await r.run(spec(), new AbortController().signal)).ok).toBe(true)
+    expect(r.spawnCount).toBe(2)
+  })
+
+  it('replaces the process after a deadline or a cancel', async () => {
+    process.env.FAKE_MODE = 'hang'
+    const r = runner()
+    expect((await r.run(spec({ deadlineAt: Date.now() + 500 }), new AbortController().signal)).ok).toBe(false)
+    expect(r.warmCount).toBe(0)
+    const ac = new AbortController()
+    setTimeout(() => { ac.abort() }, 300)
+    expect(await r.run(spec(), ac.signal)).toMatchObject({ ok: false, canceled: true })
+    expect(r.warmCount).toBe(0)
+    expect(r.spawnCount).toBe(2)
+  })
+
+  it('keeps a process after a failed but completed turn (quota), and not after a crash', async () => {
+    process.env.FAKE_MODE = 'quota'
+    const r = runner()
+    expect((await r.run(spec(), new AbortController().signal)).ok).toBe(false)
+    expect(r.warmCount).toBe(1)
+    await r.close()
+    process.env.FAKE_MODE = 'exit'
+    const r2 = runner()
+    expect((await r2.run(spec(), new AbortController().signal)).ok).toBe(false)
+    expect(r2.warmCount).toBe(0)
+  })
+
+  it('retires a process at its maximum age', async () => {
+    const r = runner({ warmMaxAgeMs: 400 })
+    expect((await r.run(spec(), new AbortController().signal)).ok).toBe(true)
+    await new Promise((res) => setTimeout(res, 600))
+    expect(r.warmCount).toBe(0)
+    expect((await r.run(spec(), new AbortController().signal)).ok).toBe(true)
+    expect(r.spawnCount).toBe(2)
+  })
+
+  it('starts a new process per job when warm reuse is off', async () => {
+    const r = runner({ warmMaxAgeMs: 0 })
+    await r.run(spec(), new AbortController().signal)
+    await r.run(spec(), new AbortController().signal)
+    expect(r.spawnCount).toBe(2)
+    expect(r.warmCount).toBe(0)
+  })
+
+  it('starts a fresh process when the MCP server list changes', async () => {
+    const cfg = join(codexHome, 'config.toml')
+    const before = readFileSync(cfg, 'utf-8')
+    const r = runner()
+    try {
+      await r.run(spec(), new AbortController().signal)
+      writeFileSync(cfg, before + '[mcp_servers.gamma]\ncommand = "g"\n')
+      await r.run(spec(), new AbortController().signal)
+      expect(r.spawnCount).toBe(2)
+      expect(app()[1].argv).toContain('mcp_servers.gamma.enabled=false')
+    } finally {
+      writeFileSync(cfg, before)
+    }
+  })
+
+  it('stops warm processes on close', async () => {
+    const r = runner()
+    await r.run(spec(), new AbortController().signal)
+    expect(r.warmCount).toBe(1)
+    await r.close()
+    expect(r.warmCount).toBe(0)
+    expect((await r.run(spec(), new AbortController().signal)).ok).toBe(false)
   })
 })

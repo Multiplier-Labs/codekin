@@ -22,6 +22,8 @@ export interface ExecutionConfig {
   enabled: boolean
   clientsFile: string
   codexHome: string | null
+  /** Reuse a warm Codex process for this long; 0 = a new process per job. */
+  warmMaxAgeMs: number
   limits: Partial<ExecutionLimits>
 }
 
@@ -30,6 +32,7 @@ export function loadExecutionConfig(): ExecutionConfig {
     enabled: /^(1|true|yes)$/i.test(process.env.EXECUTION_ENABLED ?? ''),
     clientsFile: process.env.EXECUTION_CLIENTS_FILE || join(DATA_DIR, 'execution-clients.json'),
     codexHome: process.env.EXECUTION_CODEX_HOME || null,
+    warmMaxAgeMs: int('EXECUTION_WARM_MINUTES', 60, 0, 24 * 60) * 60 * 1000,
     limits: {
       concurrency: int('EXECUTION_CONCURRENCY', DEFAULT_LIMITS.concurrency, 1, 8),
       maxQueued: int('EXECUTION_MAX_QUEUED', DEFAULT_LIMITS.maxQueued, 1, 10_000),
