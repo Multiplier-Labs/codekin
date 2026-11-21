@@ -85,6 +85,12 @@ import { codekinPackageVersion } from './relay/relay-credential.js'
 import { createOrchestratorRouter } from './orchestrator-routes.js'
 import { ensureOrchestratorRunning, getOrchestratorProvider, getOrCreateOrchestratorId } from './orchestrator-manager.js'
 import { OrchestratorMonitor } from './orchestrator-monitor.js'
+import { loadExecutionConfig } from './execution-config.js'
+import { ExecutionStore } from './execution-store.js'
+import { ExecutionService } from './execution-service.js'
+import { ExecutionClients } from './execution-auth.js'
+import { CodexRunner } from './execution-codex-runner.js'
+import { createExecutionRouter } from './execution-routes.js'
 import { getOrchestratorOutbox } from './orchestrator-outbox.js'
 import { PORT as CONFIG_PORT, BIND_HOST, AUTH_TOKEN as configAuthToken, CORS_ORIGIN, FRONTEND_DIST, AGENT_DISPLAY_NAME, getAgentDisplayName, setAgentDisplayNameResolver, TRUST_PROXY, AUTO_RESTORE_SESSIONS, ORCHESTRATOR_MONITOR, DATA_DIR, resolveRepoPathInRoot } from './config.js'
 
@@ -282,6 +288,24 @@ app.use(createCanvasRouter(extractToken, verifyTokenOrSessionToken, () => sessio
   verify: (token) => verifyOpenCodeCanvasToken(authToken, token),
   resolve: (oc) => sessions.findOpenCodeSession(oc),
 }, () => sessions.previews))
+
+// Execution API for applications (docs/EXECUTION-API.md). Off unless EXECUTION_ENABLED=1.
+// Registered BEFORE express.json() and the per-IP limiter: it parses larger
+// bodies itself and rate-limits per client token.
+const executionConfig = loadExecutionConfig()
+let executionService: ExecutionService | null = null
+let executionStore: ExecutionStore | null = null
+if (executionConfig.enabled) {
+  executionStore = new ExecutionStore()
+  executionService = new ExecutionService(executionStore, {
+    codex: new CodexRunner({ codexHome: executionConfig.codexHome }),
+  }, executionConfig.limits)
+  const executionClients = new ExecutionClients(executionConfig.clientsFile)
+  app.use('/api/execution/v1', createExecutionRouter(executionClients, executionService))
+  const recovered = executionService.start()
+  console.log(`[execution] API enabled: ${executionClients.count} client(s), concurrency ${executionService.limits.concurrency}` +
+    (recovered.requeued || recovered.failed ? `; recovered ${recovered.requeued} requeued, ${recovered.failed} failed` : ''))
+}
 
 // JSON body parser for all other routes
 app.use(express.json())
@@ -1018,6 +1042,8 @@ async function gracefulShutdown(signal: string): Promise<void> {
   shutdownRepoActivityIndex()
   shutdownDeploymentMonitor()
   loopStore.close()
+  await executionService?.stop()
+  executionStore?.close()
   commitEventState.handler?.shutdown()
   webhookHandler.shutdown()
   await sessions.shutdown()
