@@ -1,7 +1,7 @@
 /** Tests for the Canvas sandbox origin: configuration, headers, frame-src and the static page server. */
 import { describe, it, expect, afterEach } from 'vitest'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
-import type { AddressInfo } from 'net'
+import net, { type AddressInfo } from 'net'
 import type http from 'http'
 import { tmpdir } from 'os'
 import path from 'path'
@@ -15,6 +15,17 @@ afterEach(async () => {
   if (dir) rmSync(dir, { recursive: true, force: true })
   dir = null
 })
+
+function freePort(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const probe = net.createServer()
+    probe.once('error', reject)
+    probe.listen(0, '127.0.0.1', () => {
+      const { port } = probe.address() as AddressInfo
+      probe.close(() => resolve(port))
+    })
+  })
+}
 
 function builtPage() {
   dir = mkdtempSync(path.join(tmpdir(), 'sandbox-'))
@@ -64,9 +75,20 @@ describe('sandbox policies', () => {
 describe('startSandboxServer', () => {
   it('serves the page and its assets with the sandbox headers, and nothing else', async () => {
     const d = builtPage()
-    const port = 41000 + Math.floor(Math.random() * 2000)
-    server = startSandboxServer({ origin: null, port, dir: d, frameAncestors: '*' }, '127.0.0.1')
-    await new Promise(r => server!.once('listening', r))
+    // A random fixed port can land on one another worker holds (EADDRINUSE never
+    // emits 'listening'), so ask the OS for a free one and retry if it's taken
+    // between the probe and the bind.
+    for (let attempt = 0; ; attempt++) {
+      const port = await freePort()
+      server = startSandboxServer({ origin: null, port, dir: d, frameAncestors: '*' }, '127.0.0.1')
+      const ok = await new Promise<boolean>(r => {
+        server!.once('listening', () => r(true))
+        server!.once('error', () => r(false))
+      })
+      if (ok) break
+      server = null
+      if (attempt >= 4) throw new Error('could not bind the sandbox server')
+    }
     const base = `http://127.0.0.1:${(server!.address() as AddressInfo).port}`
     const page = await fetch(`${base}/`)
     expect(page.status).toBe(200)
