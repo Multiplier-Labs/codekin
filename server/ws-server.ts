@@ -298,7 +298,7 @@ let executionStore: ExecutionStore | null = null
 if (executionConfig.enabled) {
   executionStore = new ExecutionStore()
   executionService = new ExecutionService(executionStore, {
-    codex: new CodexRunner({ codexHome: executionConfig.codexHome }),
+    codex: new CodexRunner({ codexHome: executionConfig.codexHome, warmMaxAgeMs: executionConfig.warmMaxAgeMs }),
   }, executionConfig.limits)
   const executionClients = new ExecutionClients(executionConfig.clientsFile)
   app.use('/api/execution/v1', createExecutionRouter(executionClients, executionService))

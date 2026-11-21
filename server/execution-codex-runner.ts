@@ -1,16 +1,20 @@
 /**
  * Runs one bounded execution job on Codex (docs/EXECUTION-API.md §Inference profile).
  *
- * One `codex app-server` process per job, in a fresh empty temp directory,
- * on an ephemeral thread whose base instructions are the job's own. The job
+ * Each job runs on a fresh ephemeral thread whose base instructions are the
+ * job's own, in a fresh empty working directory. The `codex app-server`
+ * process underneath is kept warm and reused for later jobs (up to
+ * `warmMaxAgeMs`, default an hour) — but only after a clean, completed turn;
+ * a guard trip, cancellation, deadline or any incomplete turn replaces it. The job
  * gets no tools: tool-bearing features are disabled, every MCP server in the
  * Codex config is disabled by name, the sandbox is read-only and approvals
  * are never granted. A runtime guard then fails the job closed if anything
  * slips through anyway — an MCP server starting, any item other than the
  * user message / reasoning / the answer, or any server-initiated request.
  *
- * Unlike CodexProcess (interactive coding sessions) this keeps no state
- * between jobs, so nothing can leak from one job's context into another's.
+ * Unlike CodexProcess (interactive coding sessions) no conversation is ever
+ * shared: each job's thread is unsubscribed when it ends, so nothing can leak
+ * from one job's context into another's.
  */
 
 import { spawn, execFile, type ChildProcess } from 'child_process'
@@ -79,6 +83,8 @@ export interface HarnessRunner {
   probe(): Promise<ProbeResult>
   /** Cheap usage-window read without running a model turn. */
   readRateLimits?(): Promise<RateLimitSnapshot | null>
+  /** Stop any warm processes. */
+  close?(): Promise<void>
 }
 
 // ---------------------------------------------------------------------------
@@ -231,9 +237,27 @@ export interface CodexRunnerOptions {
   binaryArgs?: string[]
   /** Dedicated Codex home for jobs (its own config and login). */
   codexHome?: string | null
-  /** Instructions for the probe job. */
+  /** Timeout for the probe job. */
   probeTimeoutMs?: number
+  /** Reuse a warm app-server for this long after it started; 0 = a new process per job. */
+  warmMaxAgeMs?: number
 }
+
+/** A warm app-server process between jobs. */
+interface WarmProcess {
+  conn: AppServerConnection
+  /** Arguments it was started with; a change (CLI features, MCP servers) retires it. */
+  argsKey: string
+  /** The process's own (empty) working directory. */
+  dir: string
+  startedAt: number
+  jobs: number
+  idleTimer: ReturnType<typeof setTimeout> | null
+}
+
+/** Account and plan are re-read at most this often; usage arrives with every turn. */
+const ACCOUNT_TTL_MS = 60_000
+const INIT_TIMEOUT_MS = 20_000
 
 const ALLOWED_ITEM_TYPES = new Set(['userMessage', 'reasoning', 'agentMessage'])
 const STRIPPED_FOR_JOBS = ['OPENAI_API_KEY', 'CODEX_API_KEY', 'OPENAI_BASE_URL', 'AUTH_TOKEN', 'AUTH_TOKEN_FILE']
@@ -308,12 +332,98 @@ export class CodexRunner implements HarnessRunner {
   /** Disable flags derived from the installed CLI; refreshed by probe(). */
   private featureFlags: string[] | null = null
   private lastRateLimits: RateLimitSnapshot | null = null
+  private warmMaxAgeMs: number
+  private idle: WarmProcess[] = []
+  private closed = false
+  private accountCache: { account: HarnessAccount; at: number } | null = null
+  /** Processes started so far (observability and tests). */
+  spawnCount = 0
 
   constructor(opts: CodexRunnerOptions = {}) {
     this.binary = opts.binary ?? process.env.CODEX_BINARY ?? 'codex'
     this.binaryArgs = opts.binaryArgs ?? []
     this.codexHome = opts.codexHome ?? null
     this.probeTimeoutMs = opts.probeTimeoutMs ?? 60_000
+    this.warmMaxAgeMs = Math.max(0, opts.warmMaxAgeMs ?? 60 * 60 * 1000)
+  }
+
+  /** Number of warm processes waiting for a job. */
+  get warmCount(): number {
+    return this.idle.length
+  }
+
+  private async dispose(w: WarmProcess): Promise<void> {
+    this.idle = this.idle.filter(x => x !== w)
+    if (w.idleTimer) clearTimeout(w.idleTimer)
+    await w.conn.terminate()
+    rmSync(w.dir, { recursive: true, force: true })
+  }
+
+  /** A warm process started with these arguments, or a new one after the handshake. */
+  private async acquire(args: string[]): Promise<WarmProcess> {
+    const key = args.join('\u0000')
+    while (this.idle.length > 0) {
+      const w = this.idle.pop() as WarmProcess
+      if (w.idleTimer) clearTimeout(w.idleTimer)
+      w.idleTimer = null
+      if (w.conn.alive && w.argsKey === key && Date.now() - w.startedAt < this.warmMaxAgeMs) return w
+      void this.dispose(w)
+    }
+    const dir = mkdtempSync(join(tmpdir(), 'codekin-exec-'))
+    let proc: ChildProcess
+    try {
+      proc = spawn(this.binary, args, { cwd: dir, env: this.env(), stdio: ['pipe', 'pipe', 'ignore'] })
+    } catch (e) {
+      rmSync(dir, { recursive: true, force: true })
+      throw e
+    }
+    this.spawnCount++
+    const spawnError = new Promise<never>((_resolve, reject) => { proc.on('error', reject) })
+    const conn = new AppServerConnection(proc)
+    const w: WarmProcess = { conn, argsKey: key, dir, startedAt: Date.now(), jobs: 0, idleTimer: null }
+    const init = { timer: null as ReturnType<typeof setTimeout> | null }
+    try {
+      await Promise.race([
+        conn.request('initialize', { clientInfo: { name: 'codekin-execution', title: 'Codekin execution', version: '1' }, capabilities: null }),
+        spawnError,
+        new Promise<never>((_resolve, reject) => { init.timer = setTimeout(() => { reject(new Error('app-server did not start in time')) }, INIT_TIMEOUT_MS) }),
+      ])
+    } catch (e) {
+      await this.dispose(w)
+      throw e
+    } finally {
+      if (init.timer) clearTimeout(init.timer)
+    }
+    conn.notify('initialized')
+    return w
+  }
+
+  /** Back to the pool after a clean job, else stopped (and awaited, so nothing outlives the job). */
+  private async release(w: WarmProcess, reusable: boolean): Promise<void> {
+    w.conn.onNotification = () => {}
+    w.conn.onServerRequest = () => { void this.dispose(w) }
+    const left = this.warmMaxAgeMs - (Date.now() - w.startedAt)
+    if (!reusable || this.closed || !w.conn.alive || left <= 0) {
+      await this.dispose(w)
+      return
+    }
+    w.idleTimer = setTimeout(() => { void this.dispose(w) }, left)
+    w.idleTimer.unref()
+    this.idle.push(w)
+  }
+
+  async close(): Promise<void> {
+    this.closed = true
+    await Promise.all(this.idle.map(w => this.dispose(w)))
+  }
+
+  /** Account and plan, from cache when fresh. */
+  private async account(conn: AppServerConnection): Promise<HarnessAccount | null> {
+    if (this.accountCache && Date.now() - this.accountCache.at < ACCOUNT_TTL_MS) return this.accountCache.account
+    const acct = await conn.request('account/read', { refreshToken: false }) as { account?: Record<string, unknown> | null } | null
+    const account = acct?.account ? { type: str(acct.account.type) ?? 'unknown', planType: str(acct.account.planType) } : null
+    this.accountCache = account ? { account, at: Date.now() } : null
+    return account
   }
 
   private env(): Record<string, string> {
@@ -362,16 +472,21 @@ export class CodexRunner implements HarnessRunner {
     } catch (e) {
       return { ok: false, error: err('RUNTIME_UNAVAILABLE', `Codex CLI unavailable: ${(e as Error).message}`, true) }
     }
-    const cwd = mkdtempSync(join(tmpdir(), 'codekin-exec-'))
-    let proc: ChildProcess
+    if (this.closed) return { ok: false, error: err('RUNTIME_UNAVAILABLE', 'Codex runner is shutting down', true) }
+    let w: WarmProcess
     try {
-      proc = spawn(this.binary, args, { cwd, env: this.env(), stdio: ['pipe', 'pipe', 'ignore'] })
+      w = await this.acquire(args)
     } catch (e) {
-      rmSync(cwd, { recursive: true, force: true })
       return { ok: false, error: err('RUNTIME_UNAVAILABLE', `Could not start Codex: ${(e as Error).message}`, true) }
     }
-    const conn = new AppServerConnection(proc)
-    const spawnError = new Promise<Error>((resolve) => proc.on('error', resolve))
+    w.jobs++
+    const conn = w.conn
+    // Each job gets its own empty working directory, whatever process it runs in.
+    const cwd = mkdtempSync(join(tmpdir(), 'codekin-exec-job-'))
+    // Set from notification callbacks, so kept in an object (not narrowed away).
+    const job = { threadId: null as string | null, turnCompleted: false, guardTripped: false }
+    /** Notifications for another (earlier) thread are ignored. */
+    const mine = (params: Record<string, unknown>) => typeof params.threadId !== 'string' || params.threadId === job.threadId
 
     let settle!: (o: RunOutcome) => void
     const outcome = new Promise<RunOutcome>((resolve) => { settle = resolve })
@@ -388,12 +503,14 @@ export class CodexRunner implements HarnessRunner {
     let lastText: string | null = null
     let model: string | null = spec.model
 
-    conn.onServerRequest = (method) => {
-      finish({ ok: false, error: err('UNSUPPORTED_CAPABILITY', `Execution guard: the harness asked the client for "${method}"`) })
+    const guard = (message: string) => {
+      job.guardTripped = true
+      finish({ ok: false, error: err('UNSUPPORTED_CAPABILITY', `Execution guard: ${message}`) })
     }
+    conn.onServerRequest = (method) => { guard(`the harness asked the client for "${method}"`) }
     conn.onNotification = (method, params) => {
       if (method.startsWith('mcpServer/')) {
-        finish({ ok: false, error: err('UNSUPPORTED_CAPABILITY', 'Execution guard: an MCP server started inside the job') })
+        guard('an MCP server started inside the job')
         return
       }
       if (method === 'account/rateLimits/updated') {
@@ -401,6 +518,13 @@ export class CodexRunner implements HarnessRunner {
         if (rl) { this.lastRateLimits = rl; hooks.onRateLimits?.(rl) }
         return
       }
+      // The guard applies to every thread in the process; results only to this job's.
+      if ((method === 'item/started' || method === 'item/completed')
+        && !ALLOWED_ITEM_TYPES.has(str(((params.item ?? {}) as Record<string, unknown>).type) ?? 'unknown')) {
+        guard(`the harness produced a "${str(((params.item ?? {}) as Record<string, unknown>).type) ?? 'unknown'}" item`)
+        return
+      }
+      if (!mine(params)) return
       if (method === 'thread/tokenUsage/updated') {
         const tu = (params.tokenUsage ?? {}) as Record<string, unknown>
         const b = (tu.last ?? tu.total ?? {}) as Record<string, unknown>
@@ -411,7 +535,7 @@ export class CodexRunner implements HarnessRunner {
         const item = (params.item ?? {}) as Record<string, unknown>
         const type = str(item.type) ?? 'unknown'
         if (!ALLOWED_ITEM_TYPES.has(type)) {
-          finish({ ok: false, error: err('UNSUPPORTED_CAPABILITY', `Execution guard: the harness produced a "${type}" item`) })
+          guard(`the harness produced a "${type}" item`)
           return
         }
         if (method === 'item/completed' && type === 'agentMessage' && typeof item.text === 'string') {
@@ -423,6 +547,7 @@ export class CodexRunner implements HarnessRunner {
       if (method === 'turn/completed') {
         const turn = (params.turn ?? {}) as Record<string, unknown>
         const status = str(turn.status)
+        job.turnCompleted = status === 'completed' || status === 'failed'
         if (status === 'completed') {
           const text = finalText ?? lastText
           if (text === null) finish({ ok: false, error: err('INVALID_OUTPUT', 'The turn completed without an answer', true) })
@@ -441,24 +566,26 @@ export class CodexRunner implements HarnessRunner {
     }, Math.max(0, remaining))
     const onAbort = () => { finish({ ok: false, canceled: true, error: err('EXECUTION_INTERRUPTED', 'Canceled') }) }
     signal.addEventListener('abort', onAbort, { once: true })
-    void spawnError.then((e) => { finish({ ok: false, error: err('RUNTIME_UNAVAILABLE', `Could not start Codex: ${e.message}`, true) }) })
     void conn.exitPromise.then(() => { finish({ ok: false, error: err('EXECUTION_INTERRUPTED', 'Codex exited before the turn completed', true) }) })
 
     const drive = async () => {
-      await conn.request('initialize', { clientInfo: { name: 'codekin-execution', title: 'Codekin execution', version: '1' }, capabilities: null })
-      conn.notify('initialized')
-      const acct = await conn.request('account/read', { refreshToken: false }) as { account?: Record<string, unknown> | null } | null
-      const account = acct?.account ? { type: str(acct.account.type) ?? 'unknown', planType: str(acct.account.planType) } : null
+      const account = await this.account(conn)
       if (!account) {
         finish({ ok: false, error: err('AUTH_REQUIRED', 'Codex is not logged in for execution jobs') })
         return
       }
-      try {
-        const rl = parseRateLimits(((await conn.request('account/rateLimits/read', null)) ?? {}) as Record<string, unknown>)
-        if (rl) { this.lastRateLimits = rl; hooks.onRateLimits?.(rl) }
-      } catch { /* not every account type reports limits */ }
+      // Usage arrives with every turn; read it only when none is recent.
+      const rlAge = this.lastRateLimits ? Date.now() - Date.parse(this.lastRateLimits.at) : Infinity
+      if (rlAge >= ACCOUNT_TTL_MS) {
+        try {
+          const rl = parseRateLimits(((await conn.request('account/rateLimits/read', null)) ?? {}) as Record<string, unknown>)
+          if (rl) this.lastRateLimits = rl
+        } catch { /* not every account type reports limits */ }
+      }
+      if (this.lastRateLimits) hooks.onRateLimits?.(this.lastRateLimits)
       billingMode = billingModeFor(account, this.lastRateLimits)
       if (billingMode !== 'subscription') {
+        this.accountCache = null
         finish({ ok: false, error: err('UNSUPPORTED_CAPABILITY', `Billing mode is ${billingMode}, and the job allows subscription only`) })
         return
       }
@@ -476,25 +603,41 @@ export class CodexRunner implements HarnessRunner {
         ...(spec.effort ? { config: { model_reasoning_effort: spec.effort } } : {}),
       }) as { thread?: { id?: string }; model?: string } | null
       if (!spec.model && typeof thread?.model === 'string') model = thread.model
-      const threadId = thread?.thread?.id
-      if (!threadId) throw new Error('thread/start returned no thread id')
+      job.threadId = thread?.thread?.id ?? null
+      if (!job.threadId) throw new Error('thread/start returned no thread id')
       await conn.request('turn/start', {
-        threadId,
+        threadId: job.threadId,
         input: [{ type: 'text', text: spec.input, text_elements: [] }],
         ...(spec.output.type === 'json' ? { outputSchema: spec.output.schema } : {}),
       })
     }
     drive().catch((e: unknown) => {
       const msg = e instanceof Error ? e.message : String(e)
-      if (/unauthori[sz]ed|not.*logged.*in|login/i.test(msg)) finish({ ok: false, error: err('AUTH_REQUIRED', msg) })
+      if (/unauthori[sz]ed|not.*logged.*in|login/i.test(msg)) {
+        this.accountCache = null
+        finish({ ok: false, error: err('AUTH_REQUIRED', msg) })
+      }
       else finish({ ok: false, error: err('RUNTIME_UNAVAILABLE', `Codex app-server: ${msg}`, true) })
     })
 
     const result = await outcome
     clearTimeout(deadlineTimer)
     signal.removeEventListener('abort', onAbort)
-    // A job is never reported (or canceled) while its process may still act.
-    await conn.terminate()
+    if (!result.ok && result.error.code === 'AUTH_REQUIRED') this.accountCache = null
+    // Reuse only a process whose turn ran to completion without a guard trip.
+    // Otherwise it is stopped before the job is reported (or canceled), so it
+    // can never act after its job has ended.
+    const canceled = !result.ok && result.canceled === true
+    const reusable = job.turnCompleted && !job.guardTripped && !canceled && conn.alive
+    if (reusable && job.threadId) {
+      const threadId = job.threadId
+      // Unload the finished thread so the next job's process holds no history.
+      await Promise.race([
+        conn.request('thread/unsubscribe', { threadId }).catch(() => {}),
+        new Promise((resolve) => { setTimeout(resolve, 2000).unref() }),
+      ])
+    }
+    await this.release(w, reusable)
     rmSync(cwd, { recursive: true, force: true })
     return result
   }
