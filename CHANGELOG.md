@@ -7,16 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-11-22
+
 ### Added
 - **Execution API** (`/api/execution/v1`, off unless `EXECUTION_ENABLED=1`): your own applications can run bounded, tool-less model jobs (JSON with a schema, or text) through a signed-in Codex, with per-application tokens, a durable queue, a warm Codex process reused across jobs and subscription-only billing. See docs/EXECUTION-API.md (#945, #946).
-- **Full-page preview snapshots.** A toggle next to Snapshot in a Canvas preview captures the page's whole height, not just the first screen. Codekin scrolls the page once first so lazy-loaded images appear. Very long pages stop at 16,384 device pixels, and the snapshot says so.
-- `codekin restart` restarts the background service (launchd on macOS, systemd on Linux). The server checks for agent CLIs only at startup, so restart after installing or signing in to one.
+- **Full-page preview snapshots.** A toggle next to Snapshot in a Canvas preview captures the page's whole height, not just the first screen. Codekin scrolls the page once first so lazy-loaded images appear. Very long pages stop at 16,384 device pixels, and the snapshot says so (#948).
+- Canvas images and preview snapshots zoom and pan. They open fitted to the panel width; drag or scroll to pan, pinch or Ctrl/Cmd+scroll to zoom around the pointer, double-click to toggle between fitted and 100%, and a corner bar zooms in, out, to 100% or back to fit. Diagrams share the same controls and gain touch pinch and a 10–800% range (#941).
+- `codekin restart` restarts the background service (launchd on macOS, systemd on Linux). The server checks for agent CLIs only at startup, so restart after installing or signing in to one (#943).
+
+### Changed
+- The session header's Attach control is a dashed chip labelled **Attach** again, not a bare `+`. The Canvas header button uses the sidebar **New** button's grey raised fill in place of solid orange; it is still the only filled button in the header (#937–#939).
 
 ### Security
-- Execution API hardening. Jobs no longer carry your Codex skills list or environment details. Jobs fail closed on a second model request (a tool call that emits no event) or on a loaded `AGENTS.md`. Billing is decided only on the job's own usage read. Requests are dropped when a job ends, so submit-and-cancel can't fill the disk. Failed token attempts are rate limited per IP. Output validation no longer accepts `constructor`/`__proto__` as properties. Stopping a job kills everything its Codex process started. A separate Codex home stays optional.
+- Execution API hardening. Jobs no longer carry your Codex skills list or environment details. Jobs fail closed on a second model request (a tool call that emits no event) or on a loaded `AGENTS.md`. Billing is decided only on the job's own usage read. Requests are dropped when a job ends, so submit-and-cancel can't fill the disk. Failed token attempts are rate limited per IP. Output validation no longer accepts `constructor`/`__proto__` as properties. Stopping a job kills everything its Codex process started. A separate Codex home stays optional (#947).
 
 ### Fixed
-- Codex could show "Connected" in the footer and still be greyed out as "not installed" in the new-session picker. The picker used the CLI check from server startup, so a Codex installed afterwards (or whose `codex --version` timed out at login) stayed unavailable until a restart. A successful live Codex model list now makes it selectable. The "not found" tooltip now suggests restarting Codekin.
+- Codex could show "Connected" in the footer and still be greyed out as "not installed" in the new-session picker. The picker used the CLI check from server startup, so a Codex installed afterwards (or whose `codex --version` timed out at login) stayed unavailable until a restart. A successful live Codex model list now makes it selectable. The "not found" tooltip now suggests restarting Codekin (#943).
+- Reopening the Mac app after the laptop slept showed the selected session at its first message. A transcript rebuilt on reconnect now opens at the latest message, and one opened while the page was hidden is held to the bottom when it becomes visible (#940).
+- Pasted text with no spaces (log lines, JSON) no longer runs past the right edge of the sent message bubble (#942).
 
 ## [0.12.2] - 2026-11-15
 
