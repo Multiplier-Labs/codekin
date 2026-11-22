@@ -201,7 +201,7 @@ export class PreviewManager {
    * screenshot, with the console errors seen while it loaded, as an image
    * item. Works wherever Canvas does, including through a relay.
    */
-  async snapshot(sessionId: string, itemId: string, opts: { path?: unknown; viewport?: unknown } = {}): Promise<{ snapshotItemId: string } | { error: string }> {
+  async snapshot(sessionId: string, itemId: string, opts: { path?: unknown; viewport?: unknown; fullPage?: unknown } = {}): Promise<{ snapshotItemId: string } | { error: string }> {
     if (!this.deps.publishSnapshot) return { error: 'Snapshots are not available.' }
     const browser = this.snapshotBrowser()
     if (!browser) {
@@ -212,6 +212,7 @@ export class PreviewManager {
     if (this.snapshotting.has(sessionId)) return { error: 'A snapshot is already being taken in this session.' }
     if (this.browsersRunning >= MAX_SNAPSHOT_BROWSERS) return { error: 'Codekin is busy taking other snapshots. Try again in a moment.' }
     const viewport: SnapshotViewport = typeof opts.viewport === 'string' && opts.viewport in SNAPSHOT_VIEWPORTS ? opts.viewport as SnapshotViewport : 'full'
+    const fullPage = opts.fullPage === true
     this.snapshotting.add(sessionId)
     this.browsersRunning++
     try {
@@ -223,11 +224,13 @@ export class PreviewManager {
       const raw = opts.path
       const path = typeof raw === 'string' && raw.startsWith('/') && !raw.startsWith('//') && raw.length <= 2000 && !/[\s\\]/.test(raw) ? raw : target.path
       if (!await probePort(port)) return { error: `Nothing is listening on port ${port}. Start the dev server, then take the snapshot again.` }
-      const shot = await (this.deps.takeSnapshot ?? takeSnapshot)(browser, { port, path, ...SNAPSHOT_VIEWPORTS[viewport] })
+      const shot = await (this.deps.takeSnapshot ?? takeSnapshot)(browser, { port, path, ...SNAPSHOT_VIEWPORTS[viewport], ...(fullPage ? { fullPage } : {}) })
       const item = await this.deps.publishSnapshot(sessionId, itemId, { content: shot.image, mediaType: shot.mediaType }, {
         path: shot.finalPath, title: shot.title, port, viewport, console: shot.console,
         ...(shot.restricted ? { restricted: true as const } : {}),
         ...(shot.blocked ? { blocked: shot.blocked } : {}),
+        ...(fullPage ? { fullPage: true as const } : {}),
+        ...(shot.truncated ? { truncated: true as const } : {}),
       })
       return { snapshotItemId: item.id }
     } catch (err) {

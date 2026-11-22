@@ -45,7 +45,7 @@ export interface PreviewApi {
   restart: (itemId: string) => void
   requestLogs: (itemId: string) => void
   /** Take a snapshot of the page at `path` in a headless browser on the machine; it opens as an image item. */
-  snapshot: (itemId: string, path: string, viewport: SnapshotViewport) => void
+  snapshot: (itemId: string, path: string, viewport: SnapshotViewport, fullPage?: boolean) => void
   /** A snapshot of this preview is being taken, or the last one failed (`error`). */
   snapshotStatus: (itemId: string) => { busy: boolean; error?: string }
   /** Bumped on every (re)join: a shown preview asks for its proxy again (Codekin may have restarted). */
@@ -396,10 +396,10 @@ export function useCanvas(sessionId: string | null, send: (msg: WsClientMessage)
     stop: (itemId: string) => { send({ type: 'preview_stop', itemId }) },
     restart: (itemId: string) => { send({ type: 'preview_restart', itemId }) },
     requestLogs: (itemId: string) => { send({ type: 'preview_logs', itemId }) },
-    snapshot: (itemId: string, path: string, viewport: SnapshotViewport) => {
+    snapshot: (itemId: string, path: string, viewport: SnapshotViewport, fullPage = false) => {
       if (!sessionId) return
       setSnapshots(prev => ({ ...prev, [`${sessionId}/${itemId}`]: { busy: true } }))
-      send({ type: 'preview_snapshot', itemId, path, viewport })
+      send({ type: 'preview_snapshot', itemId, path, viewport, ...(fullPage ? { fullPage } : {}) })
     },
   }), [sessionId, send])
   const preview = useMemo<PreviewApi>(() => ({

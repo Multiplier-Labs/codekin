@@ -3,6 +3,9 @@
  * page in a headless Chrome or Chromium on this machine and take a
  * screenshot, with the console errors and warnings seen while it loaded.
  *
+ * A full-page snapshot scrolls the page once (so lazy content loads) and
+ * captures its whole height, up to FULL_PAGE_MAX_PX device pixels.
+ *
  * A snapshot travels as an ordinary image item, so it reaches every client
  * that can see Canvas, including the hosted web app through a relay, where
  * the live preview can't be shown.
@@ -41,6 +44,8 @@ export interface SnapshotOptions {
   height: number
   /** Emulate a phone (touch, mobile viewport, 2x pixels). */
   mobile?: boolean
+  /** Capture the whole page, not just the viewport (up to FULL_PAGE_MAX_PX tall). */
+  fullPage?: boolean
 }
 
 export interface SnapshotResult {
@@ -54,6 +59,8 @@ export interface SnapshotResult {
   restricted: boolean
   /** How many requests were blocked for leaving this machine (restricted only). */
   blocked: number
+  /** A full-page snapshot of a page taller than one image can hold: it stops partway. */
+  truncated?: boolean
 }
 
 export class SnapshotError extends Error {}
@@ -68,6 +75,13 @@ const LOAD_TIMEOUT_MS = 15_000
 const QUIET_MS = 500
 /** …but no longer than this. */
 const SETTLE_MAX_MS = 5_000
+/**
+ * Tallest full-page image, in device pixels. Chrome can't composite a
+ * taller one reliably, and the 2 MiB limit is tight well before it.
+ */
+export const FULL_PAGE_MAX_PX = 16_384
+/** Pause at each step of the scroll that wakes lazy-loaded content before a full-page capture. */
+const SCROLL_STEP_MS = 120
 /** What a request gets from the dead proxy when the page may reach only localhost. */
 const BLOCKED_ERROR = 'net::ERR_PROXY_CONNECTION_FAILED'
 
@@ -403,9 +417,38 @@ async function capture(cdp: Cdp, opts: SnapshotOptions, restricted: boolean): Pr
     }
     await withTimeout(loadFired, LOAD_TIMEOUT_MS, 'The page took longer than 15 seconds to load.')
     // Let a single-page app fetch and render what it does after load.
-    const settleUntil = Date.now() + SETTLE_MAX_MS
-    while (Date.now() < settleUntil && (inflight > 0 || Date.now() - lastActivity < QUIET_MS)) {
-      await new Promise(r => setTimeout(r, 100))
+    const settle = async () => {
+      const settleUntil = Date.now() + SETTLE_MAX_MS
+      while (Date.now() < settleUntil && (inflight > 0 || Date.now() - lastActivity < QUIET_MS)) {
+        await new Promise(r => setTimeout(r, 100))
+      }
+    }
+    await settle()
+
+    const scale = opts.mobile ? 2 : 1
+    const maxHeight = Math.floor(FULL_PAGE_MAX_PX / scale)
+    let pageHeight = opts.height
+    let truncated = false
+    if (opts.fullPage) {
+      // Scroll down a screen at a time so lazy images and scroll-triggered
+      // content load, then back to the top and wait for the network again.
+      await page('Runtime.evaluate', {
+        expression: `(async () => {
+          const el = document.scrollingElement || document.documentElement
+          const end = Math.min(el.scrollHeight, ${maxHeight})
+          const go = (y) => { try { scrollTo({ top: y, left: 0, behavior: 'instant' }) } catch { scrollTo(0, y) } }
+          for (let y = innerHeight; y < end; y += innerHeight) { go(y); await new Promise(r => setTimeout(r, ${SCROLL_STEP_MS})) }
+          go(0)
+          await new Promise(r => setTimeout(r, ${SCROLL_STEP_MS}))
+        })()`,
+        awaitPromise: true,
+      })
+      lastActivity = Date.now()
+      await settle()
+      const metrics = await page('Page.getLayoutMetrics') as { cssContentSize?: { height?: number }; contentSize?: { height?: number } }
+      const contentHeight = Math.ceil(metrics.cssContentSize?.height ?? metrics.contentSize?.height ?? opts.height)
+      pageHeight = Math.max(opts.height, Math.min(contentHeight, maxHeight))
+      truncated = contentHeight > maxHeight
     }
 
     const where = await page('Runtime.evaluate', {
@@ -421,18 +464,31 @@ async function capture(cdp: Cdp, opts: SnapshotOptions, restricted: boolean): Pr
       if (typeof t === 'string') title = t.slice(0, 200)
     } catch { /* keep the defaults */ }
 
-    let shot = await page('Page.captureScreenshot', { format: 'png' }) as { data?: string }
-    let image = Buffer.from(shot.data ?? '', 'base64')
+    // PNG first, then JPEG at falling quality until it fits. A long page may
+    // also need fewer pixels: it is then kept at a smaller scale.
+    const attempts: Array<{ quality?: number; zoom: number }> = [
+      { zoom: 1 }, { quality: 85, zoom: 1 }, { quality: 65, zoom: 1 }, { quality: 45, zoom: 1 },
+      ...(opts.fullPage ? [{ quality: 65, zoom: 0.75 }, { quality: 60, zoom: 0.5 }] : []),
+    ]
+    let image = Buffer.alloc(0)
     let mediaType: SnapshotResult['mediaType'] = 'image/png'
-    for (const quality of [85, 65, 45]) {
-      if (image.length <= SNAPSHOT_MAX_BYTES) break
-      shot = await page('Page.captureScreenshot', { format: 'jpeg', quality }) as { data?: string }
+    for (const { quality, zoom } of attempts) {
+      const shot = await page('Page.captureScreenshot', {
+        format: quality === undefined ? 'png' : 'jpeg',
+        ...(quality === undefined ? {} : { quality }),
+        ...(opts.fullPage ? { captureBeyondViewport: true, clip: { x: 0, y: 0, width: opts.width, height: pageHeight, scale: zoom } } : {}),
+      }) as { data?: string }
       image = Buffer.from(shot.data ?? '', 'base64')
-      mediaType = 'image/jpeg'
+      mediaType = quality === undefined ? 'image/png' : 'image/jpeg'
+      if (image.length <= SNAPSHOT_MAX_BYTES) break
     }
     if (!image.length) throw new SnapshotError('The browser returned no image.')
-    if (image.length > SNAPSHOT_MAX_BYTES) throw new SnapshotError('The snapshot is too large to keep. Try a smaller viewport.')
-    return { image, mediaType, finalPath, title, console: entries, restricted, blocked }
+    if (image.length > SNAPSHOT_MAX_BYTES) {
+      throw new SnapshotError(opts.fullPage
+        ? 'The page is too long to keep as one snapshot. Turn off Full page, or try a narrower viewport.'
+        : 'The snapshot is too large to keep. Try a smaller viewport.')
+    }
+    return { image, mediaType, finalPath, title, console: entries, restricted, blocked, ...(truncated ? { truncated } : {}) }
   } finally {
     off()
   }

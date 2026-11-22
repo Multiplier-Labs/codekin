@@ -107,7 +107,7 @@ export type WsClientMessage =
   /** The server output Codekin kept for a preview it started. */
   | { type: 'preview_logs'; itemId: string }
   /** Load the preview's page in a headless browser on the machine and keep a screenshot as an image item. */
-  | { type: 'preview_snapshot'; itemId: string; path?: string; viewport?: SnapshotViewport }
+  | { type: 'preview_snapshot'; itemId: string; path?: string; viewport?: SnapshotViewport; fullPage?: boolean }
   | { type: 'move_to_worktree' }
   | { type: 'retry_worktree' }
   | { type: 'use_existing_checkout' }
@@ -324,6 +324,10 @@ export interface SnapshotMeta {
   restricted?: true
   /** Requests blocked for leaving the machine (restricted only). */
   blocked?: number
+  /** The whole page was captured, not just the viewport. */
+  fullPage?: true
+  /** A full-page snapshot of a page taller than one image can hold: it stops partway. */
+  truncated?: true
 }
 
 /** A launch configuration as the user sees it before starting it. */

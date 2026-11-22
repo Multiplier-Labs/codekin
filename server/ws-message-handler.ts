@@ -517,7 +517,7 @@ export function handleWsMessage(msg: WsClientMessage, ctx: WsHandlerContext): vo
       if (!sessionId) { send({ type: 'canvas_error', message: 'Not in a session' }); break }
       if (typeof msg.itemId !== 'string') { send({ type: 'canvas_error', message: 'Missing preview.', sessionId }); break }
       const itemId = msg.itemId
-      void sessions.previews.snapshot(sessionId, itemId, { path: msg.path, viewport: msg.viewport }).then((r) => {
+      void sessions.previews.snapshot(sessionId, itemId, { path: msg.path, viewport: msg.viewport, fullPage: msg.fullPage }).then((r) => {
         send({ type: 'preview_snapshot_result', sessionId, itemId, ...r })
       })
       break

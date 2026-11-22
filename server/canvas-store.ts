@@ -152,6 +152,8 @@ function checkSnapshotMeta(meta: unknown): CanvasItemMeta {
       path: m.path, title: m.title, port: m.port, viewport: m.viewport as 'full' | 'tablet' | 'phone', console,
       ...(m.restricted === true ? { restricted: true as const } : {}),
       ...(typeof m.blocked === 'number' && m.blocked > 0 ? { blocked: m.blocked } : {}),
+      ...(m.fullPage === true ? { fullPage: true as const } : {}),
+      ...(m.truncated === true ? { truncated: true as const } : {}),
     },
   }
 }
