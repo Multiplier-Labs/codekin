@@ -105,7 +105,22 @@ describe('PreviewView', () => {
     const el = render(preview, JSON.stringify({ port: 5173, path: '/settings' }))
     act(() => { el.querySelector<HTMLButtonElement>('button[aria-label^="Phone"]')!.click() })
     act(() => { snapshotButton(el).click() })
-    expect(preview.snapshot).toHaveBeenCalledWith('p1', '/settings', 'phone')
+    expect(preview.snapshot).toHaveBeenCalledWith('p1', '/settings', 'phone', false)
+  })
+
+  it('takes full-page snapshots while Full page is on', () => {
+    const preview = api({ itemId: 'p1', status: 'running', targetPort: 5173, managed: false, proxyPort: 40000, entry: '/__codekin/enter?k=abc&to=%2F', snapshots: true })
+    const el = render(preview, JSON.stringify({ port: 5173, path: '/' }))
+    const toggle = el.querySelector<HTMLButtonElement>('button[aria-label="Full page snapshots"]')!
+    expect(toggle.getAttribute('aria-pressed')).toBe('false')
+    act(() => { toggle.click() })
+    expect(toggle.getAttribute('aria-pressed')).toBe('true')
+    expect(snapshotButton(el).title).toContain('full page')
+    act(() => { snapshotButton(el).click() })
+    expect(preview.snapshot).toHaveBeenLastCalledWith('p1', '/', 'full', true)
+    act(() => { toggle.click() })
+    act(() => { snapshotButton(el).click() })
+    expect(preview.snapshot).toHaveBeenLastCalledWith('p1', '/', 'full', false)
   })
 
   it('offers no snapshot without a browser on the machine, or while the server is down', () => {

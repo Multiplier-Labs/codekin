@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - **Execution API** (`/api/execution/v1`, off unless `EXECUTION_ENABLED=1`): your own applications can run bounded, tool-less model jobs (JSON with a schema, or text) through a signed-in Codex, with per-application tokens, a durable queue, a warm Codex process reused across jobs and subscription-only billing. See docs/EXECUTION-API.md (#945, #946).
+- **Full-page preview snapshots.** A toggle next to Snapshot in a Canvas preview captures the page's whole height, not just the first screen. Codekin scrolls the page once first so lazy-loaded images appear. Very long pages stop at 16,384 device pixels, and the snapshot says so.
 - `codekin restart` restarts the background service (launchd on macOS, systemd on Linux). The server checks for agent CLIs only at startup, so restart after installing or signing in to one.
 
 ### Security

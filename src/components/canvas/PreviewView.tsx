@@ -8,13 +8,14 @@
  * replaced by its status, so a stopped server never shows a stale page.
  *
  * Snapshot loads the page in a headless browser on the machine and opens
- * the screenshot as an image item. That is how the hosted web app (which
+ * the screenshot as an image item; with Full page on, it captures the
+ * page's whole height. That is how the hosted web app (which
  * can't reach the preview proxy) shows a preview at all.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  IconAlertTriangle, IconArrowLeft, IconArrowRight, IconCamera, IconClick, IconDeviceDesktop, IconDeviceMobile, IconDeviceTablet,
+  IconAlertTriangle, IconArrowAutofitHeight, IconArrowLeft, IconArrowRight, IconCamera, IconClick, IconDeviceDesktop, IconDeviceMobile, IconDeviceTablet,
   IconExternalLink, IconInfoCircle, IconLoader2, IconPlayerPlay, IconPlayerStop, IconRefresh, IconRotateClockwise, IconSend, IconTerminal2, IconX,
 } from '@tabler/icons-react'
 import type { PreviewApi } from '../../hooks/useCanvas'
@@ -80,6 +81,7 @@ export function PreviewView({ item, content, preview, onAttach, isMobile }: Prop
   const [pathDraft, setPathDraft] = useState<string | null>(null)
   const [generation, setGeneration] = useState(0)
   const [viewport, setViewport] = useState<Viewport>('full')
+  const [fullPage, setFullPage] = useState(false)
   const [connected, setConnected] = useState(false)
   const [loadedUnconnected, setLoadedUnconnected] = useState(false)
   const [picking, setPicking] = useState(false)
@@ -190,11 +192,11 @@ export function PreviewView({ item, content, preview, onAttach, isMobile }: Prop
   const width = VIEWPORTS[viewport]
   const snap = preview.snapshotStatus(item.id)
   const canSnapshot = running && !!state?.snapshots && !snap.busy
-  const takeSnapshot = () => { preview.snapshot(item.id, current?.path ?? loadPath, isMobile ? 'phone' : viewport) }
+  const takeSnapshot = () => { preview.snapshot(item.id, current?.path ?? loadPath, isMobile ? 'phone' : viewport, fullPage) }
   const snapshotTitle = !state?.snapshots
     ? 'Snapshots need Chrome or Chromium on the computer Codekin runs on'
     : !running ? 'Snapshots need the dev server to be running'
-    : `Load this page in a browser on the computer Codekin runs on, and keep a screenshot (${isMobile ? 'phone' : viewport} size)`
+    : `Load this page in a browser on the computer Codekin runs on, and keep a screenshot (${isMobile ? 'phone' : viewport} size${fullPage ? ', full page' : ''})`
   const note = snap.error
     || state?.notice
     || (running ? state.error : undefined)
@@ -241,6 +243,12 @@ export function PreviewView({ item, content, preview, onAttach, isMobile }: Prop
         <button type="button" onClick={takeSnapshot} disabled={!canSnapshot} title={snapshotTitle} aria-label="Take a snapshot"
           className="flex h-8 shrink-0 items-center gap-1.5 rounded-control px-2 text-meta text-ink hover:bg-surface-raised disabled:opacity-40 disabled:hover:bg-transparent">
           {snap.busy ? <IconLoader2 size={16} className="animate-spin" aria-hidden /> : <IconCamera size={16} aria-hidden />} {snap.busy ? 'Taking…' : 'Snapshot'}
+        </button>
+        <button type="button" onClick={() => { setFullPage(f => !f) }} aria-pressed={fullPage} disabled={!state?.snapshots}
+          title={fullPage ? 'Full page: snapshots capture the whole page. Click to capture only the first screen' : 'Full page: make snapshots capture the whole page, not just the first screen'}
+          aria-label="Full page snapshots"
+          className={`${ICON_BTN} ${fullPage ? 'bg-primary-11 text-ink' : ''}`}>
+          <IconArrowAutofitHeight size={17} />
         </button>
         <button type="button" onClick={() => { setDrawer(d => (d === 'console' ? null : 'console')) }} aria-pressed={drawer === 'console'}
           title="Console" aria-label={`Console: ${errors} errors, ${warnings} warnings`}

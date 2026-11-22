@@ -36,7 +36,7 @@ export function SnapshotView({ item, revision, src, meta, onAttach }: Props) {
       <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 border-b border-edge bg-surface px-3 py-1.5 text-meta text-ink-muted">
         <span className="min-w-0 truncate font-mono text-ink" title={`localhost:${meta.port}${meta.path}`}>localhost:{meta.port}{meta.path}</span>
         {meta.title && <span className="min-w-0 truncate">{meta.title}</span>}
-        <span className="shrink-0">{VIEWPORT_LABEL[meta.viewport]}</span>
+        <span className="shrink-0">{VIEWPORT_LABEL[meta.viewport]}{meta.fullPage ? ', full page' : ''}</span>
         {when && <span className="shrink-0">{when}</span>}
         <span className="flex-1" />
         <button type="button" onClick={() => { setOpen(o => !o) }} aria-expanded={open}
@@ -53,6 +53,12 @@ export function SnapshotView({ item, revision, src, meta, onAttach }: Props) {
             Chrome's sandbox isn't available on that computer, so the page could load only from it
             {meta.blocked ? `: ${meta.blocked} request${meta.blocked === 1 ? '' : 's'} elsewhere (fonts, CDNs, APIs) were blocked` : ''}.
           </span>
+        </div>
+      )}
+      {meta.truncated && (
+        <div className="flex shrink-0 items-start gap-2 border-b border-edge bg-surface px-3 py-1.5 text-meta text-ink-muted" role="note">
+          <IconInfoCircle size={15} className="mt-0.5 shrink-0" aria-hidden />
+          <span>The page is longer than one snapshot can hold, so this one stops partway down.</span>
         </div>
       )}
       {open && meta.console.length > 0 && (

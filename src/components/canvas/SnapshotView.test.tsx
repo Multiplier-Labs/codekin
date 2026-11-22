@@ -46,6 +46,15 @@ describe('SnapshotView', () => {
     expect(onAttach).toHaveBeenCalledWith('console', expect.stringContaining('TypeError: x is undefined'), '1 console error', true)
   })
 
+  it('labels a full-page snapshot, and says when the page was too long to fit', () => {
+    const el = render({ path: '/', title: '', port: 5173, viewport: 'tablet', console: [], fullPage: true, truncated: true })
+    expect(el.textContent).toContain('Tablet, 820 px, full page')
+    expect(el.textContent).toContain('stops partway down')
+    const plain = render({ path: '/', title: '', port: 5173, viewport: 'full', console: [] })
+    expect(plain.textContent).not.toContain('full page')
+    expect(plain.textContent).not.toContain('stops partway')
+  })
+
   it('says when the page could reach only this machine', () => {
     const el = render({ path: '/', title: '', port: 5173, viewport: 'full', console: [], restricted: true, blocked: 3 })
     expect(el.textContent).toContain('No console errors')

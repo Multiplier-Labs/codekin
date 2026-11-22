@@ -8,7 +8,7 @@ import { tmpdir } from 'os'
 import path from 'path'
 import { CanvasStore } from './canvas-store.js'
 import { PreviewManager, SNAPSHOT_VIEWPORTS } from './preview-manager.js'
-import { browserArgs, findSnapshotBrowser, NO_SANDBOX_MESSAGE, noSandboxAllowed, SnapshotError, takeSnapshot, type SnapshotOptions, type SnapshotResult } from './preview-snapshot.js'
+import { browserArgs, findSnapshotBrowser, FULL_PAGE_MAX_PX, NO_SANDBOX_MESSAGE, noSandboxAllowed, SnapshotError, takeSnapshot, type SnapshotOptions, type SnapshotResult } from './preview-snapshot.js'
 import type { CanvasItem, PreviewTarget, Session, SnapshotMeta, WsServerMessage } from './types.js'
 
 let dir: string
@@ -118,6 +118,21 @@ describe('PreviewManager.snapshot', () => {
     }
   })
 
+  it('asks for the whole page only when fullPage is true, and records it (and a cut-off page)', async () => {
+    const dev = await listen((_q, s) => { s.end('ok') })
+    try {
+      targets.set('p1', { port: dev.port, path: '/' })
+      result = async (opts) => ({ image: PNG, mediaType: 'image/png', finalPath: opts.path, title: '', console: [], restricted: false, blocked: 0, truncated: true })
+      await manager.snapshot('s1', 'p1', { viewport: 'tablet', fullPage: true })
+      await manager.snapshot('s1', 'p1', { fullPage: 'yes' })
+      expect(calls.map(c => c.opts.fullPage)).toEqual([true, undefined])
+      expect(published[0]!.meta).toMatchObject({ viewport: 'tablet', fullPage: true, truncated: true })
+      expect(published[1]!.meta.fullPage).toBeUndefined()
+    } finally {
+      await dev.close()
+    }
+  })
+
   it('falls back to the item\'s path and the full viewport for anything else', async () => {
     const dev = await listen((_q, s) => { s.end('ok') })
     try {
@@ -180,6 +195,8 @@ describe('snapshot items in the Canvas store', () => {
     const store = new CanvasStore(dir)
     const item = await store.create('s1', { kind: 'image', title: 'Snapshot: web', source: { type: 'snapshot', preview: 'p1' }, content: PNG, mediaType: 'image/png', meta: { snapshot: meta } })
     expect((await store.get('s1', item.id)).meta).toEqual({ snapshot: meta })
+    await store.addRevision('s1', item.id, { content: PNG, mediaType: 'image/png', meta: { snapshot: { ...meta, fullPage: true, truncated: true } } })
+    expect((await store.get('s1', item.id)).meta).toEqual({ snapshot: { ...meta, fullPage: true, truncated: true } })
     await expect(store.addRevision('s1', item.id, { content: PNG, mediaType: 'image/png', meta: { snapshot: { ...meta, viewport: 'huge' } } as never })).rejects.toThrow('Not a snapshot record.')
     await expect(store.addRevision('s1', item.id, { content: PNG, mediaType: 'image/png', meta: { snapshot: { ...meta, console: [{ level: 'info', message: 'x', path: '/', at: 1 }] } } as never })).rejects.toThrow('Not a snapshot record.')
     await expect(store.create('s1', { kind: 'markdown', title: 'x', source: { type: 'agent' }, content: 'x', mediaType: 'text/markdown', meta: { snapshot: meta } })).rejects.toThrow('takes no extra data')
@@ -259,5 +276,45 @@ describe.skipIf(!realBrowser)('takeSnapshot with a real browser', () => {
     }
     // On a host without a usable sandbox (CI runners) takeSnapshot launches
     // Chrome twice, each launch bounded at 75s above; let those limits decide.
+  }, 180_000)
+
+  it('captures the whole height of the page, after scrolling so lazy content loads', async () => {
+    let lazyRequested = false
+    const dev = await listen((req, res) => {
+      if (req.url === '/lazy.svg') {
+        lazyRequested = true
+        res.setHeader('Content-Type', 'image/svg+xml')
+        res.end('<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"/>')
+        return
+      }
+      res.setHeader('Content-Type', 'text/html')
+      res.end(`<title>Long</title><style>body{margin:0}</style><div style="height:2000px">top</div><img loading="lazy" src="/lazy.svg" width="10" height="10"><div style="height:390px"></div>`)
+    })
+    try {
+      const shot = await takeSnapshot(realBrowser!, { port: dev.port, path: '/', width: 400, height: 300, fullPage: true }, true, 75_000)
+      expect(shot.mediaType).toBe('image/png')
+      // PNG IHDR: width and height at bytes 16 and 20.
+      expect(shot.image.readUInt32BE(16)).toBe(400)
+      expect(shot.image.readUInt32BE(20)).toBe(2400)
+      expect(shot.truncated).toBeUndefined()
+      expect(lazyRequested).toBe(true)
+    } finally {
+      await dev.close()
+    }
+  }, 180_000)
+
+  it('stops a page taller than one image can hold', async () => {
+    const dev = await listen((_req, res) => {
+      res.setHeader('Content-Type', 'text/html')
+      res.end(`<style>body{margin:0}</style><div style="height:${FULL_PAGE_MAX_PX + 5000}px;background:linear-gradient(#fff,#000)"></div>`)
+    })
+    try {
+      const shot = await takeSnapshot(realBrowser!, { port: dev.port, path: '/', width: 200, height: 300, fullPage: true }, true, 75_000)
+      expect(shot.truncated).toBe(true)
+      const height = shot.mediaType === 'image/png' ? shot.image.readUInt32BE(20) : null
+      if (height !== null) expect(height).toBe(FULL_PAGE_MAX_PX)
+    } finally {
+      await dev.close()
+    }
   }, 180_000)
 })

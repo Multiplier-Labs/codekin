@@ -51,7 +51,7 @@ describe('PreviewView (hosted)', () => {
     expect(el.textContent).toContain('Take a snapshot to see the page here')
     const take = [...el.querySelectorAll('button')].find(b => b.textContent?.includes('Take a snapshot'))!
     act(() => { take.click() })
-    expect(preview.snapshot).toHaveBeenCalledWith('p1', '/', 'full')
+    expect(preview.snapshot).toHaveBeenCalledWith('p1', '/', 'full', false)
     expect(el.querySelector<HTMLButtonElement>('button[aria-label="Open in a new tab"]')!.disabled).toBe(true)
   })
 
