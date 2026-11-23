@@ -22,6 +22,12 @@ const AUTH_CHECK_INTERVAL_MS = 60_000
  */
 const BACKOFF_INITIAL_MS = 250
 const BACKOFF_MAX_MS = 30_000
+/**
+ * Least time between auth probes triggered by a drop or a wake. A socket that
+ * keeps failing would otherwise probe on every retry, and the probe endpoint
+ * is rate-limited per IP: a retry storm locks every client behind that IP out.
+ */
+export const AUTH_PROBE_MIN_GAP_MS = 15_000
 
 export interface UseWsConnectionOptions {
   token: string
@@ -48,6 +54,8 @@ export function useWsConnection({
   const backoff = useRef(BACKOFF_INITIAL_MS)
   const intentionalClose = useRef(false)
   const connectRef = useRef<() => void>(() => {})
+  /** When the last drop- or wake-triggered auth probe ran (ms since epoch). */
+  const lastAuthProbe = useRef(0)
 
   // Session restore / health check state machine:
   //
@@ -78,6 +86,16 @@ export function useWsConnection({
     if (healthPongTimer.current) { clearTimeout(healthPongTimer.current); healthPongTimer.current = null }
   }, [])
 
+  /** Check the login session after a drop or wake, at most once per AUTH_PROBE_MIN_GAP_MS. */
+  const probeAuth = useCallback(() => {
+    const now = Date.now()
+    if (now - lastAuthProbe.current < AUTH_PROBE_MIN_GAP_MS) return
+    lastAuthProbe.current = now
+    checkAuthSession().then(valid => {
+      if (!valid) { cleanup(); redirectToLogin() }
+    }).catch(() => { /* network error — the socket retries on its own */ })
+  }, [cleanup])
+
   const send = useCallback((msg: WsClientMessage) => {
     const ws = wsRef.current
     if (ws && ws.readyState === WebSocket.OPEN) {
@@ -101,7 +119,10 @@ export function useWsConnection({
       if (wsRef.current !== ws) return
       ws.send(JSON.stringify({ type: 'auth', token }))
       setConnState('connected')
-      backoff.current = BACKOFF_INITIAL_MS
+      // The backoff resets on the server's `connected` reply, not here: a
+      // server can accept the socket and close it straight away (origin not
+      // allowed, too many connections), and resetting on open would retry
+      // that every 250ms forever.
       pingTimer.current = setInterval(() => {
         send({ type: 'ping' })
       }, 30000)
@@ -111,6 +132,9 @@ export function useWsConnection({
       if (wsRef.current !== ws) return
       let msg: WsServerMessage
       try { msg = JSON.parse(event.data as string) as WsServerMessage } catch { return }
+
+      // Auth accepted: the connection works, so the next drop retries fast again.
+      if (msg.type === 'connected') backoff.current = BACKOFF_INITIAL_MS
 
       // Intercept health-check pong before forwarding
       if (msg.type === 'pong' && awaitingHealthPong.current) {
@@ -147,14 +171,12 @@ export function useWsConnection({
           reconnectTimer.current = null
           connectRef.current()
         }, delay)
-        checkAuthSession().then(valid => {
-          if (!valid) { cleanup(); redirectToLogin() }
-        }).catch(() => { /* network error — keep retrying */ })
+        probeAuth()
       }
     }
 
     ws.onerror = () => { /* onclose will fire after this */ }
-  }, [token, cleanup, send, onMessageRef])
+  }, [token, cleanup, send, onMessageRef, probeAuth])
   useEffect(() => { connectRef.current = connect }, [connect])
 
   const disconnect = useCallback(() => {
@@ -217,10 +239,8 @@ export function useWsConnection({
     // armed it was most likely the page being suspended.
     backoff.current = BACKOFF_INITIAL_MS
     connect()
-    checkAuthSession().then(valid => {
-      if (!valid) { cleanup(); redirectToLogin() }
-    }).catch(() => { /* network error — the socket retries on its own */ })
-  }, [send, connect, cleanup])
+    probeAuth()
+  }, [send, connect, probeAuth])
 
   // Connect on mount when token available, disconnect on unmount
   useEffect(() => {
