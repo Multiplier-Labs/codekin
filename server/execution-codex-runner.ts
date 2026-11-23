@@ -54,7 +54,7 @@ export interface RateLimitSnapshot {
 
 export type RunOutcome =
   | { ok: true; text: string; model: string | null; usage: JobUsage | null; billingMode: BillingMode }
-  | { ok: false; error: JobError; canceled?: boolean; billingMode?: BillingMode }
+  | { ok: false; error: JobError; canceled?: boolean; billingMode?: BillingMode; throttled?: boolean }
 
 export interface RunHooks {
   onRateLimits?: (rl: RateLimitSnapshot) => void
@@ -325,6 +325,23 @@ export function parseRateLimits(params: Record<string, unknown>): RateLimitSnaps
     limitReached: str(rl.rateLimitReachedType),
     at: new Date().toISOString(),
   }
+}
+
+/**
+ * True when a failed turn means the provider is throttling (HTTP 429 after
+ * the CLI's own retries, or an overloaded server) rather than a spent
+ * subscription. Retrying at once only hits the same wall, so the service
+ * backs off instead.
+ */
+export function isThrottledTurn(turnError: Record<string, unknown> | null): boolean {
+  const message = str(turnError?.message) ?? ''
+  const info = turnError?.codexErrorInfo
+  const kind = typeof info === 'string' ? info : info && typeof info === 'object' ? Object.keys(info)[0] : 'other'
+  if (kind === 'serverOverloaded') return true
+  if (kind !== 'responseTooManyFailedAttempts' && kind !== 'other') return false
+  const detail = info && typeof info === 'object' ? (info as Record<string, unknown>)[kind] : null
+  const status = detail && typeof detail === 'object' ? (detail as Record<string, unknown>).httpStatusCode : null
+  return status === 429 || /\b429\b|too many requests/i.test(message)
 }
 
 /** Map a failed turn's codexErrorInfo to a job error. */
@@ -602,7 +619,8 @@ export class CodexRunner implements HarnessRunner {
         } else if (status === 'interrupted') {
           finish({ ok: false, error: err('EXECUTION_INTERRUPTED', 'The turn was interrupted', true) })
         } else {
-          finish({ ok: false, error: mapTurnError((turn.error ?? null) as Record<string, unknown> | null, this.lastRateLimits) })
+          const turnError = (turn.error ?? null) as Record<string, unknown> | null
+          finish({ ok: false, error: mapTurnError(turnError, this.lastRateLimits), throttled: isThrottledTurn(turnError) })
         }
       }
     }

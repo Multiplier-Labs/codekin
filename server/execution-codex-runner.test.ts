@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync
 import { tmpdir } from 'os'
 import { join } from 'path'
 import {
-  CodexRunner, type RateLimitSnapshot, parseEnabledFeatures, parseMcpServerNames, billingModeFor, mapTurnError, parseRateLimits, type RunSpec,
+  CodexRunner, type RateLimitSnapshot, parseEnabledFeatures, parseMcpServerNames, billingModeFor, mapTurnError, isThrottledTurn, parseRateLimits, type RunSpec,
 } from './execution-codex-runner.js'
 
 /**
@@ -161,6 +161,15 @@ describe('parsers', () => {
     expect(e).toMatchObject({ code: 'QUOTA_EXHAUSTED', retryable: true, retryAfter: new Date(2000000000 * 1000).toISOString() })
     expect(mapTurnError({ message: 'x', codexErrorInfo: { httpConnectionFailed: { httpStatusCode: 502 } } }, null).code).toBe('RUNTIME_UNAVAILABLE')
     expect(mapTurnError({ message: 'x', codexErrorInfo: 'unauthorized' }, null).code).toBe('AUTH_REQUIRED')
+  })
+
+  it('recognises a provider throttle, not a spent subscription', () => {
+    expect(isThrottledTurn({ message: 'exceeded retry limit, last status: 429 Too Many Requests', codexErrorInfo: 'responseTooManyFailedAttempts' })).toBe(true)
+    expect(isThrottledTurn({ message: 'x', codexErrorInfo: { responseTooManyFailedAttempts: { httpStatusCode: 429 } } })).toBe(true)
+    expect(isThrottledTurn({ message: 'x', codexErrorInfo: 'serverOverloaded' })).toBe(true)
+    expect(isThrottledTurn({ message: 'exceeded retry limit, last status: 500', codexErrorInfo: 'responseTooManyFailedAttempts' })).toBe(false)
+    expect(isThrottledTurn({ message: '429', codexErrorInfo: 'usageLimitExceeded' })).toBe(false)
+    expect(isThrottledTurn(null)).toBe(false)
   })
 })
 

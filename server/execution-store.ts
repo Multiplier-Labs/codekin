@@ -72,7 +72,7 @@ export interface Job {
   model: string | null
   priority: JobPriority
   status: JobStatus
-  /** Why a queued job is not running yet ('capacity' | 'budget' | 'quota'), else null. */
+  /** Why a queued job is not running yet ('capacity' | 'budget' | 'quota' | 'throttled'), else null. */
   waitReason: string | null
   attempts: number
   createdAt: string

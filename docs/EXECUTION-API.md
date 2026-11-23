@@ -169,7 +169,7 @@ Idempotent.
 
 | Field | Notes |
 |---|---|
-| `id`, `status`, `waitReason` | `queued → running → succeeded \| failed \| canceled \| expired`; `waitReason` is `capacity`, `budget` or `quota` while queued |
+| `id`, `status`, `waitReason` | `queued → running → succeeded \| failed \| canceled \| expired`; `waitReason` is `capacity`, `budget`, `quota` or `throttled` while queued |
 | `workload`, `harness`, `model`, `priority` | `model` is the model that actually ran |
 | `attempts` | At most 2 |
 | `createdAt`, `startedAt`, `finishedAt`, `deadlineAt`, `cancelRequestedAt`, `queueMs`, `execMs` | |
@@ -195,6 +195,8 @@ Idempotent.
 | `EXECUTION_INTERRUPTED` | The process exited, or Codekin restarted mid-job |
 
 **Retries.** `INVALID_OUTPUT`, `EXECUTION_INTERRUPTED` and transient `RUNTIME_UNAVAILABLE` errors are retried once within the deadline.
+
+**Throttling.** When the provider throttles a harness (HTTP 429 after the CLI's own retries, or an overloaded server), Codekin holds that harness instead of retrying at once: queued jobs wait with `waitReason: "throttled"` for 30 s, doubling while the throttling goes on (at most 5 min), and the first success lifts the hold. The throttled job is retried after the hold if its deadline allows; a job whose deadline comes first fails with `RUNTIME_UNAVAILABLE` and `retryAfter` set to the end of the hold.
 
 **Restart recovery.** After a Codekin restart, jobs that were running are requeued if an attempt and time remain; otherwise they fail with `EXECUTION_INTERRUPTED`.
 

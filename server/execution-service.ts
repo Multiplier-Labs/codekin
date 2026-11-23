@@ -21,6 +21,9 @@ export interface ExecutionLimits {
   maxAttempts: number
   /** Background jobs wait while the usage window is at or above this percent. */
   backgroundBudgetPercent: number
+  /** First hold after the provider throttles a harness; doubles while throttling goes on, up to the max. */
+  throttleHoldMs: number
+  throttleHoldMaxMs: number
   retentionDays: number
   maxDeadlineMs: number
   maxPromptBytes: number
@@ -33,6 +36,8 @@ export const DEFAULT_LIMITS: ExecutionLimits = {
   maxQueued: 100,
   maxAttempts: 2,
   backgroundBudgetPercent: 80,
+  throttleHoldMs: 30_000,
+  throttleHoldMaxMs: 5 * 60_000,
   retentionDays: 7,
   maxDeadlineMs: 60 * 60 * 1000,
   maxPromptBytes: 256 * 1024,
@@ -92,6 +97,9 @@ export class ExecutionService extends EventEmitter {
   private rateLimits = new Map<string, RateLimitSnapshot>()
   /** Harness paused until this epoch ms after a quota error. */
   private pausedUntil = new Map<string, number>()
+  /** Harness held until this epoch ms after the provider throttled it, and the current backoff step. */
+  private throttledUntil = new Map<string, number>()
+  private throttleBackoff = new Map<string, number>()
   private rateRefreshedAt = new Map<string, number>()
   private pumpTimer: ReturnType<typeof setTimeout> | null = null
   private sweepTimer: ReturnType<typeof setInterval> | null = null
@@ -382,6 +390,18 @@ export class ExecutionService extends EventEmitter {
         nextWake = Math.min(nextWake, paused)
         continue
       }
+      const throttled = this.throttledUntil.get(job.harness) ?? 0
+      if (throttled > now && deadline <= throttled) {
+        // It would only expire in the queue; say why now so the caller can come back later.
+        const error: JobError = { code: 'RUNTIME_UNAVAILABLE', message: 'The provider is throttling requests (429 Too Many Requests); jobs are held until it eases', retryable: true, retryAfter: new Date(throttled).toISOString() }
+        if (this.store.finish(job.id, 'failed', { error })) this.emit('terminal', job.id)
+        continue
+      }
+      if (throttled > now) {
+        this.store.setWaitReason(job.id, 'throttled')
+        nextWake = Math.min(nextWake, throttled)
+        continue
+      }
       const used = this.rateLimits.get(job.harness)?.usedPercent
       if (job.priority === 'background' && typeof used === 'number' && used >= this.limits.backgroundBudgetPercent) {
         this.store.setWaitReason(job.id, 'budget')
@@ -426,6 +446,8 @@ export class ExecutionService extends EventEmitter {
       if (this.stopped) return // left 'running' (or cancel-requested) for restart recovery
 
       if (outcome.ok) {
+        this.throttleBackoff.delete(job.harness)
+        this.throttledUntil.delete(job.harness)
         const checked = this.checkOutput(req, outcome.text)
         if (checked.ok) {
           if (this.store.finish(id, 'succeeded', { output: checked.value, raw: outcome.text, usage: outcome.usage, model: outcome.model, billingMode: outcome.billingMode })) {
@@ -444,7 +466,13 @@ export class ExecutionService extends EventEmitter {
         const until = outcome.error.retryAfter ? Date.parse(outcome.error.retryAfter) : Date.now() + 15 * 60 * 1000
         this.pausedUntil.set(job.harness, until)
       }
-      this.afterFailure(id, outcome.error, outcome.billingMode ?? null, null)
+      let error = outcome.error
+      if (outcome.throttled) {
+        // Hold the harness instead of retrying straight into the same 429.
+        const until = this.noteThrottled(job.harness)
+        error = { ...error, retryAfter: new Date(until).toISOString() }
+      }
+      this.afterFailure(id, error, outcome.billingMode ?? null, null)
     } catch (e) {
       if (!this.stopped) this.afterFailure(id, { code: 'EXECUTION_INTERRUPTED', message: (e as Error).message, retryable: true, retryAfter: null }, null, null)
     } finally {
@@ -453,10 +481,26 @@ export class ExecutionService extends EventEmitter {
     }
   }
 
+  /** The provider throttled a harness: hold it, doubling the hold while throttling goes on. Returns the hold's end. */
+  private noteThrottled(harness: string): number {
+    const now = Date.now()
+    // Jobs already running when the hold began fail too; they do not extend it.
+    const current = this.throttledUntil.get(harness) ?? 0
+    if (current > now) return current
+    const step = Math.min(this.throttleBackoff.get(harness) ?? this.limits.throttleHoldMs, this.limits.throttleHoldMaxMs)
+    this.throttleBackoff.set(harness, Math.min(step * 2, this.limits.throttleHoldMaxMs))
+    const until = now + step
+    this.throttledUntil.set(harness, until)
+    console.warn(`[execution] ${harness} throttled by the provider; holding jobs for ${Math.round(step / 1000)} s`)
+    return until
+  }
+
   private afterFailure(id: string, error: JobError, billingMode: string | null, raw: string | null): void {
     const job = this.store.get(id)
     if (!job) return
-    const deadlineLeft = Date.parse(job.deadlineAt) - Date.now()
+    // A retry waits for the earliest moment it may succeed; fail now if the deadline comes first.
+    const notBefore = error.retryAfter && error.code !== 'QUOTA_EXHAUSTED' ? Date.parse(error.retryAfter) : Date.now()
+    const deadlineLeft = Date.parse(job.deadlineAt) - Math.max(Date.now(), Number.isFinite(notBefore) ? notBefore : 0)
     const retry = error.retryable
       && error.code !== 'QUOTA_EXHAUSTED'
       && job.attempts < this.limits.maxAttempts
