@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-11-23
+
+### Changed
+- Execution API: a provider throttle on the Codex harness (a 429 after the CLI's own retries, or "server overloaded") now holds that harness instead of failing every job submitted meanwhile. Queued jobs wait with `waitReason: "throttled"` for 30 s, doubling while the throttling continues up to 5 min, and any success lifts the hold. A throttled job is retried after the hold if its deadline allows; otherwise it fails at once with `RUNTIME_UNAVAILABLE` and a `retryAfter` (#950).
+
+### Fixed
+- On a scratch session the **Keep this work?** callout multiplied until it filled the chat and pushed the composer off screen, and its buttons did nothing. It now shows once, and Move to a folder…, Make it a git repo, Publish to GitHub… and Not now work (#951).
+- When the server accepted the connection and closed it straight away (origin not allowed, too many connections), the app retried every 250 ms forever and checked the login on every retry. That kept the per-IP limit on `/auth-verify` full, so other clients at the same address were refused too. Reconnects now back off until the server accepts the login, and the login is checked at most once every 15 s after a drop or wake (#952).
+
 ## [0.13.0] - 2026-11-22
 
 ### Added
