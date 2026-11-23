@@ -429,7 +429,10 @@ export function SessionContent({
         </div>
       )}
 
-      {keepThisWork}
+      {/* Wrapped so the callout's key (the session id) is not a sibling of the
+          InputBar's, which is the same id: duplicate sibling keys made React
+          leave a dead copy of the callout behind on every render. */}
+      {keepThisWork && <div className="shrink-0">{keepThisWork}</div>}
 
       {/* Tentative banner */}
       {activeTentativeCount > 0 && (
