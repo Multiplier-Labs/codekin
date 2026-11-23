@@ -180,6 +180,62 @@ describe('outcomes', () => {
     expect(runner.calls).toHaveLength(1)
   })
 
+  it('holds the harness after a provider throttle, then retries the job', async () => {
+    await service.stop()
+    service = new ExecutionService(store, { codex: runner }, { concurrency: 1, throttleHoldMs: 300, throttleHoldMaxMs: 1000 })
+    service.start()
+    const throttle = { code: 'RUNTIME_UNAVAILABLE' as const, message: 'exceeded retry limit, last status: 429 Too Many Requests', retryable: true, retryAfter: null }
+    runner.outcomes = [{ ok: false, error: throttle, throttled: true }]
+    const job = submit('k1')
+    await until(() => store.get(job.id)!.waitReason === 'throttled')
+    const other = submit('k2')
+    await until(() => store.get(other.id)!.waitReason === 'throttled')
+    expect(runner.calls).toHaveLength(1)
+    // After the hold, the throttled job runs again and succeeds; the other follows.
+    expect(await service.waitFor(job.id, 3000)).toMatchObject({ status: 'succeeded', attempts: 2 })
+    expect(await service.waitFor(other.id, 3000)).toMatchObject({ status: 'succeeded' })
+    expect(runner.calls).toHaveLength(3)
+  })
+
+  it('fails a throttled job at once when its deadline ends before the hold', async () => {
+    await service.stop()
+    service = new ExecutionService(store, { codex: runner }, { concurrency: 1, throttleHoldMs: 60_000 })
+    service.start()
+    runner.outcomes = [{ ok: false, error: { code: 'RUNTIME_UNAVAILABLE', message: 'last status: 429', retryable: true, retryAfter: null }, throttled: true }]
+    const done = await service.waitFor(submit('k1', { deadlineAt: new Date(Date.now() + 20_000).toISOString() }).id, 3000)
+    expect(done).toMatchObject({ status: 'failed', attempts: 1, error: { code: 'RUNTIME_UNAVAILABLE' } })
+    expect(Date.parse(done!.error!.retryAfter!)).toBeGreaterThan(Date.now() + 50_000)
+    // A job queued during the hold whose deadline also ends first fails too, without reaching the harness.
+    const late = await service.waitFor(submit('k2', { deadlineAt: new Date(Date.now() + 20_000).toISOString() }).id, 3000)
+    expect(late).toMatchObject({ status: 'failed', error: { code: 'RUNTIME_UNAVAILABLE', retryAfter: done!.error!.retryAfter } })
+    expect(runner.calls).toHaveLength(1)
+  })
+
+  it('doubles the throttle hold while throttling goes on and resets it on success', async () => {
+    await service.stop()
+    service = new ExecutionService(store, { codex: runner }, { concurrency: 1, maxAttempts: 1, throttleHoldMs: 100, throttleHoldMaxMs: 300 })
+    service.start()
+    const throttled = (): RunOutcome => ({ ok: false, error: { code: 'RUNTIME_UNAVAILABLE', message: '429', retryable: true, retryAfter: null }, throttled: true })
+    const holdOf = async (key: string) => {
+      const start = Date.now()
+      const done = await service.waitFor(submit(key).id, 3000)
+      return Date.parse(done!.error!.retryAfter!) - start
+    }
+    runner.outcomes = [throttled()]
+    expect(await holdOf('a')).toBeLessThan(250)
+    await new Promise((r) => setTimeout(r, 150))
+    runner.outcomes = [throttled()]
+    const second = await holdOf('b')
+    expect(second).toBeGreaterThanOrEqual(190)
+    await new Promise((r) => setTimeout(r, second + 50))
+    runner.outcomes = [throttled()]
+    expect(await holdOf('c')).toBeGreaterThanOrEqual(290) // capped at the max
+    await new Promise((r) => setTimeout(r, 350))
+    expect(await service.waitFor(submit('d').id, 3000)).toMatchObject({ status: 'succeeded' })
+    runner.outcomes = [throttled()]
+    expect(await holdOf('e')).toBeLessThan(250) // back to the first step
+  })
+
   it('expires queued jobs whose deadline passes', async () => {
     runner.outcomes = ['hold']
     const blocker = submit('a')
