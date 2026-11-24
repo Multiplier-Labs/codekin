@@ -51,7 +51,7 @@ import { CommandPalette } from './components/CommandPalette'
 import type { InputBarHandle } from './components/InputBar'
 import { NewSessionComposer } from './components/NewSessionComposer'
 import { EnvironmentChecklist } from './components/EnvironmentChecklist'
-import { defaultPlace, getRecentPlaces, isNotRepoPlace, placeFromSession, rememberPlace, sessionPlaceLabel, type DraftPlace } from './lib/places'
+import { NEW_SCRATCH, isNotRepoPlace, rememberPlace, sessionPlaceLabel, type DraftPlace } from './lib/places'
 import { resolvePlacePath, startDraftSession } from './lib/startDraftSession'
 import { useDraftPermissionMode, useDraftState } from './hooks/useDraftState'
 import { DiffPanel } from './components/DiffPanel'
@@ -250,7 +250,7 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
   // which agent — before anything exists on the server. Send creates it; the
   // first message follows once session_created arrives.
   const recentPlacesPref = usePref('recentPlaces')
-  const [draftPlace, setDraftPlace] = useState<DraftPlace>(() => defaultPlace(getRecentPlaces()))
+  const [draftPlace, setDraftPlace] = useState(NEW_SCRATCH)
   const [draftProviderChoice, setDraftProviderChoice] = useState<CodingProvider | null>(null)
   const draft = useDraftState()
 
@@ -642,9 +642,13 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
     draft.fail('The connection dropped before the session started. Try again once it is back.')
   }, [connState, draft])
 
-  /** Open the composer; `preset` picks the place (the sidebar's group +), else the last one used. */
+  /**
+   * Open the composer; `preset` picks the place (the sidebar's group +).
+   * Otherwise it opens unpicked, on a new scratch folder: the last session's
+   * place is one click away under Recent, never preselected.
+   */
   const openNewSession = useCallback((preset?: DraftPlace) => {
-    setDraftPlace(preset ?? defaultPlace(getRecentPlaces()))
+    setDraftPlace(preset ?? NEW_SCRATCH)
     draft.setError(null)
     navigate('/new')
   }, [navigate, draft])
@@ -1169,8 +1173,7 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
             repoName={activeRepoName}
             sessionName={activeSessionName}
             onMenuOpen={() => setMobileMenuOpen(true)}
-            // Same place as the session in view (a new scratch folder for a scratch session); else the default.
-            onNewSession={() => { openNewSession(activeSession ? placeFromSession(activeSession) : undefined) }}
+            onNewSession={() => { openNewSession() }}
             onSettingsOpen={() => { openSettings() }}
           />
         )}

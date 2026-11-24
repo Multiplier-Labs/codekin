@@ -7,7 +7,7 @@ vi.mock('./prefs', () => ({
 }))
 
 import {
-  NEW_SCRATCH, MAX_RECENT_PLACES, defaultPlace, withRecentPlace, placeKey, samePlace,
+  NEW_SCRATCH, MAX_RECENT_PLACES, withRecentPlace, placeKey, samePlace,
   placeFromRepo, placeFromPath, sessionPlaceLabel, placeFromSession, placeFromOwner, placeHint, placeTag, isNotRepoPlace,
   tildify, untildify, baseName, getRecentPlaces, rememberPlace, type DraftPlace,
 } from './places'
@@ -38,23 +38,6 @@ describe('paths', () => {
 
   it('baseName takes the last segment', () => {
     expect(baseName('/a/b/c/')).toBe('c')
-  })
-})
-
-describe('defaultPlace', () => {
-  it('is a new scratch folder with no history', () => {
-    expect(defaultPlace(undefined)).toBe(NEW_SCRATCH)
-    expect(defaultPlace([])).toBe(NEW_SCRATCH)
-  })
-
-  it('is the last place used', () => {
-    const folder = placeFromPath('/home/sam/notes', false, HOME)
-    expect(defaultPlace([folder, NEW_SCRATCH])).toBe(folder)
-  })
-
-  it('never reuses a specific scratch folder', () => {
-    const used: DraftPlace = { kind: 'scratch', path: '/home/sam/codekin/scratch/brisk-otter', git: false, label: 'x' }
-    expect(defaultPlace([used])).toBe(NEW_SCRATCH)
   })
 })
 
