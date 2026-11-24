@@ -231,9 +231,17 @@ describe('PreviewManager', () => {
     await launch('web')
     const running = await until(() => states().find(s => s.status === 'running'))
     manager.forget('s1', running.itemId)
-    await new Promise(r => setTimeout(r, 500))
-    expect(await probePort(devPort)).toBe(false)
-  })
+    // Poll rather than sleep a fixed interval: on a loaded CI runner the dev server
+    // can take longer than half a second to exit after SIGTERM (the SIGKILL fallback
+    // fires after KILL_GRACE_MS = 5s, so allow comfortably more than that).
+    let closed = false
+    const deadline = Date.now() + 8_000
+    while (!closed && Date.now() < deadline) {
+      closed = !(await probePort(devPort))
+      if (!closed) await new Promise(r => setTimeout(r, 100))
+    }
+    expect(closed).toBe(true)
+  }, 20_000)
 
   it('starts one server when Start is pressed twice at once', async () => {
     const d = await digestOf('web')
