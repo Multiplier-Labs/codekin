@@ -7,9 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.1] - 2026-11-24
+
+### Changed
+- **New session** opens on a new scratch folder instead of preselecting the last session's repo or folder, and the mobile top bar's **+** no longer copies the place of the session in view. Recent places are still one click away as **Recent** chips under the composer, and a sidebar group's **+** still presets that group (#954).
+
 ### Fixed
-- Switching sessions slowed down as more sessions ran, especially over the relay. Opening a session sent its newest 500 history entries in one frame, 6–14 MB for a busy session, on every switch. It now sends about the newest 512 KB, starting at a turn boundary, and earlier messages load as you scroll up (or with **Show earlier messages**). The server also saved every changed history whole every 2 s while sessions streamed, which stalled it for most of a second with ten busy sessions; each history is now an append-only log (`session-history/<id>.jsonl`) that a save extends with just what changed, compacted in the background. Existing history files are still read, converted the first time a history changes, and kept so an older version can still read them.
-- The test suite could read and write the real `~/.codekin` (two tests built a session manager without a test data folder). Every test file now gets a temporary `DATA_DIR`.
+- Switching sessions slowed down as more sessions ran, especially over the relay. Opening a session sent its newest 500 history entries in one frame, 6–14 MB for a busy session, on every switch. It now sends about the newest 512 KB, starting at a turn boundary, and earlier messages load as you scroll up (or with **Show earlier messages**). The server also saved every changed history whole every 2 s while sessions streamed, which stalled it for most of a second with ten busy sessions; each history is now an append-only log (`session-history/<id>.jsonl`) that a save extends with just what changed, compacted in the background. Existing history files are still read, converted the first time a history changes, and kept so an older version can still read them (#955).
+- A history log cut off mid-line by a crash could lose an entry: the next save appended straight after the partial line. A log that doesn't end in a newline is now rewritten on its next save. The replay size budget now counts UTF-8 bytes, so a history in CJK or other non-ASCII text stays within it (#956).
+- The test suite could read and write the real `~/.codekin` (two tests built a session manager without a test data folder). Every test file now gets a temporary `DATA_DIR` (#955).
 
 ## [0.14.0] - 2026-11-23
 
