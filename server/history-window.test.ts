@@ -21,6 +21,14 @@ describe('windowBefore', () => {
     expect(win.hasMore).toBe(true)
   })
 
+  it('counts the budget in UTF-8 bytes, not string length', () => {
+    // 100 CJK characters: 100 code units but 300 bytes of UTF-8.
+    const cjk = () => out('字'.repeat(100))
+    const win = windowBefore([cjk(), cjk(), cjk(), cjk()], 4, 0, 700)
+    expect(win.entries).toHaveLength(2)
+    expect(win.hasMore).toBe(true)
+  })
+
   it('stops at the entry cap', () => {
     const history = Array.from({ length: 10 }, (_, i) => out(String(i)))
     const win = windowBefore(history, 10, 0, 1_000_000, 4)

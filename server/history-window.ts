@@ -19,7 +19,7 @@ import type { WsServerMessage } from './types.js'
 /** Max messages retained in a session's output history buffer. */
 export const MAX_HISTORY = 2000
 
-/** Serialized size a join or a page may carry, roughly. */
+/** Serialized UTF-8 size a join or a page may carry, roughly. */
 export const HISTORY_WINDOW_BYTES = 512 * 1024
 
 /** Entry count a join or a page may carry, whatever their size. */
@@ -57,7 +57,8 @@ export function windowBefore(
   let start = end
   let bytes = 0
   while (start > 0 && end - start < maxEntries) {
-    const size = JSON.stringify(history[start - 1]).length
+    // UTF-8 bytes, as sent; string length undercounts non-ASCII text up to threefold.
+    const size = Buffer.byteLength(JSON.stringify(history[start - 1]), 'utf8')
     // Always take one entry, so an oversized one cannot stall paging.
     if (start < end && bytes + size > budgetBytes) break
     bytes += size
