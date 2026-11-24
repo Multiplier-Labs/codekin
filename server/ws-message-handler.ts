@@ -21,6 +21,7 @@ import type { WsClientMessage, WsServerMessage } from './types.js'
 import { isGitWorkTree } from './places.js'
 import { orgManifestFor } from './org-manifest.js'
 import { randomUUID } from 'crypto'
+import { joinWindow, pageBefore } from './history-window.js'
 
 /** Closure state passed to handleWsMessage from the ws.on('connection') scope. */
 export interface WsHandlerContext {
@@ -180,13 +181,16 @@ export function handleWsMessage(msg: WsClientMessage, ctx: WsHandlerContext): vo
       const session = sessions.join(msg.sessionId, ws)
       if (session) {
         clientSessions.set(ws, session.id)
+        const replay = joinWindow(session.outputHistory, session._historyBase ?? 0)
         send({
           type: 'session_joined',
           sessionId: session.id,
           sessionName: session.name,
           workingDir: session.workingDir,
           active: session.claudeProcess?.isAlive() ?? false,
-          outputBuffer: session.outputHistory.slice(-500),
+          outputBuffer: replay.entries,
+          historyStart: replay.start,
+          historyHasMore: replay.hasMore,
           model: session.model,
           ...(session.effort ? { effort: session.effort } : {}),
           provider: session.provider,
@@ -200,6 +204,16 @@ export function handleWsMessage(msg: WsClientMessage, ctx: WsHandlerContext): vo
         clientSessions.delete(ws)
         send({ type: 'error', message: 'Session not found' })
       }
+      break
+    }
+
+    // Older history for the joined session, as the reader scrolls up.
+    case 'load_history': {
+      const sessionId = clientSessions.get(ws)
+      const session = sessionId ? sessions.get(sessionId) : undefined
+      if (!session || typeof msg.before !== 'number' || !Number.isFinite(msg.before)) break
+      const page = pageBefore(session.outputHistory, session._historyBase ?? 0, Math.floor(msg.before))
+      send({ type: 'history_page', sessionId: session.id, before: msg.before, start: page.start, entries: page.entries, hasMore: page.hasMore })
       break
     }
 

@@ -8,7 +8,7 @@
 
 import { isNotRepoPlace } from '../lib/places'
 import type { ReactNode, RefObject } from 'react'
-import { ChatView } from './ChatView'
+import { ChatView, type EarlierControls } from './ChatView'
 import { TodoPanel } from './TodoPanel'
 import { PromptButtons } from './PromptButtons'
 import { TentativeBanner } from './TentativeBanner'
@@ -112,6 +112,8 @@ import type { PromptEntry } from '../hooks/usePromptState'
 export interface SessionContentProps {
   activeSessionId: string
   messages: ChatMessage[]
+  /** Loading the transcript's earlier messages (see ChatView). */
+  earlier?: EarlierControls
   fontSize: number
   isMobile: boolean
   planningMode: boolean
@@ -204,6 +206,7 @@ export interface SessionContentProps {
 export function SessionContent({
   activeSessionId,
   messages,
+  earlier,
   fontSize,
   isMobile,
   planningMode,
@@ -314,6 +317,9 @@ export function SessionContent({
         <ChatView
           sessionId={activeSessionId}
           messages={messages}
+          canLoadEarlier={earlier?.canLoad}
+          loadingEarlier={earlier?.loading}
+          onLoadEarlier={earlier?.onLoad}
           fontSize={fontSize}
           disabled={disabled}
           planningMode={planningMode}

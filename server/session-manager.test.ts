@@ -1401,8 +1401,9 @@ describe('SessionManager', () => {
       expect(persisted.workingDir).toBe('/tmp/persist')
       // The history goes to its own file, not into sessions.json.
       expect(persisted.outputHistory).toBeUndefined()
-      const historyCall = mockedWriteFileSync.mock.calls.findLast(c => String(c[0]).includes(`session-history/${s.id}.json`))
-      expect(JSON.parse(historyCall![1] as string)).toEqual([{ type: 'output', data: 'hello' }])
+      const historyCall = mockedWriteFileSync.mock.calls.findLast(c => String(c[0]).includes(`session-history/${s.id}.jsonl`))
+      const lines = (historyCall![1] as string).split('\n').filter(Boolean).map(l => JSON.parse(l))
+      expect(lines).toEqual([[0, { type: 'output', data: 'hello' }]])
     })
 
     it('persists repo approvals separately from sessions', () => {

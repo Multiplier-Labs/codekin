@@ -50,6 +50,8 @@ export type WsClientMessage =
   | { type: 'create_session'; name: string; workingDir: string; model?: string; effort?: string; useWorktree?: boolean; permissionMode?: PermissionMode; allowedTools?: string[]; provider?: CodingProvider }
   | { type: 'join_session'; sessionId: string }
   | { type: 'leave_session' }
+  /** Older history for the joined session: the page ending just before absolute position `before`. */
+  | { type: 'load_history'; before: number }
   | { type: 'start_claude'; options?: Record<string, unknown> }
   | { type: 'set_model'; model: string; effort?: string | null }
   | { type: 'set_effort'; effort: string | null }
@@ -134,7 +136,15 @@ export type WsClientMessage =
 export type WsServerMessage =
   | { type: 'connected'; connectionId: string; claudeAvailable: boolean; claudeVersion: string; apiKeySet: boolean; codexAvailable?: boolean; codexAuthenticated?: boolean; openCodeAvailable?: boolean; grokAvailable?: boolean; grokAuthenticated?: boolean }
   | { type: 'session_created'; sessionId: string; sessionName: string; workingDir: string; provider?: CodingProvider; model?: string; effort?: string }
-  | { type: 'session_joined'; sessionId: string; sessionName: string; workingDir: string; active: boolean; outputBuffer: WsServerMessage[]; model?: string; effort?: string; provider?: CodingProvider; permissionMode?: PermissionMode; planState?: 'idle' | 'planning' | 'reviewing' }
+  /**
+   * `outputBuffer` is the newest part of the history, capped by size.
+   * `historyStart` is the absolute position of its first entry and
+   * `historyHasMore` says older entries can be loaded with `load_history`
+   * (both absent from servers that sent a fixed count).
+   */
+  | { type: 'session_joined'; sessionId: string; sessionName: string; workingDir: string; active: boolean; outputBuffer: WsServerMessage[]; historyStart?: number; historyHasMore?: boolean; model?: string; effort?: string; provider?: CodingProvider; permissionMode?: PermissionMode; planState?: 'idle' | 'planning' | 'reviewing' }
+  /** Reply to `load_history`: entries from absolute position `start` up to `before`. */
+  | { type: 'history_page'; sessionId: string; before: number; start: number; entries: WsServerMessage[]; hasMore: boolean }
   | { type: 'session_left' }
   | { type: 'session_deleted'; message: string }
   | { type: 'claude_started'; sessionId: string }

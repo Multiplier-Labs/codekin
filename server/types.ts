@@ -120,6 +120,8 @@ export interface Session {
   clients: Set<WebSocket>
   /** Rolling buffer of messages for replay when a new client joins. */
   outputHistory: WsServerMessage[]
+  /** Absolute position of `outputHistory[0]`: entries trimmed from the front so far (unset = 0). */
+  _historyBase?: number
   /** Claude CLI's internal session ID, used for --session-id resume across restarts. */
   claudeSessionId: string | null
   /** Preferred model to pass via --model flag (e.g. 'claude-opus-4-6'). Defaults to Claude's default. */

@@ -296,6 +296,19 @@ describe('review feedback', () => {
   })
 })
 
+describe('load_history', () => {
+  const watcher: ChannelPolicy = { role: 'grantee', grants: { s1: ['view'] }, userId: 'u-watch' }
+
+  it('lets anyone who can view the joined session page its history, and relays the page', () => {
+    const load = frame({ type: 'load_history', before: 40 })
+    expect(checkClientFrame(watcher, joined(watcher), load).allowed).toBe(true)
+    expect(checkClientFrame(watcher, newChannelState(), load).allowed).toBe(false)
+    const page = frame({ type: 'history_page', sessionId: 's1', before: 40, start: 20, entries: [], hasMore: true })
+    expect(checkServerFrame(watcher, joined(watcher), page)).toBe(true)
+    expect(checkServerFrame(watcher, joined(watcher), frame({ type: 'history_page', sessionId: 's2', before: 40, start: 20, entries: [], hasMore: true }))).toBe(false)
+  })
+})
+
 describe('canvas', () => {
   const watcher: ChannelPolicy = { role: 'grantee', grants: { s1: ['view'] }, userId: 'u-watch' }
 

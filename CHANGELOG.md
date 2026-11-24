@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Switching sessions slowed down as more sessions ran, especially over the relay. Opening a session sent its newest 500 history entries in one frame, 6–14 MB for a busy session, on every switch. It now sends about the newest 512 KB, starting at a turn boundary, and earlier messages load as you scroll up (or with **Show earlier messages**). The server also saved every changed history whole every 2 s while sessions streamed, which stalled it for most of a second with ten busy sessions; each history is now an append-only log (`session-history/<id>.jsonl`) that a save extends with just what changed, compacted in the background. Existing history files are still read, converted the first time a history changes, and kept so an older version can still read them.
+- The test suite could read and write the real `~/.codekin` (two tests built a session manager without a test data folder). Every test file now gets a temporary `DATA_DIR`.
+
 ## [0.14.0] - 2026-11-23
 
 ### Changed
