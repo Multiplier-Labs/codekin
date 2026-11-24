@@ -346,9 +346,12 @@ export class HistoryStore {
     const positions = kept.map(([pos]) => pos)
     const history = kept.map(([, entry]) => entry)
     const base = positions.length ? positions[0] : 0
-    // Positions must run without a gap for appends to continue them;
-    // otherwise (a lost line) the first persist rewrites the log.
-    if (positions.length === 0 || max - base + 1 === positions.length) {
+    // Positions must run without a gap for appends to continue them, and the
+    // log must end with a newline: an append after a line cut short by a crash
+    // would join that line and be lost with it. Otherwise the first persist
+    // rewrites the log.
+    const contiguous = positions.length === 0 || max - base + 1 === positions.length
+    if (contiguous && (text === '' || text.endsWith('\n'))) {
       const last = history[history.length - 1]
       this.marks.set(id, { ref: history, end: base + history.length, last, lastSize: sizeOf(last), appended: 0, compacted: text.length })
     }

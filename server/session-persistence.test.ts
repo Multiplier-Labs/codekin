@@ -542,6 +542,38 @@ describe('SessionPersistence output history logs', () => {
     expect(readLines('s1').map(([pos]) => pos)).toEqual([0, 1])
   })
 
+  it('does not append onto a last line cut short by a crash', async () => {
+    mkdirSync(HISTORY_DIR, { recursive: true })
+    writeFileSync(SESSIONS_FILE, JSON.stringify([{ id: 's1', name: 'S', workingDir: '/repos/x', created: '2026-04-27T00:00:00Z', claudeSessionId: null }]))
+    writeFileSync(logFile('s1'), '[0,{"type":"output","data":"a"}]\n[1,{"type":"outp')
+
+    const restored = new Map<string, Session>()
+    const p = new SessionPersistence(restored)
+    quiet(() => p.restoreFromDisk())
+    const s1 = restored.get('s1')!
+    expect(s1.outputHistory).toEqual([{ type: 'output', data: 'a' }])
+
+    s1.outputHistory.push({ type: 'result' } as any)
+    p.persistToDisk()
+    await p.whenHistoriesWritten()
+    expect(readLines('s1')).toEqual([[0, { type: 'output', data: 'a' }], [1, { type: 'result' }]])
+    expect(restore().get('s1')!.outputHistory).toEqual([{ type: 'output', data: 'a' }, { type: 'result' }])
+  })
+
+  it('does not append onto a complete last line missing its newline', async () => {
+    mkdirSync(HISTORY_DIR, { recursive: true })
+    writeFileSync(SESSIONS_FILE, JSON.stringify([{ id: 's1', name: 'S', workingDir: '/repos/x', created: '2026-04-27T00:00:00Z', claudeSessionId: null }]))
+    writeFileSync(logFile('s1'), '[0,{"type":"output","data":"a"}]')
+
+    const restored = new Map<string, Session>()
+    const p = new SessionPersistence(restored)
+    quiet(() => p.restoreFromDisk())
+    restored.get('s1')!.outputHistory.push({ type: 'result' } as any)
+    p.persistToDisk()
+    await p.whenHistoriesWritten()
+    expect(restore().get('s1')!.outputHistory).toEqual([{ type: 'output', data: 'a' }, { type: 'result' }])
+  })
+
   it('converts a history file from the array format into a log once it changes', () => {
     mkdirSync(HISTORY_DIR, { recursive: true })
     writeFileSync(SESSIONS_FILE, JSON.stringify([{ id: 's1', name: 'S', workingDir: '/repos/x', created: '2026-04-27T00:00:00Z', claudeSessionId: null }]))
