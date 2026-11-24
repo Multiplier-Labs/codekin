@@ -5,21 +5,19 @@
  * Uses atomic rename to prevent corruption on crash.
  *
  * `sessions.json` holds metadata only. Each session's output history lives in
- * its own file under `session-history/`, rewritten only when that history
- * changed. Histories run to megabytes per session, and the writes are
- * synchronous: serializing every history on every persist blocked the event
- * loop for most of a second on a busy machine, which delayed every
- * `session_created` (three persists for a worktree session) and stalled
- * every live stream.
+ * its own append-only log under `session-history/` (see history-store.ts),
+ * which a persist extends with just what changed.
  *
- * A session saved with its history inline (older versions, or a history file
- * that could not be written) restores from the inline copy; the next persist
- * moves it into its own file.
+ * A session saved with its history inline (older versions, or a history whose
+ * log could not be written yet) restores from the inline copy; once its log
+ * is written the inline copy is dropped.
  */
 
-import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'fs'
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { DATA_DIR } from './config.js'
+import { HistoryStore } from './history-store.js'
+import { MAX_HISTORY } from './history-window.js'
 import { PlanManager } from './plan-manager.js'
 import type { ProcessCoordinator } from './process-coordinator.js'
 import type { Session, WsServerMessage } from './types.js'
@@ -28,38 +26,6 @@ import { jsonParse } from './json-parse.js'
 const SESSIONS_FILE = join(DATA_DIR, 'sessions.json')
 const HISTORY_DIR = join(DATA_DIR, 'session-history')
 const PERSIST_DEBOUNCE_MS = 2000
-
-/** Ids that are safe as file names; any other id keeps its history inline. */
-const FILE_SAFE_ID = /^[A-Za-z0-9_-]{1,128}$/
-
-function historyFile(id: string): string {
-  return join(HISTORY_DIR, `${id}.json`)
-}
-
-/**
- * Enough of a history's state to tell whether it changed since it was
- * written. History is appended to (push), trimmed from the front (splice),
- * replaced (filter), and its last `output` entry grows in place as chunks
- * merge; each of those changes the array, its length, its last entry, or that
- * entry's text length.
- */
-interface HistoryMark {
-  ref: WsServerMessage[]
-  length: number
-  last: WsServerMessage | undefined
-  lastSize: number
-}
-
-function markOf(history: WsServerMessage[]): HistoryMark {
-  const last: WsServerMessage | undefined = history.length ? history[history.length - 1] : undefined
-  return { ref: history, length: history.length, last, lastSize: last?.type === 'output' ? last.data.length : 0 }
-}
-
-function unchanged(mark: HistoryMark | undefined, history: WsServerMessage[]): boolean {
-  if (!mark) return false
-  const now = markOf(history)
-  return mark.ref === now.ref && mark.length === now.length && mark.last === now.last && mark.lastSize === now.lastSize
-}
 
 function writeAtomic(file: string, content: string): void {
   const tmp = file + '.tmp'
@@ -110,58 +76,21 @@ export interface PersistedSession {
 export class SessionPersistence {
   private sessions: Map<string, Session>
   private _persistTimer: ReturnType<typeof setTimeout> | null = null
-  /** Sessions whose history is on disk in its own file, and its state when written. */
-  private historyMarks = new Map<string, HistoryMark>()
+  private histories: HistoryStore
 
   constructor(sessions: Map<string, Session>) {
     this.sessions = sessions
+    // A finished rewrite may leave appends and an inline copy to settle.
+    this.histories = new HistoryStore(HISTORY_DIR, sessions, () => this.persistToDiskDebounced())
   }
 
   /**
-   * Write each changed history to its own file. Returns the ids whose history
-   * is not in a file and so must stay inline in `sessions.json`.
+   * Write all sessions to disk as JSON (atomic rename to prevent corruption).
+   * `final` (shutdown) also does any history rewrite still queued, synchronously.
    */
-  private writeHistories(): Set<string> {
-    const inline = new Set<string>()
-    try {
-      mkdirSync(HISTORY_DIR, { recursive: true })
-    } catch (err) {
-      console.error('Failed to create the session history folder:', err)
-      for (const id of this.sessions.keys()) inline.add(id)
-      return inline
-    }
-    for (const s of this.sessions.values()) {
-      if (!FILE_SAFE_ID.test(s.id)) { inline.add(s.id); continue }
-      if (unchanged(this.historyMarks.get(s.id), s.outputHistory)) continue
-      try {
-        writeAtomic(historyFile(s.id), JSON.stringify(s.outputHistory))
-        this.historyMarks.set(s.id, markOf(s.outputHistory))
-      } catch (err) {
-        console.error(`Failed to persist history for session ${s.id}:`, err)
-        this.historyMarks.delete(s.id)
-        inline.add(s.id)
-      }
-    }
-    return inline
-  }
-
-  /** Remove the history files of sessions that are gone (deleted or archived). */
-  private removeStaleHistories(): void {
-    for (const id of this.historyMarks.keys()) {
-      if (this.sessions.has(id)) continue
-      this.historyMarks.delete(id)
-      try {
-        unlinkSync(historyFile(id))
-      } catch (err) {
-        if ((err as NodeJS.ErrnoException).code !== 'ENOENT') console.warn(`Failed to remove history for session ${id}:`, err)
-      }
-    }
-  }
-
-  /** Write all sessions to disk as JSON (atomic rename to prevent corruption). */
-  persistToDisk(): void {
+  persistToDisk(opts: { final?: boolean } = {}): void {
     // Histories first: sessions.json stops carrying a history only once its file exists.
-    const inline = this.writeHistories()
+    const inline = this.histories.writeAll(opts.final)
     const data: PersistedSession[] = Array.from(this.sessions.values()).map((s) => ({
       id: s.id,
       name: s.name,
@@ -202,24 +131,18 @@ export class SessionPersistence {
       console.error('Failed to persist sessions:', err)
       return
     }
-    this.removeStaleHistories()
+    this.histories.removeStale()
   }
 
-  /** A restored session's history: inline if saved that way, else from its own file. */
-  private readHistory(s: PersistedSession): WsServerMessage[] {
-    if (s.outputHistory) return s.outputHistory
-    if (!FILE_SAFE_ID.test(s.id)) return []
-    const file = historyFile(s.id)
-    if (!existsSync(file)) return []
-    try {
-      const history = jsonParse(readFileSync(file, 'utf-8')) as WsServerMessage[]
-      if (!Array.isArray(history)) return []
-      this.historyMarks.set(s.id, markOf(history))
-      return history
-    } catch (err) {
-      console.warn(`Failed to restore history for session ${s.id}:`, err)
-      return []
-    }
+  /** A restored session's history: inline if saved that way, else from its log. */
+  private readHistory(s: PersistedSession): { history: WsServerMessage[]; base: number } {
+    if (s.outputHistory) return { history: s.outputHistory.slice(-MAX_HISTORY), base: 0 }
+    return this.histories.read(s.id) ?? { history: [], base: 0 }
+  }
+
+  /** Resolves once queued history rewrites have finished (tests). */
+  whenHistoriesWritten(): Promise<void> {
+    return this.histories.whenIdle()
   }
 
   persistToDiskDebounced(): void {
@@ -257,6 +180,7 @@ export class SessionPersistence {
           worktreeError = `Worktree ${s.worktreePath} no longer exists.`
         }
 
+        const history = this.readHistory(s)
         const session: Session = {
           id: s.id,
           name: s.name,
@@ -282,7 +206,8 @@ export class SessionPersistence {
           allowedTools: s.allowedTools,
           claudeProcess: null,
           clients: new Set(),
-          outputHistory: this.readHistory(s),
+          outputHistory: history.history,
+          _historyBase: history.base,
           // Restore claudeSessionId so Claude CLI resumes with full conversation
           // history from its own session storage (not just our 4000-char summary).
           claudeSessionId: s.claudeSessionId ?? null,

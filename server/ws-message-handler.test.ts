@@ -368,6 +368,29 @@ describe('handleWsMessage', () => {
       expect(msg.model).toBe('claude-opus-4-6')
       expect(msg.permissionMode).toBe('plan')
       expect(msg.outputBuffer).toHaveLength(1)
+      expect(msg.historyStart).toBe(0)
+      expect(msg.historyHasMore).toBe(false)
+    })
+
+    it('sends a size-capped window, and older pages on load_history', () => {
+      const history = Array.from({ length: 40 }, (_, i) => ({ type: 'output', data: `${i}`.padEnd(40_000, '.') }) as WsServerMessage)
+      const session = mockSession({ id: 'sess-2', outputHistory: history, _historyBase: 100 } as any)
+      ;(ctx.sessions.join as ReturnType<typeof vi.fn>).mockReturnValue(session)
+      ;(ctx.sessions.get as ReturnType<typeof vi.fn>).mockReturnValue(session)
+
+      handleWsMessage({ type: 'join_session', sessionId: 'sess-2' } as WsClientMessage, ctx)
+      const joined = ctx.sent[0] as any
+      expect(joined.outputBuffer.length).toBeLessThan(40)
+      expect(joined.historyHasMore).toBe(true)
+      expect(joined.historyStart).toBe(100 + 40 - joined.outputBuffer.length)
+
+      handleWsMessage({ type: 'load_history', before: joined.historyStart } as WsClientMessage, ctx)
+      const page = ctx.sent[1] as any
+      expect(page.type).toBe('history_page')
+      expect(page.sessionId).toBe('sess-2')
+      expect(page.before).toBe(joined.historyStart)
+      expect(page.start + page.entries.length).toBe(joined.historyStart)
+      expect(page.entries[page.entries.length - 1]).toBe(history[joined.historyStart - 101])
     })
 
     it('sends error when session is not found', () => {

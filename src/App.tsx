@@ -257,6 +257,9 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
   const {
     connState,
     messages,
+    canLoadEarlier,
+    loadingEarlier,
+    loadEarlier,
     tasks,
     planningMode,
     isProcessing,
@@ -1246,6 +1249,7 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
             sessionJoined={!!activeSessionId}
             activeSessionId={activeSessionId}
             messages={messages}
+            earlier={{ canLoad: canLoadEarlier, loading: loadingEarlier, onLoad: loadEarlier }}
             fontSize={settings.fontSize + (isMobile ? 1 : 0)}
             isMobile={isMobile}
             planningMode={planningMode}
@@ -1379,6 +1383,7 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
               onRemove: (id) => { setCanvasAttachments(prev => ({ ...prev, [activeSessionId]: (prev[activeSessionId] ?? []).filter(a => a.id !== id) })) },
             }}
             messages={[...messages, ...tentativeMessages]}
+            earlier={{ canLoad: canLoadEarlier, loading: loadingEarlier, onLoad: loadEarlier }}
             fontSize={settings.fontSize + (isMobile ? 1 : 0)}
             isMobile={isMobile}
             planningMode={planningMode}

@@ -52,7 +52,23 @@ interface Props {
   sessionId?: string | null
   /** Canvas chat cards: the session's items and how to open one. Without it, cards aren't shown. */
   canvas?: CanvasCardContext
+  /** Older messages can be loaded above the first one shown. */
+  canLoadEarlier?: boolean
+  /** A page of older messages is on its way. */
+  loadingEarlier?: boolean
+  /** Ask for the page of older messages (the button at the top, or scrolling near it). */
+  onLoadEarlier?: () => void
 }
+
+/** What a view passes down for loading a transcript's earlier messages. */
+export interface EarlierControls {
+  canLoad: boolean
+  loading: boolean
+  onLoad: () => void
+}
+
+/** Scrolling within this distance of the top loads the earlier messages. */
+const LOAD_EARLIER_THRESHOLD_PX = 400
 
 /**
  * How long a freshly opened transcript holds to the bottom while its layout
@@ -550,7 +566,7 @@ function ActivityIndicator({ label, variant = 'default' }: { label: string; vari
   )
 }
 
-export function ChatView({ messages, fontSize, disabled, planningMode, activityLabel, isMobile, variant = 'default', agentName, joe, sessionId, canvas }: Props) {
+export function ChatView({ messages, fontSize, disabled, planningMode, activityLabel, isMobile, variant = 'default', agentName, joe, sessionId, canvas, canLoadEarlier, loadingEarlier, onLoadEarlier }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const contentRef = useRef<HTMLDivElement>(null)
   const [showScrollButton, setShowScrollButton] = useState(false)
@@ -566,6 +582,13 @@ export function ChatView({ messages, fontSize, disabled, planningMode, activityL
   const prevSessionIdRef = useRef(sessionId)
   /** A transcript opened while the page was hidden: hold it to the bottom again once shown. */
   const settleOnShowRef = useRef(false)
+  const prevFirstKeyRef = useRef<string | undefined>(undefined)
+  /** Scroll position and height as last laid out, to keep the reader's place when older messages land above. */
+  const lastScrollRef = useRef({ top: 0, height: 0 })
+  const recordScroll = useCallback(() => {
+    const el = containerRef.current
+    if (el) lastScrollRef.current = { top: el.scrollTop, height: el.scrollHeight }
+  }, [])
 
   // Put the view at the very bottom, unless the reader is mid-scroll.
   // WebKit (Safari, the desktop app) scrolls on a separate thread: a scrollTop
@@ -592,6 +615,11 @@ export function ChatView({ messages, fontSize, disabled, planningMode, activityL
   const checkScroll = useCallback(() => {
     const el = containerRef.current
     if (!el) return
+    recordScroll()
+    // The reader scrolling up near the top pulls in the earlier messages.
+    if (canLoadEarlier && !loadingEarlier && el.scrollTop < LOAD_EARLIER_THRESHOLD_PX && performance.now() < userScrollingUntilRef.current) {
+      onLoadEarlier?.()
+    }
     const threshold = 100
     const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < threshold
     // A just-opened transcript still settling: the reader hasn't touched it
@@ -603,7 +631,7 @@ export function ChatView({ messages, fontSize, disabled, planningMode, activityL
     }
     isNearBottomRef.current = nearBottom
     setShowScrollButton(!nearBottom)
-  }, [pinToBottom])
+  }, [pinToBottom, recordScroll, canLoadEarlier, loadingEarlier, onLoadEarlier])
 
   // Opening a transcript — first mount, another session, an empty one filling
   // in, or a rejoin rebuilding it — always starts at the bottom, whatever the
@@ -623,6 +651,8 @@ export function ChatView({ messages, fontSize, disabled, planningMode, activityL
     }
     const prevLastKey = prevLastKeyRef.current
     prevLastKeyRef.current = messages[messages.length - 1]?.key
+    const prevFirstKey = prevFirstKeyRef.current
+    prevFirstKeyRef.current = messages[0]?.key
     const el = containerRef.current
     if (!el) return
     if (messages.length === 0) {
@@ -630,6 +660,18 @@ export function ChatView({ messages, fontSize, disabled, planningMode, activityL
       return
     }
     const rebuilt = !!prevLastKey && !messages.some(m => m.key === prevLastKey)
+    // Earlier messages loaded above: keep what the reader was looking at in
+    // place. Chrome's scroll anchoring may already have; WebKit has none.
+    const prepended = !openPendingRef.current && !rebuilt && !!prevFirstKey
+      && messages[0]?.key !== prevFirstKey && messages.some(m => m.key === prevFirstKey)
+    if (prepended) {
+      const { top, height } = lastScrollRef.current
+      const target = top + (el.scrollHeight - height)
+      if (Math.abs(el.scrollTop - target) > 1) el.scrollTop = target
+      const nearBottom = el.scrollHeight - target - el.clientHeight < 100
+      isNearBottomRef.current = nearBottom
+      setShowScrollButton(!nearBottom)
+    }
     if (openPendingRef.current || rebuilt) {
       openPendingRef.current = false
       isNearBottomRef.current = true
@@ -640,7 +682,8 @@ export function ChatView({ messages, fontSize, disabled, planningMode, activityL
       setShowScrollButton(false)
       el.scrollTop = el.scrollHeight - el.clientHeight
     }
-  }, [messages, sessionId])
+    recordScroll()
+  }, [messages, sessionId, recordScroll])
 
   useEffect(() => {
     const onShow = () => {
@@ -680,10 +723,10 @@ export function ChatView({ messages, fontSize, disabled, planningMode, activityL
   useEffect(() => {
     const content = contentRef.current
     if (!content || typeof ResizeObserver === 'undefined') return
-    const ro = new ResizeObserver(() => { pinToBottom() })
+    const ro = new ResizeObserver(() => { pinToBottom(); recordScroll() })
     ro.observe(content)
     return () => { ro.disconnect() }
-  }, [pinToBottom])
+  }, [pinToBottom, recordScroll])
 
   const scrollToBottom = useCallback(() => {
     if (containerRef.current) {
@@ -711,6 +754,18 @@ export function ChatView({ messages, fontSize, disabled, planningMode, activityL
           <OrchestratorWelcome agentName={agentName} />
         ) : (
         <div className="flex flex-col gap-[18px] py-4">
+          {canLoadEarlier && (
+            <div className="flex justify-center">
+              <button
+                type="button"
+                onClick={onLoadEarlier}
+                disabled={loadingEarlier}
+                className="rounded-control border border-edge bg-surface px-3 py-1 text-meta text-ink-muted transition hover:border-edge-strong hover:text-ink disabled:cursor-default disabled:opacity-60"
+              >
+                {loadingEarlier ? 'Loading earlier messages…' : 'Show earlier messages'}
+              </button>
+            </div>
+          )}
           {(() => {
             let lastShownLabel: string | null = null
             const nodes: React.ReactNode[] = []

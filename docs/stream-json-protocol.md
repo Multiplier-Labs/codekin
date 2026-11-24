@@ -320,7 +320,8 @@ Response to a `control_request`. Uses a nested format with a `response` wrapper.
 |------|--------|-------------|
 | `connected` | `connectionId`, `claudeAvailable`, `claudeVersion`, `apiKeySet` | Initial handshake |
 | `session_created` | `sessionId`, `sessionName`, `workingDir` | New session created |
-| `session_joined` | `sessionId`, `sessionName`, `workingDir`, `active`, `outputBuffer` | Joined existing session (includes full history replay) |
+| `session_joined` | `sessionId`, `sessionName`, `workingDir`, `active`, `outputBuffer`, `historyStart?`, `historyHasMore?` | Joined existing session. `outputBuffer` is the newest part of the history, about 512 KB at most; `historyStart` is the absolute position of its first entry and `historyHasMore` says older entries can be loaded with `load_history` |
+| `history_page` | `sessionId`, `before`, `start`, `entries`, `hasMore` | Reply to `load_history`: the history entries from absolute position `start` up to `before` |
 | `session_left` | — | Left session |
 | `session_deleted` | `message` | Session was deleted |
 | `claude_started` | `sessionId` | Claude process spawned |
@@ -353,7 +354,8 @@ Response to a `control_request`. Uses a nested format with a `response` wrapper.
 |------|--------|-------------|
 | `auth` | `token` | Authenticate the WebSocket connection (must be sent as first message) |
 | `create_session` | `name`, `workingDir` | Create a new session (auto-starts Claude) |
-| `join_session` | `sessionId` | Join an existing session (receives history via `outputBuffer`) |
+| `join_session` | `sessionId` | Join an existing session (receives recent history via `outputBuffer`) |
+| `load_history` | `before` | Older history of the joined session: the page ending just before absolute position `before` (normally the `historyStart` the client has) |
 | `leave_session` | — | Leave current session |
 | `start_claude` | `options?` | Start Claude process in current session |
 | `stop` | — | Stop Claude process |

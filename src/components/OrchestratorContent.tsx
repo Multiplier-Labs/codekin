@@ -10,7 +10,7 @@
  */
 
 import { OrchestratorView } from './OrchestratorView'
-import { ChatView } from './ChatView'
+import { ChatView, type EarlierControls } from './ChatView'
 import { PromptButtons } from './PromptButtons'
 import type { ChatMessage, CodingProvider, ModelOption, PermissionMode } from '../types'
 import { PROVIDERS, permissionModesFor } from '../types'
@@ -22,6 +22,8 @@ export interface OrchestratorContentProps {
   sessionJoined: boolean
   activeSessionId: string | null
   messages: ChatMessage[]
+  /** Loading the transcript's earlier messages (see ChatView). */
+  earlier?: EarlierControls
   fontSize: number
   isMobile: boolean
   planningMode: boolean
@@ -49,6 +51,7 @@ export function OrchestratorContent({
   sessionJoined,
   activeSessionId,
   messages,
+  earlier,
   fontSize,
   isMobile,
   planningMode,
@@ -83,6 +86,9 @@ export function OrchestratorContent({
             <ChatView
               sessionId={activeSessionId}
               messages={messages}
+              canLoadEarlier={earlier?.canLoad}
+              loadingEarlier={earlier?.loading}
+              onLoadEarlier={earlier?.onLoad}
               fontSize={fontSize}
               disabled={disabled}
               planningMode={planningMode}

@@ -283,3 +283,56 @@ describe('ChatView keeps rendered messages in place while output streams', () =>
     expect(container.querySelector('.hljs')).toBe(codeBlock)
   })
 })
+
+describe('ChatView earlier messages', () => {
+  function setupEarlier() {
+    container = document.createElement('div')
+    document.body.appendChild(container)
+    root = createRoot(container)
+    const onLoadEarlier = vi.fn()
+    const view = (messages: ChatMessage[], loading = false) => {
+      act(() => { root!.render(<ChatView messages={messages} fontSize={14} sessionId="s1" canLoadEarlier loadingEarlier={loading} onLoadEarlier={onLoadEarlier} />) })
+    }
+    return { onLoadEarlier, view }
+  }
+
+  it('offers a button that asks for them, disabled while they load', () => {
+    const { onLoadEarlier, view } = setupEarlier()
+    view(transcript('a'))
+    const button = [...container!.querySelectorAll('button')].find(b => b.textContent === 'Show earlier messages')!
+    act(() => { button.click() })
+    expect(onLoadEarlier).toHaveBeenCalledOnce()
+    view(transcript('a'), true)
+    const loading = [...container!.querySelectorAll('button')].find(b => b.textContent === 'Loading earlier messages…')!
+    expect(loading.disabled).toBe(true)
+  })
+
+  it('loads them when the reader scrolls near the top, but not on a scroll they did not make', () => {
+    const { onLoadEarlier, view } = setupEarlier()
+    view(transcript('a'))
+    const scroller = container!.querySelector('.chat-scroll') as HTMLElement
+    const state = fakeScroller(scroller)
+    state.top = 100
+    act(() => { scroller.dispatchEvent(new Event('scroll')) })
+    expect(onLoadEarlier).not.toHaveBeenCalled()
+    readerScrollsTo(scroller, state, 200)
+    expect(onLoadEarlier).toHaveBeenCalledOnce()
+  })
+
+  it('keeps the reader in place when they arrive above', () => {
+    const { view } = setupEarlier()
+    view(transcript('a'))
+    const scroller = container!.querySelector('.chat-scroll') as HTMLElement
+    let height = 2000
+    const state = { top: 0 }
+    Object.defineProperty(scroller, 'scrollHeight', { configurable: true, get: () => height })
+    Object.defineProperty(scroller, 'clientHeight', { configurable: true, get: () => 500 })
+    Object.defineProperty(scroller, 'scrollTop', { configurable: true, get: () => state.top, set: (v: number) => { state.top = v } })
+    readerScrollsTo(scroller, state, 150)
+
+    // The page lands: 800px of older messages above what the reader sees.
+    height = 2800
+    view([...transcript('old'), ...transcript('a')])
+    expect(state.top).toBe(950)
+  })
+})

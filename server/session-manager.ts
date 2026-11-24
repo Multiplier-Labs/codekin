@@ -53,9 +53,8 @@ import { moveDir, validateMoveTarget } from './move-folder.js'
 import { buildPlaceNote, describeAttached, validateAttachPath } from './attached-places.js'
 import { takesDirsAtSpawn } from './harness-registry.js'
 import { discardOrgChanges, getOrgChangeSummary, getOrgDiff } from './org-diff.js'
+import { MAX_HISTORY } from './history-window.js'
 
-/** Max messages retained in a session's output history buffer. */
-const MAX_HISTORY = 2000
 /** Max API error retries per turn before giving up. */
 const MAX_API_RETRIES = 3
 /** Base delay for API error retry (doubles each attempt: 3s, 6s, 12s). */
@@ -2089,18 +2088,22 @@ export class SessionManager {
         for (let i = 0; i < msg.data.length; i += SessionManager.MAX_OUTPUT_CHUNK) {
           session.outputHistory.push({ type: 'output', data: msg.data.slice(i, i + SessionManager.MAX_OUTPUT_CHUNK) })
         }
-        if (session.outputHistory.length > MAX_HISTORY) {
-          session.outputHistory.splice(0, session.outputHistory.length - MAX_HISTORY)
-        }
+        this.trimHistory(session)
         this.persistToDiskDebounced()
         return
       }
     }
     session.outputHistory.push(msg)
-    if (session.outputHistory.length > MAX_HISTORY) {
-      session.outputHistory.splice(0, session.outputHistory.length - MAX_HISTORY)
-    }
+    this.trimHistory(session)
     this.persistToDiskDebounced()
+  }
+
+  /** Drop the oldest entries past MAX_HISTORY, keeping positions absolute (see history-window.ts). */
+  private trimHistory(session: Session): void {
+    const excess = session.outputHistory.length - MAX_HISTORY
+    if (excess <= 0) return
+    session.outputHistory.splice(0, excess)
+    session._historyBase = (session._historyBase ?? 0) + excess
   }
 
   /** Tell every client the session list changed (e.g. a controller change). */
@@ -2349,8 +2352,9 @@ export class SessionManager {
       }
     }
 
-    // Persist BEFORE killing processes so wasActive flag captures which were running
-    this.persistToDisk()
+    // Persist BEFORE killing processes so wasActive flag captures which were running.
+    // Final: history writes still queued are done now, synchronously.
+    this.sessionPersistence.persistToDisk({ final: true })
     this._approvalManager.persistRepoApprovals()
 
     // Kill all Claude child processes and wait for them to exit so their

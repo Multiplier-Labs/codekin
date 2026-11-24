@@ -360,6 +360,65 @@ describe('useChatSocket hook', () => {
       unmount()
     })
 
+    describe('earlier messages', () => {
+      const join = (extra: Partial<Extract<WsServerMessage, { type: 'session_joined' }>> = {}) => ({
+        type: 'session_joined',
+        sessionId: 's1',
+        sessionName: 'Test',
+        workingDir: '/tmp',
+        active: true,
+        outputBuffer: [{ type: 'user_echo', text: 'newest' }, { type: 'output', data: 'answer' }, { type: 'result' }],
+        historyStart: 40,
+        historyHasMore: true,
+        ...extra,
+      }) as WsServerMessage
+
+      it('asks for the page before the replay and puts it above the transcript', () => {
+        const { result, unmount } = setupConnected()
+        const ws = MockWebSocket.latest()
+        act(() => ws.simulateMessage(join()))
+        expect(result.current.canLoadEarlier).toBe(true)
+
+        act(() => result.current.loadEarlier())
+        expect(sentMessages(ws).pop()).toEqual({ type: 'load_history', before: 40 })
+        expect(result.current.loadingEarlier).toBe(true)
+        // A second ask while one is on its way is not sent.
+        const sentBefore = ws.sent.length
+        act(() => result.current.loadEarlier())
+        expect(ws.sent.length).toBe(sentBefore)
+
+        act(() => ws.simulateMessage({
+          type: 'history_page', sessionId: 's1', before: 40, start: 0, hasMore: false,
+          entries: [{ type: 'user_echo', text: 'oldest' }, { type: 'output', data: 'first answer' }, { type: 'result' }],
+        } as WsServerMessage))
+        expect(result.current.messages.map(m => m.type)).toEqual(['user', 'assistant', 'user', 'assistant'])
+        expect(msgAs(result.current.messages[0], 'user').text).toBe('oldest')
+        expect(result.current.canLoadEarlier).toBe(false)
+        expect(result.current.loadingEarlier).toBe(false)
+        unmount()
+      })
+
+      it('ignores a page for another position or session', () => {
+        const { result, unmount } = setupConnected()
+        const ws = MockWebSocket.latest()
+        act(() => ws.simulateMessage(join()))
+        act(() => result.current.loadEarlier())
+        for (const stale of [{ sessionId: 's2', before: 40 }, { sessionId: 's1', before: 12 }]) {
+          act(() => ws.simulateMessage({ type: 'history_page', start: 0, hasMore: false, entries: [{ type: 'user_echo', text: 'stale' }], ...stale } as WsServerMessage))
+        }
+        expect(result.current.messages).toHaveLength(2)
+        expect(result.current.loadingEarlier).toBe(true)
+        unmount()
+      })
+
+      it('offers nothing to load from a server that sends no history position', () => {
+        const { result, unmount } = setupConnected()
+        act(() => MockWebSocket.latest().simulateMessage(join({ historyStart: undefined, historyHasMore: undefined })))
+        expect(result.current.canLoadEarlier).toBe(false)
+        unmount()
+      })
+    })
+
     it('joinSession sends join_session message', () => {
       const { result, unmount } = setupConnected()
       act(() => result.current.joinSession('s1'))

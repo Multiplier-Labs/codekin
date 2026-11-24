@@ -14,6 +14,8 @@ export default defineConfig({
       'desktop/scripts/**/*.test.mjs',
     ],
     env: { NODE_ENV: 'test' },
+    // Points DATA_DIR at a temporary folder so no test reaches ~/.codekin.
+    setupFiles: ['./vitest.setup.ts'],
     // Node 25+ enables its own Web Storage global by default; without
     // --localstorage-file it is `undefined` and shadows jsdom's localStorage,
     // breaking every jsdom test that touches storage. Disable it in workers.

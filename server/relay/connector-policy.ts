@@ -398,6 +398,10 @@ export function checkClientFrame(policy: ChannelPolicy, state: ChannelState, fra
     case 'canvas_list':
     case 'canvas_get':
       return requirePermission(policy, state, 'view', 'Viewing this session is not granted')
+
+    // Older transcript of the joined session: the same right as the join's replay.
+    case 'load_history':
+      return requirePermission(policy, state, 'view', 'Viewing this session is not granted')
     case 'canvas_open_file': {
       const read = requirePermission(policy, state, 'view_diff', 'Viewing files is not granted')
       return read.allowed ? requirePermission(policy, state, 'send_prompt', 'Adding to this session is not granted') : read

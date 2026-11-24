@@ -26,6 +26,18 @@ export interface CreateSessionModel {
 /** Max chat messages kept in the browser before trimming older entries. */
 const MAX_BROWSER_MESSAGES = 500
 
+/** A page of earlier messages that has not arrived by then can be asked for again. */
+const LOAD_EARLIER_TIMEOUT_MS = 15_000
+
+/** The joined session's replay position in its server history (see server/history-window.ts). */
+interface EarlierHistory {
+  sessionId: string
+  /** Absolute position of the oldest history entry shown. */
+  start: number
+  hasMore: boolean
+  loading: boolean
+}
+
 /** Shown in the chat while the socket is down (e.g. the Codekin server restarted). */
 const DISCONNECT_TEXT = 'Connection to Codekin lost. Reconnecting…'
 /** Persistent marker added once the session rejoins after a drop. */
@@ -168,12 +180,15 @@ export function processMessage(messages: ChatMessage[], msg: WsServerMessage): C
   return modified ? clone : messages
 }
 
-/** Cap message list to MAX_BROWSER_MESSAGES, prepending a trim notice if truncated. */
-export function trimMessages(msgs: ChatMessage[]): ChatMessage[] {
-  if (msgs.length <= MAX_BROWSER_MESSAGES) return msgs
+/**
+ * Cap message list to `max` (MAX_BROWSER_MESSAGES unless the reader loaded
+ * earlier messages), prepending a trim notice if truncated.
+ */
+export function trimMessages(msgs: ChatMessage[], max = MAX_BROWSER_MESSAGES): ChatMessage[] {
+  if (msgs.length <= max) return msgs
   return [
     { type: 'system', subtype: 'trim', text: 'Older messages trimmed', key: nextKey() } as ChatMessage,
-    ...msgs.slice(-MAX_BROWSER_MESSAGES + 1),
+    ...msgs.slice(-max + 1),
   ]
 }
 
@@ -225,6 +240,19 @@ export function useChatSocket({
   const [thinkingSummary, setThinkingSummary] = useState<string | null>(null)
   const promptState = usePromptState()
   const currentSessionId = useRef<string | null>(null)
+  /** Message cap: MAX_BROWSER_MESSAGES, raised by each page of earlier messages the reader loads. */
+  const capRef = useRef(MAX_BROWSER_MESSAGES)
+  /**
+   * Where the joined session's replay starts in its server history, and
+   * whether older entries can be loaded. Null for a new session, or a server
+   * that replays a fixed count with no paging.
+   */
+  const [earlier, setEarlierState] = useState<EarlierHistory | null>(null)
+  const earlierRef = useRef<EarlierHistory | null>(null)
+  const setEarlier = useCallback((next: EarlierHistory | null) => {
+    earlierRef.current = next
+    setEarlierState(next)
+  }, [])
   /** True once a drop has been announced in the chat, until the session rejoins. */
   const wasDisconnectedRef = useRef(false)
   /** Pending announcement of a drop; cancelled if the session rejoins first. */
@@ -251,9 +279,9 @@ export function useChatSocket({
       if (last && last.type === 'assistant' && !last.complete) {
         const updated = [...prev]
         updated[updated.length - 1] = { ...last, text: last.text + text }
-        return trimMessages(updated)
+        return trimMessages(updated, capRef.current)
       }
-      return trimMessages([...prev, { type: 'assistant', text, complete: false, ts: Date.now(), key: nextKey() }])
+      return trimMessages([...prev, { type: 'assistant', text, complete: false, ts: Date.now(), key: nextKey() }], capRef.current)
     })
   }, [])
 
@@ -292,7 +320,7 @@ export function useChatSocket({
         setIsProcessing(false)
         setThinkingSummary(null)
         flushBeforeStructuralMessage()
-        setMessages(prev => trimMessages(processMessage(prev, msg)))
+        setMessages(prev => trimMessages(processMessage(prev, msg), capRef.current))
         break
 
       case 'system_message':
@@ -301,41 +329,41 @@ export function useChatSocket({
           setPref('claudeModel', msg.model)
         }
         flushBeforeStructuralMessage()
-        setMessages(prev => trimMessages(processMessage(prev, msg)))
+        setMessages(prev => trimMessages(processMessage(prev, msg), capRef.current))
         break
 
       case 'user_echo':
       case 'joe_message':
         flushBeforeStructuralMessage()
-        setMessages(prev => trimMessages(processMessage(prev, msg)))
+        setMessages(prev => trimMessages(processMessage(prev, msg), capRef.current))
         break
 
       case 'tool_active':
         setThinkingSummary(null)
         setIsProcessing(true)
         flushBeforeStructuralMessage()
-        setMessages(prev => trimMessages(processMessage(prev, msg)))
+        setMessages(prev => trimMessages(processMessage(prev, msg), capRef.current))
         break
 
       case 'tool_done':
         flushBeforeStructuralMessage()
-        setMessages(prev => trimMessages(processMessage(prev, msg)))
+        setMessages(prev => trimMessages(processMessage(prev, msg), capRef.current))
         break
 
       case 'tool_output':
         flushBeforeStructuralMessage()
-        setMessages(prev => trimMessages(processMessage(prev, msg)))
+        setMessages(prev => trimMessages(processMessage(prev, msg), capRef.current))
         break
 
       case 'image':
       case 'canvas_event':
         flushBeforeStructuralMessage()
-        setMessages(prev => trimMessages(processMessage(prev, msg)))
+        setMessages(prev => trimMessages(processMessage(prev, msg), capRef.current))
         break
 
       case 'planning_mode':
         setPlanningMode(msg.active)
-        setMessages(prev => trimMessages(processMessage(prev, msg)))
+        setMessages(prev => trimMessages(processMessage(prev, msg), capRef.current))
         break
 
       // Structured server-driven mode change (plan approval, fallback restart,
@@ -372,7 +400,7 @@ export function useChatSocket({
       case 'prompt_response_dropped':
         setIsProcessing(msg.processing)
         flushBeforeStructuralMessage()
-        setMessages(prev => trimMessages(processMessage(prev, { type: 'system_message', subtype: 'error', text: msg.reason })))
+        setMessages(prev => trimMessages(processMessage(prev, { type: 'system_message', subtype: 'error', text: msg.reason }), capRef.current))
         break
 
       case 'session_created':
@@ -380,6 +408,8 @@ export function useChatSocket({
         setRenderSessionId(msg.sessionId)
         setMessages([])
         setTasks([])
+        capRef.current = MAX_BROWSER_MESSAGES
+        setEarlier(null)
         setIsProcessing(false)
         setThinkingSummary(null)
         // Adopt the new session's harness and model right away. Until the
@@ -435,13 +465,29 @@ export function useChatSocket({
         // reconstructed from (possibly truncated) history.
         setPlanningMode(msg.planState ? msg.planState !== 'idle' : restoredPlanMode)
         setTasks(restoredTasks)
-        setMessages(trimMessages(rebuilt))
+        capRef.current = MAX_BROWSER_MESSAGES
+        setEarlier(typeof msg.historyStart === 'number'
+          ? { sessionId: msg.sessionId, start: msg.historyStart, hasMore: !!msg.historyHasMore, loading: false }
+          : null)
+        setMessages(trimMessages(rebuilt, capRef.current))
         callbacksRef.current.onSessionJoined?.(msg.sessionId)
         break
       }
 
+      // Earlier messages the reader asked for: rebuilt on their own and put
+      // above the transcript. A page for another session or position is stale.
+      case 'history_page': {
+        const cur = earlierRef.current
+        if (!cur || msg.sessionId !== currentSessionId.current || msg.sessionId !== cur.sessionId || msg.before !== cur.start) break
+        const older = rebuildFromHistory(msg.entries)
+        capRef.current += older.length
+        setMessages(prev => (prev[0]?.type === 'system' && prev[0].subtype === 'trim') ? prev : [...older, ...prev])
+        setEarlier({ ...cur, start: msg.start, hasMore: msg.hasMore && msg.start < msg.before, loading: false })
+        break
+      }
+
       case 'claude_started':
-        setMessages(prev => trimMessages(processMessage(prev, msg)))
+        setMessages(prev => trimMessages(processMessage(prev, msg), capRef.current))
         break
 
       case 'claude_stopped':
@@ -458,7 +504,7 @@ export function useChatSocket({
         break
 
       case 'session_deleted':
-        setMessages(prev => trimMessages([...prev, { type: 'system', subtype: 'error', text: 'Session was deleted', key: nextKey() }]))
+        setMessages(prev => trimMessages([...prev, { type: 'system', subtype: 'error', text: 'Session was deleted', key: nextKey() }], capRef.current))
         break
 
       case 'connected':
@@ -482,7 +528,7 @@ export function useChatSocket({
         break
 
     }
-  }, [flushPendingText, flushBeforeStructuralMessage, promptState])
+  }, [flushPendingText, flushBeforeStructuralMessage, promptState, setEarlier])
 
   const handleMessageRef = useRef(handleMessage)
   useEffect(() => { handleMessageRef.current = handleMessage }, [handleMessage])
@@ -509,7 +555,7 @@ export function useChatSocket({
         setMessages(prev => {
           const last = prev[prev.length - 1]
           if (prev.length > 0 && last.type === 'system' && last.subtype === 'exit' && last.text === DISCONNECT_TEXT) return prev
-          return trimMessages([...prev, { type: 'system', subtype: 'exit', text: DISCONNECT_TEXT, key: nextKey() }])
+          return trimMessages([...prev, { type: 'system', subtype: 'exit', text: DISCONNECT_TEXT, key: nextKey() }], capRef.current)
         })
       }, DISCONNECT_NOTICE_DELAY_MS)
     }
@@ -613,6 +659,24 @@ export function useChatSocket({
     setMessages([])
   }, [])
 
+  /** Ask for the page of history before the oldest message shown. */
+  const loadEarlier = useCallback(() => {
+    const cur = earlierRef.current
+    if (!cur || !cur.hasMore || cur.loading || cur.sessionId !== currentSessionId.current) return
+    setEarlier({ ...cur, loading: true })
+    send({ type: 'load_history', before: cur.start })
+    setTimeout(() => {
+      const now = earlierRef.current
+      if (now?.loading && now.sessionId === cur.sessionId && now.start === cur.start) setEarlier({ ...now, loading: false })
+    }, LOAD_EARLIER_TIMEOUT_MS)
+  }, [send, setEarlier])
+
+  // A client-side trim drops messages between the loaded pages and the
+  // newest ones, so paging would leave a gap: the trim notice shows instead.
+  const trimmed = messages[0]?.type === 'system' && messages[0].subtype === 'trim'
+  const canLoadEarlier = !!earlier && earlier.hasMore && earlier.sessionId === renderSessionId && !trimmed
+  const loadingEarlier = canLoadEarlier && earlier.loading
+
   /**
    * Switch the session's model. Pass `effort` to change effort in the same
    * restart (null = harness default); omit it to leave effort as it is.
@@ -695,6 +759,9 @@ export function useChatSocket({
     sendPromptResponse,
     leaveSession,
     clearMessages,
+    canLoadEarlier,
+    loadingEarlier,
+    loadEarlier,
     disconnect,
     reconnect,
     restoreSession,
