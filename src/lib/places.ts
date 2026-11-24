@@ -115,18 +115,6 @@ export function samePlace(a: DraftPlace, b: DraftPlace): boolean {
   return !!a.repo && !!b.repo && a.repo.owner === b.repo.owner && a.repo.name === b.repo.name
 }
 
-/**
- * The place a new session defaults to: the last one used, or a fresh
- * scratch folder when there is no history. A specific scratch folder is
- * never reused as the default — "last used: scratch" means a new one.
- */
-export function defaultPlace(history: readonly DraftPlace[] | undefined): DraftPlace {
-  const last = history?.[0]
-  if (!last) return NEW_SCRATCH
-  if (last.kind === 'scratch') return NEW_SCRATCH
-  return last
-}
-
 /** Put `place` first in `history`, deduped and capped. Pure. */
 export function withRecentPlace(history: readonly DraftPlace[] | undefined, place: DraftPlace): DraftPlace[] {
   // A created scratch folder is remembered as "a new scratch folder".
