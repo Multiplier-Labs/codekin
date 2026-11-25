@@ -128,6 +128,8 @@ When Canvas opens, the work area takes most of the window.
 
 **Auto-open:** the first agent-published item in a session opens Canvas; later items and revisions only post a chat card. This is a setting with three values: first item (default), every item, never. Canvas never auto-opens on phones, while the composer has text, or for a revision.
 
+**Download:** the item header's Download button saves the shown revision as a file named after the item's title (`-revN` added for an older revision). Every kind except a live preview saves in its stored format: Markdown `.md`, tables as stored (`.csv`, `.tsv` or `.json`), Mermaid `.mmd`, Vega-Lite `.vl.json`, HTML `.html`, images in their own format. Tables also convert to CSV, TSV, JSON and a Markdown table, and diagrams to an SVG image; a table too large to show in full offers only its stored file. Below 520 px of Canvas width the formats move into the ⋯ menu. The desktop app saves page-made files (`blob:` and `data:` URLs) to the Downloads folder.
+
 **Agent updates:** a new revision replaces the view only when the user is idle at the top of the item. Otherwise, or when the item is pinned, a one-line revision bar offers "Show rev N" and "Compare".
 
 ## 5. Selection → context

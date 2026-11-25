@@ -5,7 +5,7 @@
  * a way back and, on wider-than-phone windows, the agent's latest line.
  */
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { IconChevronLeft, IconCopy, IconGitCompare, IconHierarchy2, IconMessage, IconMessageQuestion, IconPlayerPlay, IconTable, IconWorld, IconX } from '@tabler/icons-react'
 import type { CanvasApi, PreviewApi } from '../../hooks/useCanvas'
 import { CanvasItemPicker } from './CanvasItemPicker'
@@ -16,6 +16,7 @@ import { CompareView } from './CompareView'
 import { RevisionBar } from './RevisionBar'
 import { makeAttachment, textLabel, type CanvasAttachment, type CanvasSelectionKind } from '../../lib/canvasContext'
 import { PANE_HEADER } from '../../lib/paneHeader'
+import { exportFormats } from '../../lib/canvasExport'
 
 /** Below this Canvas width, view source and copy fold into the ⋯ menu. */
 const NARROW = 520
@@ -53,6 +54,14 @@ export function CanvasPanel({ canvas, replacesChat, isMobile, onBackToChat, last
   const [width, setWidth] = useState(1000)
   const [sourceMode, setSourceMode] = useState(false)
   const viewKey = view.state === 'empty' ? '' : `${view.item.id}@${view.revision}`
+  // Download formats for the shown revision (tables parse once per revision).
+  const readyItem = view.state === 'ready' ? view.item : null
+  const readyRevision = view.state === 'ready' ? view.revision : 0
+  const readyContent = view.state === 'ready' ? view.content : null
+  const downloads = useMemo(
+    () => (readyItem && readyContent ? exportFormats(readyItem, readyRevision, readyContent) : []),
+    [readyItem, readyRevision, readyContent],
+  )
 
   useEffect(() => {
     const el = mainRef.current
@@ -130,6 +139,7 @@ export function CanvasPanel({ canvas, replacesChat, isMobile, onBackToChat, last
       sourceMode={sourceMode}
       onToggleSource={() => { setSourceMode(m => !m) }}
       copyText={view.state === 'ready' && selected.kind !== 'image' && !live ? view.content.content : undefined}
+      downloads={downloads}
       onPin={canvas.pin}
       onCompare={live ? undefined : view.revision < selected.latest
         ? () => { canvas.setCompare({ from: view.revision, to: selected.latest }) }
