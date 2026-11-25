@@ -26,6 +26,7 @@ import {
 import { Row, Rows, button as settingsButton, dangerButton } from '../components/settings/Block'
 import { desktopSignInUrl, isDesktopApp } from './desktopAuth'
 import { githubSignInHref } from './signInHref'
+import { saveFile } from '../lib/download'
 import { defaultPasskeyLabel, isPasskeyCancel, passkeysSupported, registerPasskey } from './passkeys'
 
 const button =
@@ -45,14 +46,7 @@ export function RecoveryCodesView({ codes, onDone }: { codes: string[]; onDone: 
   const [saved, setSaved] = useState(false)
   const [copied, setCopied] = useState(false)
   const text = codes.join('\n')
-  const download = () => {
-    const url = URL.createObjectURL(new Blob([`Codekin recovery codes\n\n${text}\n`], { type: 'text/plain' }))
-    const a = document.createElement('a')
-    a.href = url
-    a.download = 'codekin-recovery-codes.txt'
-    a.click()
-    URL.revokeObjectURL(url)
-  }
+  const download = () => { saveFile(`Codekin recovery codes\n\n${text}\n`, 'codekin-recovery-codes.txt', 'text/plain') }
   return (
     <div>
       <p className="text-body text-ink">Save your recovery codes</p>

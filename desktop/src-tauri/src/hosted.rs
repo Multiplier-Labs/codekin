@@ -355,7 +355,8 @@ fn build_location_window(
             NewWindowResponse::Deny
         })
         // The page's title carries how many sessions need you (Dock badge, notification).
-        .on_document_title_changed(|window, title| crate::attention::on_title(&window, &title));
+        .on_document_title_changed(|window, title| crate::attention::on_title(&window, &title))
+        .on_download(crate::downloads::on_download);
     builder = match geometry {
         Some((x, y, w, h)) => builder.position(x, y).inner_size(w, h),
         None => builder.inner_size(1400.0, 900.0),

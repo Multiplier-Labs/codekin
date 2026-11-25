@@ -17,6 +17,7 @@
 
 pub mod attention;
 pub mod background;
+pub mod downloads;
 mod hosted;
 pub mod http;
 pub mod launcher;
@@ -354,6 +355,7 @@ fn build_window(app: &AppHandle, shared: Arc<Shared>) -> tauri::Result<WebviewWi
     })
     // The page's title carries how many sessions need you (Dock badge, notification).
     .on_document_title_changed(|window, title| attention::on_title(&window, &title))
+    .on_download(downloads::on_download)
     .build()
 }
 
