@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.2] - 2026-11-25
+
+### Added
+- **Download Canvas items.** The Download button in a Canvas item's header saves the revision you're viewing as a file named after the item (`-revN` is added for an older revision). Every kind except a live preview saves in the format it is stored in: Markdown `.md`, tables as `.csv`, `.tsv` or `.json`, Mermaid `.mmd`, Vega-Lite `.vl.json`, HTML `.html`, and images in their own format. Tables also convert to CSV, TSV, JSON and a Markdown table, and diagrams to an SVG image. In a narrow Canvas the formats are in the ⋯ menu (#958).
+
+### Fixed
+- The desktop app cancelled every download, so nothing was saved, including recovery codes. It now saves files the page makes to the Downloads folder (#958).
+
 ## [0.14.1] - 2026-11-24
 
 ### Changed
